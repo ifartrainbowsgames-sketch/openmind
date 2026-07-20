@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router'
 import { capabilities } from '@/data/capabilities'
 import { useAuth } from '@/hooks/useAuth'
 import { supabase } from '@/lib/supabase'
-import { PRO_CHECKOUT_URL } from '@/lib/billing'
 import type { Source } from '@/components/dashboard/types'
 import DataStudio from '@/components/dashboard/DataStudio'
 import ServiceSettings from '@/components/dashboard/ServiceSettings'
@@ -54,6 +53,7 @@ export default function Dashboard() {
   const [view, setView] = useState<View>('data')
   const [sources, setSources] = useState<Source[]>([])
   const [plan, setPlan] = useState<string>('free')
+  const [billingNote, setBillingNote] = useState(false)
   const { session, loading, signOut } = useAuth()
   const navigate = useNavigate()
 
@@ -130,7 +130,6 @@ export default function Dashboard() {
   const viewLabel =
     view === 'overview' ? 'Overview'
     : view === 'data' ? 'Data Studio'
-    : view === 'widget' ? 'Widget Builder'
     : view === 'providers' ? 'Providers & keys'
     : view === 'inbox' ? 'Inbox'
     : view === 'popups' ? 'Engage · popups'
@@ -257,14 +256,12 @@ export default function Dashboard() {
               {plan} plan
             </span>
             {plan === 'free' && (
-              <a
-                href={PRO_CHECKOUT_URL}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                onClick={() => setBillingNote((b) => !b)}
                 className="flex items-center gap-1.5 border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
               >
                 <Zap className="h-3 w-3" /> Upgrade to Pro
-              </a>
+              </button>
             )}
             <span
               className="flex h-8 w-8 items-center justify-center border border-primary bg-primary font-mono-spec text-xs uppercase text-primary-foreground"
@@ -281,6 +278,23 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+
+        {billingNote && (
+          <div className="border-b border-primary bg-terminal px-8 py-3">
+            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
+              <Zap className="h-4 w-4 text-accent" />
+              <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
+                Pro billing launches soon — you're on the early-access list. No card needed today.
+              </p>
+              <button
+                onClick={() => setBillingNote(false)}
+                className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
+              >
+                dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
           {view === 'overview' && <Overview sources={sources} />}
