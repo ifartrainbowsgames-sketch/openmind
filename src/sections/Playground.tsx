@@ -39,9 +39,10 @@ export default function Playground() {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            All ten capabilities below are runnable right now. Six execute genuinely in your
-            browser; four are simulated streams — paste your own key and they call your provider
-            directly. That distinction is the whole product, so we label it honestly.
+            All ten capabilities below are runnable right now. The chatbot answers with real
+            ChatGPT through our secure gateway — no key ever touches this page. The rest run
+            genuinely in your browser or stream as labelled simulations. That distinction is
+            the whole product, so we label it honestly.
           </p>
         </div>
 

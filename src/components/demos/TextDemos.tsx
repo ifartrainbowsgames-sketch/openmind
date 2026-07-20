@@ -14,13 +14,16 @@ const CHAT_REPLIES = [
 
 interface Msg { role: 'user' | 'assistant'; text: string }
 
+// Secure demo gateway — the OpenAI key lives on the server, never in the browser.
+const GATEWAY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/openmind-chat`
+
 export function ChatDemo() {
   const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', text: 'Hi — I\'m the embeddable support agent. Ask me anything about the product.' },
+    { role: 'assistant', text: 'Hi — I\'m the embeddable support agent, answering with real ChatGPT. Ask me anything about the product.' },
   ])
   const [input, setInput] = useState('')
-  const [apiKey, setApiKey] = useState('')
   const [busy, setBusy] = useState(false)
+  const [live, setLive] = useState<boolean | null>(null)
   const replyIdx = useRef(0)
 
   const send = async () => {
@@ -28,29 +31,30 @@ export function ChatDemo() {
     if (!q || busy) return
     setInput('')
     setBusy(true)
-    setMessages((m) => [...m, { role: 'user', text: q }, { role: 'assistant', text: '' }])
+    const history: Msg[] = [...messages, { role: 'user', text: q }]
+    setMessages([...history, { role: 'assistant', text: '' }])
 
-    if (apiKey.trim()) {
-      // Real BYOK mode — browser calls OpenAI directly. Key never leaves this page.
-      try {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey.trim()}` },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: 'You are a concise support agent demo. Answer in 2-3 sentences.' },
-              { role: 'user', content: q },
-            ],
-          }),
-        })
-        const data = await res.json()
-        const text = data?.choices?.[0]?.message?.content ?? `Error: ${data?.error?.message ?? res.statusText}`
-        setMessages((m) => [...m.slice(0, -1), { role: 'assistant', text }])
-      } catch (e) {
-        setMessages((m) => [...m.slice(0, -1), { role: 'assistant', text: `Request failed: ${String(e)}` }])
-      }
-    } else {
+    // Real ChatGPT via the secure gateway — no key ever touches this page.
+    try {
+      const res = await fetch(GATEWAY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: history.slice(-6).map((m) => ({ role: m.role, content: m.text })),
+        }),
+      })
+      if (!res.ok) throw new Error(`gateway ${res.status}`)
+      const data = await res.json()
+      const text = String(data?.text ?? '').trim()
+      if (!text) throw new Error('empty reply')
+      setLive(true)
+      await streamText(text, (partial) =>
+        setMessages((m) => [...m.slice(0, -1), { role: 'assistant', text: partial }]),
+        { cps: 500 },
+      )
+    } catch {
+      // Gateway offline or unconfigured — fall back to canned answers.
+      setLive(false)
       const reply = CHAT_REPLIES[replyIdx.current % CHAT_REPLIES.length]
       replyIdx.current++
       await streamText(reply, (partial) =>
@@ -64,21 +68,26 @@ export function ChatDemo() {
     <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
       <div className="space-y-4">
         <ModeStamp
-          mode={apiKey.trim() ? 'live' : 'simulated'}
-          note={apiKey.trim() ? 'calling OpenAI directly from this page' : 'paste a key below to call your provider'}
+          mode={live ? 'live' : 'simulated'}
+          liveLabel="via secure gateway"
+          note={
+            live === true
+              ? 'real ChatGPT answers — zero keys on this page'
+              : live === false
+                ? 'gateway unreachable — showing canned answers'
+                : 'asks our secure gateway first — zero keys on this page'
+          }
         />
-        <Field label="OpenAI API key — optional, never stored">
-          <input
-            className={inputCls}
-            type="password"
-            placeholder="sk-... (leave empty for simulated mode)"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </Field>
         <p className="text-xs leading-relaxed text-muted-foreground">
-          In live mode your key is kept in memory only and the request goes straight from your
-          browser to OpenAI — the exact BYOK promise, demonstrated.
+          This demo talks to real ChatGPT through our server-side gateway. The API key lives in
+          a server vault — it is never sent to, stored in, or requested by your browser.
+        </p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          And you'll never see a key box on this page. Asking visitors to paste secret keys into
+          a website is how keys get leaked — we don't do it, and neither should you.
+        </p>
+        <p className="border border-primary/15 bg-secondary/60 px-3 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          your keys → your vault · our demo → our gateway
         </p>
       </div>
       <div>

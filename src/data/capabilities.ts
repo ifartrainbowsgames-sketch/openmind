@@ -23,7 +23,7 @@ export const capabilities: Capability[] = [
     api: true,
     embed: true,
     icon: 'MessageSquare',
-    demoNote: 'Simulated stream — paste a key to go live',
+    demoNote: 'Real ChatGPT via our secure gateway — zero keys on the page',
     features: ['Streaming replies', 'Custom knowledge', '32 languages'],
   },
   {
@@ -75,7 +75,7 @@ export const capabilities: Capability[] = [
     api: true,
     embed: true,
     icon: 'Languages',
-    demoNote: 'Simulated stream — paste a key to go live',
+    demoNote: 'Simulated stream — your provider goes live after signup',
     features: ['Glossaries', 'Formality', 'Inline widget'],
   },
   {
@@ -88,7 +88,7 @@ export const capabilities: Capability[] = [
     api: true,
     embed: false,
     icon: 'Code2',
-    demoNote: 'Simulated stream — paste a key to go live',
+    demoNote: 'Simulated stream — your provider goes live after signup',
     features: ['90+ languages', 'PR review bot', 'CI hooks'],
   },
   {

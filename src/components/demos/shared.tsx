@@ -17,7 +17,16 @@ export function Pane({ title, children, right }: { title: string; children: Reac
 }
 
 /** Honesty stamp — every demo declares how it's running. */
-export function ModeStamp({ mode, note }: { mode: 'live' | 'simulated'; note: string }) {
+export function ModeStamp({
+  mode,
+  note,
+  liveLabel = 'in your browser',
+}: {
+  mode: 'live' | 'simulated'
+  note: string
+  /** Where the live computation happens — defaults to the browser. */
+  liveLabel?: string
+}) {
   return (
     <div
       className={`flex items-center gap-2 border px-3 py-2 font-mono-spec text-[11px] uppercase tracking-[0.14em] ${
@@ -27,7 +36,7 @@ export function ModeStamp({ mode, note }: { mode: 'live' | 'simulated'; note: st
       }`}
     >
       <span className={`pulse-dot inline-block h-2 w-2 rounded-full ${mode === 'live' ? 'bg-emerald-600' : 'bg-amber-500'}`} />
-      {mode === 'live' ? 'Running live — in your browser' : 'Simulated'} · {note}
+      {mode === 'live' ? `Running live — ${liveLabel}` : 'Simulated'} · {note}
     </div>
   )
 }
