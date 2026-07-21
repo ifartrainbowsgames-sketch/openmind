@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { streamText } from '@/lib/demo'
 import { Phone, Video, ImagePlus, Sparkles, Send, PhoneOff, Bot } from 'lucide-react'
 
+export type WidgetPreset = 'openmind' | 'discord' | 'telegram' | 'instagram'
+export type WidgetFont = 'system' | 'serif' | 'mono'
+
 export interface WidgetConfig {
   accent: string
   theme: 'light' | 'dark'
@@ -12,6 +15,8 @@ export interface WidgetConfig {
   video: boolean
   images: boolean
   aiFix: boolean
+  preset?: WidgetPreset
+  font?: WidgetFont
 }
 
 export const DEFAULT_WIDGET: WidgetConfig = {
@@ -24,6 +29,58 @@ export const DEFAULT_WIDGET: WidgetConfig = {
   video: true,
   images: true,
   aiFix: true,
+  preset: 'openmind',
+  font: 'system',
+}
+
+/** Platform personalities — full re-skins, not just a color swap. */
+export const PRESETS: Record<
+  Exclude<WidgetPreset, 'openmind'>,
+  {
+    label: string
+    bg: string
+    text: string
+    subtle: string
+    line: string
+    headerBg: string
+    headerText: string
+    accent: string
+    msgArea: string
+    visitor: { background: string; color: string }
+    agent: { background: string; color: string }
+    radius: string
+  }
+> = {
+  discord: {
+    label: 'Discord',
+    bg: '#313338', text: '#dbdee1', subtle: 'rgba(219,222,225,0.45)', line: 'rgba(255,255,255,0.08)',
+    headerBg: '#1e1f22', headerText: '#ffffff', accent: '#5865F2', msgArea: '#313338',
+    visitor: { background: '#5865F2', color: '#ffffff' },
+    agent: { background: '#2b2d31', color: '#dbdee1' },
+    radius: '8px',
+  },
+  telegram: {
+    label: 'Telegram',
+    bg: '#e7ebf0', text: '#000000', subtle: 'rgba(0,0,0,0.45)', line: 'rgba(0,0,0,0.08)',
+    headerBg: '#517da2', headerText: '#ffffff', accent: '#4f9fdd', msgArea: '#e7ebf0',
+    visitor: { background: '#eeffde', color: '#000000' },
+    agent: { background: '#ffffff', color: '#000000' },
+    radius: '14px',
+  },
+  instagram: {
+    label: 'Instagram',
+    bg: '#ffffff', text: '#0f1419', subtle: 'rgba(15,20,25,0.45)', line: 'rgba(0,0,0,0.08)',
+    headerBg: '#ffffff', headerText: '#0f1419', accent: '#d62976', msgArea: '#ffffff',
+    visitor: { background: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)', color: '#ffffff' },
+    agent: { background: '#efefef', color: '#0f1419' },
+    radius: '18px',
+  },
+}
+
+const FONT_STACKS: Record<WidgetFont, string | undefined> = {
+  system: undefined,
+  serif: "'Fraunces', Georgia, serif",
+  mono: "'IBM Plex Mono', ui-monospace, monospace",
 }
 
 interface Msg { from: 'visitor' | 'agent'; text?: string; img?: string }
@@ -46,7 +103,7 @@ export function fixSentence(s: string): string {
 
 const REPLIES: [RegExp, string][] = [
   [/refund|return/i, 'Per your attached refund policy: returns are accepted within 30 days, no questions asked. Want me to start one?'],
-  [/price|pricing|plan|cost/i, 'Pro is $29/mo for 5 sites with all capabilities — you pay your provider directly for tokens, we add 0% markup.'],
+  [/price|pricing|plan|cost/i, 'Pro is $10/mo for 5 sites with all capabilities — you pay your provider directly for tokens, we add 0% markup.'],
   [/image|picture|photo/i, 'Drop it right into this chat — I\'ll run vision on it and answer questions about what I see.'],
   [/call|talk|phone|video/i, 'Use the call icons in my header — voice or video, a human (or me) picks up in seconds.'],
 ]
@@ -77,6 +134,11 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
   const bg = dark ? 'bg-[#17140f] text-[#faf8f5]' : 'bg-white text-[#17140f]'
   const subtle = dark ? 'text-white/50' : 'text-[#17140f]/50'
   const line = dark ? 'border-white/15' : 'border-[#17140f]/15'
+
+  // platform personality — when set, it re-skins the whole widget
+  const p = config.preset && config.preset !== 'openmind' ? PRESETS[config.preset] : null
+  const accent = p?.accent ?? config.accent
+  const fontFamily = FONT_STACKS[config.font ?? 'system']
 
   useEffect(() => {
     setMsgs([{ from: 'agent', text: config.greeting }])
@@ -157,15 +219,18 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
   const mmss = `${String(Math.floor(callSecs / 60)).padStart(2, '0')}:${String(callSecs % 60).padStart(2, '0')}`
 
   return (
-    <div className={`relative flex h-full w-full flex-col overflow-hidden border ${line} ${bg} ${radius} shadow-2xl`}>
+    <div
+      className={`relative flex h-full w-full flex-col overflow-hidden border ${line} ${bg} ${radius} shadow-2xl`}
+      style={p ? { background: p.bg, color: p.text, borderColor: p.line, borderRadius: p.radius, fontFamily } : { fontFamily }}
+    >
       {/* header */}
-      <div className="flex items-center gap-3 px-4 py-3" style={{ background: config.accent }}>
-        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 text-white">
+      <div className="flex items-center gap-3 px-4 py-3" style={{ background: p?.headerBg ?? accent, color: p?.headerText }}>
+        <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20" style={{ color: p?.headerText ?? '#fff' }}>
           <Bot className="h-5 w-5" />
         </span>
         <div className="flex-1 leading-tight">
-          <div className="text-sm font-semibold text-white">{config.agentName}</div>
-          <div className="flex items-center gap-1.5 text-[11px] text-white/80">
+          <div className="text-sm font-semibold" style={{ color: p?.headerText ?? '#fff' }}>{config.agentName}</div>
+          <div className="flex items-center gap-1.5 text-[11px]" style={{ color: p ? `${p.headerText}cc` : 'rgba(255,255,255,0.8)' }}>
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> online · replies instantly
           </div>
         </div>
@@ -188,6 +253,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => { e.preventDefault(); setDragOver(false); onImage(e.dataTransfer.files?.[0]) }}
         className={`relative flex-1 space-y-3 overflow-y-auto p-4 ${dark ? 'bg-black/20' : 'bg-[#faf8f5]'}`}
+        style={p ? { background: p.msgArea } : undefined}
       >
         {msgs.map((m, i) => (
           <div key={i} className={m.from === 'visitor' ? 'text-right' : ''}>
@@ -198,7 +264,13 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
                 className={`inline-block max-w-[82%] px-3 py-2 text-left text-sm leading-relaxed ${
                   m.from === 'visitor' ? 'text-white' : dark ? 'bg-white/10' : 'bg-white border border-black/10'
                 } ${config.radius === 'sharp' ? '' : 'rounded-xl'}`}
-                style={m.from === 'visitor' ? { background: config.accent } : undefined}
+                style={
+                  m.from === 'visitor'
+                    ? { background: p?.visitor.background ?? accent, color: p?.visitor.color, borderRadius: p?.radius }
+                    : p
+                      ? { background: p.agent.background, color: p.agent.color, borderRadius: p.radius, border: 'none' }
+                      : undefined
+                }
               >
                 {m.text}
                 {busy && i === msgs.length - 1 && m.from === 'agent' && <span className="cursor-blink">▍</span>}
@@ -207,7 +279,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
           </div>
         ))}
         {dragOver && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed bg-black/40" style={{ borderColor: config.accent }}>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center border-2 border-dashed bg-black/40" style={{ borderColor: accent }}>
             <span className="font-mono-spec text-xs uppercase tracking-widest text-white">Drop image to send</span>
           </div>
         )}
@@ -237,7 +309,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
               onClick={runFix}
               disabled={!draft.trim() || fixing}
               className={`flex items-center gap-1 px-2.5 py-2 text-xs font-medium disabled:opacity-40 ${subtle}`}
-              style={draft.trim() ? { color: config.accent } : undefined}
+              style={draft.trim() ? { color: accent } : undefined}
             >
               <Sparkles className="h-4 w-4" />
               {fixing ? 'Fixing…' : 'Fix'}
@@ -247,7 +319,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
             onClick={send}
             disabled={!draft.trim() || busy}
             className="p-2.5 text-white disabled:opacity-40"
-            style={{ background: config.accent, borderRadius: config.radius === 'sharp' ? 0 : 10 }}
+            style={{ background: accent, borderRadius: config.radius === 'sharp' ? 0 : 10 }}
             aria-label="Send"
           >
             <Send className="h-4 w-4" />
@@ -261,15 +333,15 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
       {/* call overlay */}
       {call && (
         <div className={`absolute inset-0 z-10 flex flex-col ${dark ? 'bg-[#17140f]' : 'bg-[#17140f]'} text-white`}>
-          <div className="flex items-center justify-between px-4 py-3" style={{ background: config.accent }}>
+          <div className="flex items-center justify-between px-4 py-3" style={{ background: accent }}>
             <span className="text-sm font-semibold">{call === 'voice' ? 'Voice call' : 'Video call'} · {config.agentName}</span>
             <span className="font-mono-spec text-xs">{mmss}</span>
           </div>
           <div className="relative flex flex-1 items-center justify-center">
             {call === 'video' ? (
               <>
-                <div className="h-full w-full" style={{ background: `linear-gradient(135deg, ${config.accent}55, #17140f)` }} />
-                <span className="absolute flex h-20 w-20 items-center justify-center rounded-full text-white" style={{ background: config.accent }}>
+                <div className="h-full w-full" style={{ background: `linear-gradient(135deg, ${accent}55, #17140f)` }} />
+                <span className="absolute flex h-20 w-20 items-center justify-center rounded-full text-white" style={{ background: accent }}>
                   <Bot className="h-10 w-10" />
                 </span>
                 <div className="absolute bottom-3 right-3 h-20 w-14 rounded-md border border-white/30 bg-white/10" />
@@ -278,7 +350,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
               <div className="flex items-end gap-1.5">
                 {Array.from({ length: 16 }).map((_, i) => (
                   <span key={i} className="w-1.5 rounded-full" style={{
-                    background: config.accent,
+                    background: accent,
                     height: `${14 + ((i * 29) % 46)}px`,
                     animation: `pulse-dot ${0.5 + (i % 4) * 0.15}s ease-in-out infinite`,
                   }} />
