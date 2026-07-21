@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Menu, X } from 'lucide-react'
+import Magnetic from '@/components/anim/Magnetic'
 
 const links = [
   { label: 'Playground', href: '#playground' },
@@ -57,13 +58,15 @@ export default function Navbar() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
-          <Button
-            size="sm"
-            asChild
-            className="rounded-none border border-primary bg-primary font-mono-spec text-xs uppercase tracking-[0.14em] hard-shadow-sm hover:bg-accent hover:border-accent hover:text-white"
-          >
-            <Link to="/dashboard">Open console</Link>
-          </Button>
+          <Magnetic>
+            <Button
+              size="sm"
+              asChild
+              className="rounded-none border border-primary bg-primary font-mono-spec text-xs uppercase tracking-[0.14em] hard-shadow-sm hover:bg-accent hover:border-accent hover:text-white"
+            >
+              <Link to="/dashboard">Open console</Link>
+            </Button>
+          </Magnetic>
         </div>
 
         <button className="md:hidden" onClick={() => setOpen(!open)} aria-label="Menu">

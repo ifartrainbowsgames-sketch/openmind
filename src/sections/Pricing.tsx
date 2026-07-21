@@ -1,5 +1,7 @@
+import { useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Check, Minus } from 'lucide-react'
+import { gsap, useGsap } from '@/lib/anim'
 
 interface Tier {
   name: string
@@ -33,8 +35,32 @@ const TIERS: Tier[] = [
 ]
 
 export default function Pricing() {
+  const ref = useRef<HTMLElement>(null)
+
+  useGsap(ref, () => {
+    // the Pro column stamps down like a rubber stamp, with a two-frame settle
+    gsap.from('.price-stamp', {
+      scale: 1.45,
+      rotation: -6,
+      opacity: 0,
+      duration: 0.4,
+      ease: 'steps(4)',
+      transformOrigin: 'center top',
+      scrollTrigger: { trigger: '.price-table', start: 'top 72%' },
+    })
+    // spec rows tick in one after another
+    gsap.from('.price-row', {
+      opacity: 0,
+      x: -14,
+      duration: 0.3,
+      stagger: 0.06,
+      ease: 'power1.out',
+      scrollTrigger: { trigger: '.price-table', start: 'top 68%' },
+    })
+  })
+
   return (
-    <section id="pricing" className="border-b border-border bg-secondary/40 py-24">
+    <section id="pricing" ref={ref} className="border-b border-border bg-secondary/40 py-24">
       <div className="mx-auto max-w-7xl px-6">
         <div className="mb-12">
           <p className="spec-label mb-4 flex items-center gap-3">
@@ -53,26 +79,28 @@ export default function Pricing() {
         </div>
 
         {/* spec table */}
-        <div className="overflow-x-auto border border-primary bg-card hard-shadow">
+        <div className="price-table overflow-x-auto border border-primary bg-card hard-shadow">
           <table className="w-full min-w-[820px] border-collapse text-left">
             <thead>
               <tr className="border-b border-primary">
                 <th className="px-5 py-4 spec-label">Specification</th>
                 {TIERS.map((t) => (
                   <th key={t.name} className={`border-l border-border/50 px-5 py-4 align-top ${t.featured ? 'bg-primary text-primary-foreground' : ''}`}>
-                    <div className="font-serif-display text-xl font-semibold">{t.name}</div>
-                    <div className="mt-1">
-                      <span className={`font-serif-display text-3xl font-semibold ${t.featured ? 'text-accent' : ''}`}>{t.price}</span>
-                      <span className={`text-xs ${t.featured ? 'text-white/60' : 'text-muted-foreground'}`}>{t.per}</span>
+                    <div className={t.featured ? 'price-stamp inline-block' : undefined}>
+                      <div className="font-serif-display text-xl font-semibold">{t.name}</div>
+                      <div className="mt-1">
+                        <span className={`font-serif-display text-3xl font-semibold ${t.featured ? 'text-accent' : ''}`}>{t.price}</span>
+                        <span className={`text-xs ${t.featured ? 'text-white/60' : 'text-muted-foreground'}`}>{t.per}</span>
+                      </div>
+                      <div className={`mt-1 text-xs ${t.featured ? 'text-white/60' : 'text-muted-foreground'}`}>{t.blurb}</div>
                     </div>
-                    <div className={`mt-1 text-xs ${t.featured ? 'text-white/60' : 'text-muted-foreground'}`}>{t.blurb}</div>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {FEATURES.map((f, fi) => (
-                <tr key={f} className="border-b border-border/40 last:border-b-0">
+                <tr key={f} className="price-row border-b border-border/40 last:border-b-0">
                   <td className="px-5 py-3.5 text-sm font-medium">{f}</td>
                   {TIERS.map((t) => {
                     const v = t.rows[fi]

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { capabilities } from '@/data/capabilities'
 import { ChatDemo, TranslateDemo, CodeDemo } from '@/components/demos/TextDemos'
 import { ImageDemo, SttDemo, TtsDemo } from '@/components/demos/MediaDemos'
 import { DocQaDemo, SentimentDemo, SummarizeDemo, VisionDemo } from '@/components/demos/LocalDemos'
+import { gsap, prefersReduced } from '@/lib/anim'
 import type { JSX } from 'react'
 
 const demoMap: Record<string, () => JSX.Element> = {
@@ -22,6 +23,18 @@ export default function Playground() {
   const [active, setActive] = useState('chat')
   const cap = capabilities.find((c) => c.id === active)!
   const Demo = demoMap[active]
+  const stageRef = useRef<HTMLDivElement>(null)
+
+  // binder flip — each demo page snaps in from the right with a hard stepped ease
+  useEffect(() => {
+    const el = stageRef.current
+    if (!el || prefersReduced()) return
+    gsap.fromTo(
+      el,
+      { x: 30, opacity: 0 },
+      { x: 0, opacity: 1, duration: 0.38, ease: 'steps(6)' },
+    )
+  }, [active])
 
   return (
     <section id="playground" className="border-b border-border bg-secondary/40 py-24">
@@ -73,7 +86,7 @@ export default function Playground() {
           </div>
 
           {/* demo stage */}
-          <div className="p-6 md:p-8">
+          <div ref={stageRef} className="p-6 md:p-8">
             <div className="mb-6 flex flex-wrap items-baseline justify-between gap-2 border-b border-border/50 pb-4">
               <h3 className="font-serif-display text-2xl font-semibold">
                 <span className="font-mono-spec text-sm font-normal text-accent">{cap.index} / </span>

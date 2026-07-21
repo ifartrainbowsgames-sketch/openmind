@@ -73,6 +73,21 @@
   .hard-shadow-white {
     box-shadow: 5px 5px 0 0 #faf8f5;
   }
+  /* mechanical press — shadow collapses into the page on click */
+  .hard-shadow:active {
+    transform: translate(5px, 5px);
+    box-shadow: 0 0 0 0 #17140f;
+  }
+  .hard-shadow-sm:active {
+    transform: translate(3px, 3px);
+    box-shadow: 0 0 0 0 #17140f;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hard-shadow:active,
+    .hard-shadow-sm:active {
+      transform: none;
+    }
+  }
   /* faint vertical drafting grid over the page */
   .bg-ruled {
     background-image: linear-gradient(90deg, rgba(23, 20, 15, 0.045) 1px, transparent 1px);
