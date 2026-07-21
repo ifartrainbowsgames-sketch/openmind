@@ -2,41 +2,82 @@ import { useRef, useState } from 'react'
 import type { Source } from './types'
 import { formatBytes } from './types'
 import { capabilities } from '@/data/capabilities'
+import { supabase } from '@/lib/supabase'
+import { PLAN_LIMITS, type Plan } from '@/hooks/usePlan'
 import {
   Upload, Globe, Type, Trash2, FileText, Check, Loader2,
-  Database, FileSpreadsheet, Braces,
+  Database, FileSpreadsheet, Braces, Lock,
 } from 'lucide-react'
 
 const CONNECTORS = ['Notion', 'Google Drive', 'Confluence', 'GitHub', 'Zendesk', 'Shopify']
 const FILE_KINDS: Record<string, string> = {
   pdf: 'PDF', docx: 'DOCX', txt: 'TXT', md: 'MD', csv: 'CSV', json: 'JSON', mp3: 'AUDIO', wav: 'AUDIO', png: 'IMAGE', jpg: 'IMAGE',
 }
+const ACCEPTED = ['pdf', 'docx', 'doc', 'txt', 'md', 'csv', 'json']
+
+interface UploadItem { name: string; progress: number; error?: string }
 
 interface Props {
   sources: Source[]
+  plan: Plan
+  userId?: string
+  onUpgrade: () => void
   addSources: (s: Omit<Source, 'id' | 'addedAt' | 'status' | 'progress' | 'chunks'>[]) => void
   removeSource: (id: string) => void
   toggleAttach: (id: string, cap: string) => void
 }
 
-export default function DataStudio({ sources, addSources, removeSource, toggleAttach }: Props) {
+export default function DataStudio({ sources, plan, userId, onUpgrade, addSources, removeSource, toggleAttach }: Props) {
   const [dragging, setDragging] = useState(false)
   const [url, setUrl] = useState('')
   const [text, setText] = useState('')
   const [attachSel, setAttachSel] = useState<string[]>(['chat', 'docqa'])
+  const [uploads, setUploads] = useState<UploadItem[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // storage meter — plan-gated (1 GB free / 5 GB pro)
+  const limitBytes = PLAN_LIMITS[plan].storageGB * 1024 * 1024 * 1024
+  const usedBytes = sources.reduce((a, s) => a + (s.sizeBytes ?? 0), 0)
+  const usedPct = Math.min(100, (usedBytes / limitBytes) * 100)
+
+  const setUpload = (name: string, patch: Partial<UploadItem>) =>
+    setUploads((us) => us.map((u) => (u.name === name ? { ...u, ...patch } : u)))
+
+  const uploadOne = async (f: File) => {
+    const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+    if (!ACCEPTED.includes(ext)) {
+      setUploads((us) => [...us, { name: f.name, progress: 0, error: `unsupported type — use ${ACCEPTED.join(', ')}` }])
+      return
+    }
+    if (usedBytes + f.size > limitBytes) {
+      setUploads((us) => [...us, { name: f.name, progress: 0, error: `over your ${PLAN_LIMITS[plan].storageGB} GB limit` }])
+      return
+    }
+    setUploads((us) => [...us, { name: f.name, progress: 30 }])
+
+    // real upload — file lands in your private Supabase bucket
+    const path = `${userId}/${Date.now()}_${f.name.replace(/[^\w.-]/g, '_')}`
+    const { error } = await supabase.storage.from('sources').upload(path, f)
+    if (error) {
+      setUpload(f.name, { progress: 0, error: error.message })
+      return
+    }
+    setUpload(f.name, { progress: 80 })
+    addSources([{
+      name: f.name,
+      type: 'file' as const,
+      size: formatBytes(f.size),
+      attached: attachSel,
+      sizeBytes: f.size,
+      filePath: path,
+    }])
+    setUpload(f.name, { progress: 100 })
+    setTimeout(() => setUploads((us) => us.filter((u) => u.name !== f.name)), 1800)
+  }
+
   const onFiles = (files: FileList | null) => {
-    if (!files?.length) return
-    addSources(
-      [...files].map((f) => ({
-        name: f.name,
-        type: 'file' as const,
-        size: formatBytes(f.size),
-        attached: attachSel,
-        estChunks: Math.max(4, Math.round(f.size / 1800)),
-      })).map(({ estChunks: _e, ...rest }) => rest),
-    )
+    if (!files?.length || !userId) return
+    ;[...files].forEach(uploadOne)
   }
 
   const toggleSel = (id: string) =>
@@ -57,6 +98,68 @@ export default function DataStudio({ sources, addSources, removeSource, toggleAt
           {sources.length} sources · {sources.filter((s) => s.status === 'indexed').length} indexed
         </span>
       </div>
+
+      {/* storage meter */}
+      <div className="border border-primary bg-card p-4">
+        <div className="flex items-center justify-between">
+          <span className="spec-label">Workspace storage</span>
+          <span className="font-mono-spec text-[11px] text-muted-foreground">
+            {formatBytes(usedBytes)} / {PLAN_LIMITS[plan].storageGB} GB · {plan} plan
+          </span>
+        </div>
+        <div className="mt-2 h-2 w-full border border-border/50 bg-background">
+          <div
+            className={`h-full transition-all ${usedPct > 90 ? 'bg-destructive' : 'bg-accent'}`}
+            style={{ width: `${Math.max(1, usedPct)}%` }}
+          />
+        </div>
+        {plan === 'free' && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            PDF, Word, text and data files count toward the limit. Need 5 GB?{' '}
+            <button onClick={onUpgrade} className="text-accent underline underline-offset-2">
+              Upgrade to Pro — $10/mo
+            </button>
+          </p>
+        )}
+      </div>
+
+      {/* active uploads */}
+      {uploads.length > 0 && (
+        <div className="space-y-2">
+          {uploads.map((u) => (
+            <div
+              key={u.name}
+              className={`flex items-center gap-3 border px-4 py-3 ${
+                u.error ? 'border-destructive/60 bg-destructive/5' : 'border-primary bg-card'
+              }`}
+            >
+              {u.error ? (
+                <Lock className="h-4 w-4 shrink-0 text-destructive" />
+              ) : u.progress === 100 ? (
+                <Check className="h-4 w-4 shrink-0 text-emerald-600" />
+              ) : (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-accent" />
+              )}
+              <span className="max-w-64 truncate text-sm font-medium">{u.name}</span>
+              {u.error ? (
+                <span className="text-xs text-destructive">{u.error}</span>
+              ) : (
+                <div className="h-1.5 flex-1 border border-border/50 bg-background">
+                  <div className="h-full bg-accent transition-all" style={{ width: `${u.progress}%` }} />
+                </div>
+              )}
+              {u.error?.includes('limit') && (
+                <button
+                  onClick={onUpgrade}
+                  className="ml-auto border border-accent bg-accent px-2.5 py-1 font-mono-spec text-[10px] uppercase tracking-wider text-white"
+                >
+                  Upgrade
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* attach selector */}
       <div className="border border-primary bg-card p-4">
@@ -95,7 +198,7 @@ export default function DataStudio({ sources, addSources, removeSource, toggleAt
             {dragging ? 'Drop to upload' : 'Drag files or click'}
           </div>
           <p className="text-xs text-muted-foreground">
-            PDF · DOCX · MD · CSV · JSON · audio · images
+            PDF · DOCX · TXT · MD · CSV · JSON — uploaded to your private bucket
           </p>
           <input
             ref={fileRef}

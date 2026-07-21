@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { capabilities } from '@/data/capabilities'
 import { useAuth } from '@/hooks/useAuth'
+import { usePlan } from '@/hooks/usePlan'
 import { supabase } from '@/lib/supabase'
 import type { Source } from '@/components/dashboard/types'
 import DataStudio from '@/components/dashboard/DataStudio'
@@ -10,15 +11,19 @@ import Inbox from '@/components/dashboard/Inbox'
 import Popups from '@/components/dashboard/Popups'
 import PromptStudio from '@/components/dashboard/PromptStudio'
 import WidgetBuilder from '@/components/dashboard/WidgetBuilder'
+import ServicesPanel from '@/components/dashboard/ServicesPanel'
+import AnalyticsPanel from '@/components/dashboard/AnalyticsPanel'
 import { Overview, ProvidersKeys } from '@/components/dashboard/Panels'
 import {
   LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
   Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Zap, Loader2,
+  Boxes, BarChart3,
 } from 'lucide-react'
 
 const SEED_ROWS = [
-  { name: 'refund-policy.pdf', type: 'file', size: '84.2 KB', chunks: 148, status: 'indexed', attached: ['chat', 'docqa'] },
-  { name: 'https://docs.acme.com', type: 'url', size: '—', chunks: 1204, status: 'indexed', attached: ['chat', 'docqa'] },
+  { name: 'refund-policy.pdf', type: 'file', size: '1.2 MB', attached: ['chat', 'docqa'] },
+  { name: 'https://docs.acme.com', type: 'url', size: '—', attached: ['chat', 'docqa', 'summarize'] },
+  { name: 'FAQ (pasted)', type: 'text', size: '3.9 KB', attached: ['chat'] },
 ]
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,19 +37,23 @@ const rowToSource = (r: any): Source => ({
   progress: r.status === 'indexed' ? 100 : 40,
   attached: r.attached ?? [],
   addedAt: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'just now',
+  sizeBytes: r.size_bytes ?? 0,
+  filePath: r.file_path ?? undefined,
 })
 
 type View = 'overview' | 'data' | 'providers' | string
 
 const NAV_TOP = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+  { id: 'services', label: 'Services', icon: Boxes },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'data', label: 'Data Studio', icon: Database },
   { id: 'widget', label: 'Widget Builder', icon: Paintbrush },
   { id: 'providers', label: 'Providers & keys', icon: KeyRound },
 ]
 
-const NAV_ENGAGE = [
-  { id: 'inbox', label: 'Inbox', icon: InboxIcon, badge: 2 },
+const NAV_OPS = [
+  { id: 'inbox', label: 'Inbox', icon: InboxIcon },
   { id: 'popups', label: 'Engage · popups', icon: Megaphone },
   { id: 'prompt', label: 'Prompt Studio', icon: PenLine },
 ]
@@ -52,9 +61,9 @@ const NAV_ENGAGE = [
 export default function Dashboard() {
   const [view, setView] = useState<View>('data')
   const [sources, setSources] = useState<Source[]>([])
-  const [plan, setPlan] = useState<string>('free')
   const [billingNote, setBillingNote] = useState(false)
   const { session, loading, signOut } = useAuth()
+  const { plan, setPlan, services, toggleService } = usePlan(session?.user.id)
   const navigate = useNavigate()
 
   // auth guard — console requires an account
@@ -62,40 +71,43 @@ export default function Dashboard() {
     if (!loading && !session) navigate('/login')
   }, [loading, session, navigate])
 
-  // load plan + sources from Supabase; seed demo data on first login
+  // load sources from Supabase; seed demo data on first login
   useEffect(() => {
     if (!session) return
     const uid = session.user.id
-    supabase.from('subscriptions').select('plan').eq('user_id', uid).maybeSingle()
-      .then(({ data }) => { if (data?.plan) setPlan(data.plan) })
     supabase.from('sources').select('*').order('created_at', { ascending: false })
-      .then(async ({ data }) => {
-        if (data && data.length === 0) {
-          await supabase.from('sources').insert(SEED_ROWS.map((s) => ({ ...s, user_id: uid })))
-          const { data: seeded } = await supabase.from('sources').select('*').order('created_at', { ascending: false })
-          setSources((seeded ?? []).map(rowToSource))
-        } else if (data) {
+      .then(({ data }) => {
+        if (data && data.length > 0) {
           setSources(data.map(rowToSource))
+        } else if (data) {
+          supabase.from('sources')
+            .insert(SEED_ROWS.map((s) => ({ ...s, user_id: uid, status: 'indexed', chunks: 40 })))
+            .select()
+            .then(({ data: seeded }) => { if (seeded) setSources(seeded.map(rowToSource)) })
         }
       })
   }, [session])
 
-  // indexing simulation — progress creeps to 100, flips to indexed, syncs to cloud
+  // simulate indexing finishing, and persist the flip
   useEffect(() => {
     const t = setInterval(() => {
       setSources((ss) =>
         ss.map((s) => {
           if (s.status !== 'indexing') return s
-          const p = Math.min(100, s.progress + 5 + Math.floor(Math.random() * 11))
-          if (p >= 100) {
-            const chunks = 24 + ((s.name.length * 37) % 420)
-            supabase.from('sources').update({ status: 'indexed', chunks }).eq('id', s.id).then()
-            return { ...s, progress: 100, status: 'indexed' as const, chunks }
+          const p = Math.min(100, s.progress + 8)
+          const done = p >= 100
+          if (done) {
+            supabase.from('sources').update({ status: 'indexed', chunks: 40 + Math.floor(Math.random() * 20) }).eq('id', s.id).then()
           }
-          return { ...s, progress: p }
+          return {
+            ...s,
+            progress: p,
+            status: done ? 'indexed' : 'indexing',
+            chunks: done ? s.chunks || 42 : s.chunks,
+          }
         }),
       )
-    }, 320)
+    }, 700)
     return () => clearInterval(t)
   }, [])
 
@@ -103,7 +115,18 @@ export default function Dashboard() {
     if (!session) return
     supabase
       .from('sources')
-      .insert(items.map((s) => ({ ...s, user_id: session.user.id, status: 'indexing' })))
+      .insert(
+        items.map((s) => ({
+          name: s.name,
+          type: s.type,
+          size: s.size,
+          attached: s.attached,
+          size_bytes: s.sizeBytes ?? 0,
+          file_path: s.filePath ?? null,
+          user_id: session.user.id,
+          status: 'indexing',
+        })),
+      )
       .select()
       .then(({ data }) => {
         if (data) setSources((ss) => [...data.map(rowToSource), ...ss])
@@ -111,24 +134,36 @@ export default function Dashboard() {
   }
 
   const removeSource = (id: string) => {
+    const victim = sources.find((s) => s.id === id)
     setSources((ss) => ss.filter((s) => s.id !== id))
     supabase.from('sources').delete().eq('id', id).then()
+    if (victim?.filePath) supabase.storage.from('sources').remove([victim.filePath]).then()
   }
 
   const toggleAttach = (id: string, cap: string) => {
-    setSources((ss) =>
-      ss.map((s) => {
-        if (s.id !== id) return s
-        const attached = s.attached.includes(cap) ? s.attached.filter((c) => c !== cap) : [...s.attached, cap]
-        supabase.from('sources').update({ attached }).eq('id', id).then()
-        return { ...s, attached }
-      }),
+    const target = sources.find((s) => s.id === id)
+    if (!target) return
+    const next = target.attached.includes(cap)
+      ? target.attached.filter((c) => c !== cap)
+      : [...target.attached, cap]
+    setSources((ss) => ss.map((s) => (s.id === id ? { ...s, attached: next } : s)))
+    supabase.from('sources').update({ attached: next }).eq('id', id).then()
+  }
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-accent" />
+      </div>
     )
   }
+  if (!session) return null
 
   const cap = capabilities.find((c) => c.id === view)
   const viewLabel =
     view === 'overview' ? 'Overview'
+    : view === 'services' ? 'Services'
+    : view === 'analytics' ? 'Analytics'
     : view === 'data' ? 'Data Studio'
     : view === 'providers' ? 'Providers & keys'
     : view === 'inbox' ? 'Inbox'
@@ -138,154 +173,101 @@ export default function Dashboard() {
 
   const navBtn = (active: boolean) =>
     `flex w-full items-center gap-3 px-4 py-2.5 text-left font-mono-spec text-[12px] uppercase tracking-[0.12em] transition-colors ${
-      active ? 'bg-accent text-white' : 'text-white/60 hover:bg-white/10 hover:text-white'
+      active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
     }`
 
-  const sidebar = (
-    <>
-      <div className="border-b border-white/15 px-5 py-5">
-        <Link to="/" className="flex items-baseline gap-2">
-          <span className="font-serif-display text-xl font-bold text-white">
-            OpenMind<span className="text-accent">.</span>
-          </span>
-          <span className="font-mono-spec text-[10px] uppercase tracking-[0.16em] text-white/40">console</span>
-        </Link>
-      </div>
-
-      <div className="flex-1 overflow-y-auto py-4">
-        <div className="px-4 pb-2 font-mono-spec text-[10px] uppercase tracking-[0.18em] text-white/35">Workspace</div>
-        {NAV_TOP.map((n) => (
-          <button key={n.id} onClick={() => setView(n.id)} className={navBtn(view === n.id)}>
-            <n.icon className="h-4 w-4" /> {n.label}
-          </button>
-        ))}
-
-        <div className="px-4 pb-2 pt-6 font-mono-spec text-[10px] uppercase tracking-[0.18em] text-white/35">
-          Live operations
-        </div>
-        {NAV_ENGAGE.map((n) => (
-          <button key={n.id} onClick={() => setView(n.id)} className={navBtn(view === n.id)}>
-            <n.icon className="h-4 w-4" /> {n.label}
-            {n.badge ? (
-              <span className="ml-auto bg-accent px-1.5 py-0.5 font-mono-spec text-[9px] text-white">{n.badge}</span>
-            ) : null}
-          </button>
-        ))}
-
-        <div className="px-4 pb-2 pt-6 font-mono-spec text-[10px] uppercase tracking-[0.18em] text-white/35">
-          Capabilities
-        </div>
-        {capabilities.map((c) => (
-          <button key={c.id} onClick={() => setView(c.id)} className={navBtn(view === c.id)}>
-            <span className={`font-mono-spec text-[10px] ${view === c.id ? 'text-white' : 'text-accent'}`}>{c.index}</span>
-            {c.name}
-            <span className="ml-auto font-mono-spec text-[10px] text-white/30">
-              {sources.filter((s) => s.attached.includes(c.id)).length || ''}
-            </span>
-          </button>
-        ))}
-
-        <div className="px-4 pb-2 pt-6 font-mono-spec text-[10px] uppercase tracking-[0.18em] text-white/35">Account</div>
-        {[{ label: 'Team', icon: Users }, { label: 'Billing', icon: CreditCard }].map((n) => (
-          <div key={n.label} className="flex w-full items-center gap-3 px-4 py-2.5 font-mono-spec text-[12px] uppercase tracking-[0.12em] text-white/30">
-            <n.icon className="h-4 w-4" /> {n.label}
-            <span className="ml-auto border border-white/20 px-1 text-[9px]">soon</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="border-t border-white/15 p-4">
-        <Link
-          to="/"
-          className="flex items-center gap-2 font-mono-spec text-[11px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to site
-        </Link>
-      </div>
-    </>
-  )
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <span className="flex items-center gap-3 font-mono-spec text-xs uppercase tracking-[0.16em] text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading console…
-        </span>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-background lg:grid lg:grid-cols-[264px_1fr]">
-      {/* desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[264px] flex-col bg-primary lg:flex">
-        {sidebar}
-      </aside>
-
-      {/* mobile top strip */}
-      <div className="sticky top-0 z-40 flex items-center gap-2 overflow-x-auto bg-primary px-4 py-3 lg:hidden">
-        <Link to="/" className="mr-2 font-serif-display text-lg font-bold text-white">
-          OpenMind<span className="text-accent">.</span>
-        </Link>
-        {[...NAV_TOP.map((n) => ({ id: n.id, label: n.label })), ...NAV_ENGAGE.map((n) => ({ id: n.id, label: n.label })), ...capabilities.map((c) => ({ id: c.id, label: c.name }))].map((n) => (
-          <button
-            key={n.id}
-            onClick={() => setView(n.id)}
-            className={`whitespace-nowrap border px-3 py-1.5 font-mono-spec text-[11px] uppercase tracking-wider ${
-              view === n.id ? 'border-accent bg-accent text-white' : 'border-white/25 text-white/60'
-            }`}
-          >
-            {n.label}
-          </button>
-        ))}
-      </div>
-
-      {/* main */}
-      <div className="lg:col-start-2">
-        {/* topbar */}
-        <div className="sticky top-0 z-30 hidden items-center justify-between border-b border-primary bg-background/95 px-8 py-3 backdrop-blur-sm lg:flex">
-          <span className="font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-            console / <span className="text-foreground">{viewLabel}</span>
-          </span>
-          <div className="flex items-center gap-3">
-            <span className={`border px-2.5 py-1 font-mono-spec text-[10px] uppercase tracking-[0.14em] ${
-              plan === 'free'
-                ? 'border-border/60 text-muted-foreground'
-                : 'border-accent bg-accent/10 text-accent'
-            }`}>
-              {plan} plan
-            </span>
-            {plan === 'free' && (
-              <button
-                onClick={() => setBillingNote((b) => !b)}
-                className="flex items-center gap-1.5 border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
-              >
-                <Zap className="h-3 w-3" /> Upgrade to Pro
+    <div className="min-h-screen bg-secondary/30">
+      <div className="flex min-h-screen">
+        {/* sidebar */}
+        <aside className="hidden w-60 shrink-0 flex-col border-r border-primary bg-card md:flex">
+          <Link to="/" className="flex items-center gap-2 border-b border-primary px-4 py-3.5 hover:bg-secondary">
+            <ArrowLeft className="h-4 w-4 text-muted-foreground" />
+            <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span></span>
+            <span className="spec-label">console</span>
+          </Link>
+          <nav className="flex-1 overflow-y-auto py-3">
+            <div className="px-4 pb-2 spec-label">Workspace</div>
+            {NAV_TOP.map((n) => (
+              <button key={n.id} onClick={() => setView(n.id)} className={navBtn(view === n.id)}>
+                <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
               </button>
-            )}
-            <span
-              className="flex h-8 w-8 items-center justify-center border border-primary bg-primary font-mono-spec text-xs uppercase text-primary-foreground"
-              title={session?.user.email ?? ''}
-            >
-              {(session?.user.email ?? '??').slice(0, 2)}
-            </span>
-            <button
-              onClick={() => signOut().then(() => navigate('/login'))}
-              className="flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
-              title="Sign out"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
+            ))}
+
+            <div className="px-4 pb-2 pt-5 spec-label">Live ops</div>
+            {NAV_OPS.map((n) => (
+              <button key={n.id} onClick={() => setView(n.id)} className={navBtn(view === n.id)}>
+                <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
+              </button>
+            ))}
+
+            <div className="px-4 pb-2 pt-5 spec-label">Services</div>
+            {capabilities.map((c) => (
+              <button key={c.id} onClick={() => setView(c.id)} className={navBtn(view === c.id)}>
+                <span className={`font-mono-spec text-[11px] ${view === c.id ? 'text-accent' : 'text-muted-foreground/60'}`}>
+                  {c.index}
+                </span>
+                {c.name}
+              </button>
+            ))}
+          </nav>
+          <div className="border-t border-primary p-4">
+            <div className="border border-border/60 bg-secondary/50 p-3">
+              <div className="spec-label mb-1">Signed in as</div>
+              <div className="truncate text-sm font-medium">{session.user.email}</div>
+              <button
+                onClick={signOut}
+                className="mt-2 flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
+              >
+                <LogOut className="h-3 w-3" /> Sign out
+              </button>
+            </div>
           </div>
-        </div>
+        </aside>
+
+        {/* main */}
+        <div className="flex-1">
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-primary bg-card px-8 py-4">
+            <div>
+              <div className="spec-label">Console / {viewLabel}</div>
+              <h1 className="font-serif-display text-2xl font-semibold">{viewLabel}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="border border-border/60 px-3 py-1.5 font-mono-spec text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+                {plan} plan
+              </span>
+              {plan === 'free' ? (
+                <button
+                  onClick={() => setBillingNote((b) => !b)}
+                  className="flex items-center gap-1.5 border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
+                >
+                  <Zap className="h-3 w-3" /> Upgrade to Pro
+                </button>
+              ) : (
+                <button
+                  onClick={() => setPlan('free')}
+                  className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
+                  title="Early access — switch back anytime"
+                >
+                  early access · switch to free
+                </button>
+              )}
+            </div>
+          </header>
 
         {billingNote && (
           <div className="border-b border-primary bg-terminal px-8 py-3">
             <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
               <Zap className="h-4 w-4 text-accent" />
               <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-                Pro billing launches soon — you're on the early-access list. No card needed today.
+                Pro will be $10/mo when billing launches — during early access it's free to activate.
               </p>
+              <button
+                onClick={() => { setPlan('pro'); setBillingNote(false) }}
+                className="border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
+              >
+                Activate Pro free
+              </button>
               <button
                 onClick={() => setBillingNote(false)}
                 className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
@@ -298,16 +280,35 @@ export default function Dashboard() {
 
         <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
           {view === 'overview' && <Overview sources={sources} />}
-          {view === 'data' && (
-            <DataStudio sources={sources} addSources={addSources} removeSource={removeSource} toggleAttach={toggleAttach} />
+          {view === 'services' && (
+            <ServicesPanel plan={plan} services={services} toggleService={toggleService} onUpgrade={() => setBillingNote(true)} />
           )}
-          {view === 'widget' && <WidgetBuilder />}
+          {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={() => setBillingNote(true)} />}
+          {view === 'data' && (
+            <DataStudio
+              sources={sources}
+              plan={plan}
+              userId={session?.user.id}
+              onUpgrade={() => setBillingNote(true)}
+              addSources={addSources}
+              removeSource={removeSource}
+              toggleAttach={toggleAttach}
+            />
+          )}
           {view === 'providers' && <ProvidersKeys />}
+          {view === 'widget' && <WidgetBuilder />}
           {view === 'inbox' && <Inbox />}
           {view === 'popups' && <Popups />}
           {view === 'prompt' && <PromptStudio />}
-          {cap && <ServiceSettings cap={cap} sources={sources} />}
+          {cap && view !== 'widget' && <ServiceSettings cap={cap} />}
         </main>
+
+        <footer className="mx-auto flex max-w-6xl items-center gap-6 px-8 pb-8 font-mono-spec text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          <span className="flex items-center gap-1.5"><Users className="h-3 w-3" /> 1 seat</span>
+          <span className="flex items-center gap-1.5"><CreditCard className="h-3 w-3" /> tokens billed by your provider</span>
+          <span className="ml-auto">spec v2.0</span>
+        </footer>
+        </div>
       </div>
     </div>
   )
