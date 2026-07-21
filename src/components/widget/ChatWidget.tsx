@@ -57,7 +57,10 @@ const FALLBACK = [
   'Noted! Every conversation here also lands in the Inbox — with visitor location, device and page journey.',
 ]
 
-export default function ChatWidget({ config }: { config: WidgetConfig }) {
+// Secure demo gateway — same one the playground uses. Key lives server-side.
+const GATEWAY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/openmind-chat`
+
+export default function ChatWidget({ config, live = false }: { config: WidgetConfig; live?: boolean }) {
   const [msgs, setMsgs] = useState<Msg[]>([{ from: 'agent', text: config.greeting }])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -92,10 +95,37 @@ export default function ChatWidget({ config }: { config: WidgetConfig }) {
   const agentReply = async (userText: string, hadImage: boolean) => {
     setBusy(true)
     setMsgs((m) => [...m, { from: 'agent', text: '' }])
-    const reply = hadImage
-      ? 'Got it — I can see your image. In live mode I\'d describe it, extract text and answer questions about it. What would you like to know?'
-      : (REPLIES.find(([re]) => re.test(userText))?.[1] ?? FALLBACK[replyIdx.current++ % FALLBACK.length])
-    await streamText(reply, (p) => setMsgs((m) => [...m.slice(0, -1), { from: 'agent', text: p }]), { cps: 400 })
+    const streamReply = async (reply: string) => {
+      await streamText(reply, (p) => setMsgs((m) => [...m.slice(0, -1), { from: 'agent', text: p }]), { cps: 400 })
+    }
+    if (hadImage) {
+      await streamReply('Got it — I can see your image. In live mode I\'d describe it, extract text and answer questions about it. What would you like to know?')
+      setBusy(false)
+      return
+    }
+    // Live mode (marketing site): real ChatGPT via the secure gateway, canned fallback.
+    if (live) {
+      try {
+        const history = msgs.slice(-6).map((m) => ({
+          role: m.from === 'agent' ? 'assistant' : 'user',
+          content: m.text,
+        }))
+        const res = await fetch(GATEWAY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: [...history, { role: 'user', content: userText }] }),
+        })
+        if (!res.ok) throw new Error(`gateway ${res.status}`)
+        const text = String((await res.json())?.text ?? '').trim()
+        if (!text) throw new Error('empty reply')
+        await streamReply(text)
+        setBusy(false)
+        return
+      } catch {
+        // fall through to canned replies
+      }
+    }
+    await streamReply(REPLIES.find(([re]) => re.test(userText))?.[1] ?? FALLBACK[replyIdx.current++ % FALLBACK.length])
     setBusy(false)
   }
 
