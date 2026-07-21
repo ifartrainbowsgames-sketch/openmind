@@ -22,7 +22,7 @@ const TIERS: Tier[] = [
     rows: ['1 site', 'yes', '7 days', null, '1', null, 'community'], cta: 'Start free',
   },
   {
-    name: 'Pro', price: '$29', per: '/mo', blurb: 'For products with real users.', featured: true,
+    name: 'Pro', price: '$10', per: '/mo', blurb: 'For products with real users.', featured: true,
     rows: ['5 sites', 'yes', '90 days', 'yes', '3', null, 'next-day'], cta: 'Start trial',
   },
   {
