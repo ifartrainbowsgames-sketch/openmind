@@ -1,4 +1,5 @@
 import { useRef } from 'react'
+import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Check, Minus } from 'lucide-react'
 import { gsap, useGsap } from '@/lib/anim'
@@ -123,6 +124,7 @@ export default function Pricing() {
                 {TIERS.map((t) => (
                   <td key={t.name} className={`border-l border-border/40 px-5 py-4 ${t.featured ? 'bg-primary/[0.03]' : ''}`}>
                     <Button
+                      asChild
                       className={`w-full rounded-none font-mono-spec text-xs uppercase tracking-[0.14em] ${
                         t.featured
                           ? 'border border-accent bg-accent text-white hard-shadow-sm hover:bg-accent/85'
@@ -130,7 +132,7 @@ export default function Pricing() {
                       }`}
                       variant={t.featured ? 'default' : 'outline'}
                     >
-                      {t.cta}
+                      <Link to="/login">{t.cta}</Link>
                     </Button>
                   </td>
                 ))}

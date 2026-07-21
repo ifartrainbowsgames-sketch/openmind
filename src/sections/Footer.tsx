@@ -1,10 +1,45 @@
+import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { ArrowRight, Github } from 'lucide-react'
+import { REPO_URL, LICENSE_URL } from '@/lib/site'
 
-const cols = [
-  { title: 'Product', links: ['Playground', 'Capabilities', 'Providers', 'Pricing', 'Changelog'] },
-  { title: 'Developers', links: ['Docs', 'API reference', 'Embed widgets', 'Self-hosting', 'Status'] },
-  { title: 'Open source', links: ['GitHub', 'License (MIT)', 'Roadmap', 'Contributing', 'Security'] },
+interface FooterLink {
+  label: string
+  href: string
+  external?: boolean
+}
+
+const cols: { title: string; links: FooterLink[] }[] = [
+  {
+    title: 'Product',
+    links: [
+      { label: 'Playground', href: '#playground' },
+      { label: 'Capabilities', href: '#capabilities' },
+      { label: 'Providers', href: '#providers' },
+      { label: 'Security', href: '#security' },
+      { label: 'Pricing', href: '#pricing' },
+    ],
+  },
+  {
+    title: 'Developers',
+    links: [
+      { label: 'Docs', href: '#integrate' },
+      { label: 'API reference', href: '#integrate' },
+      { label: 'Embed widgets', href: '#integrate' },
+      { label: 'Self-hosting', href: '#opensource' },
+      { label: 'Console', href: '/dashboard' },
+    ],
+  },
+  {
+    title: 'Open source',
+    links: [
+      { label: 'GitHub', href: REPO_URL, external: true },
+      { label: 'License (MIT)', href: LICENSE_URL, external: true },
+      { label: 'Roadmap', href: `${REPO_URL}/issues`, external: true },
+      { label: 'Contributing', href: REPO_URL, external: true },
+      { label: 'Changelog', href: `${REPO_URL}/commits/main`, external: true },
+    ],
+  },
 ]
 
 export default function Footer() {
@@ -25,16 +60,22 @@ export default function Footer() {
           <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
             <Button
               size="lg"
+              asChild
               className="rounded-none border border-accent bg-accent px-8 py-6 font-mono-spec text-sm uppercase tracking-[0.14em] text-white hard-shadow-white hover:bg-accent/85"
             >
-              Start free <ArrowRight className="ml-2 h-4 w-4" />
+              <Link to="/login">
+                Start free <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
             </Button>
             <Button
               size="lg"
               variant="outline"
+              asChild
               className="rounded-none border-white/40 bg-transparent px-8 py-6 font-mono-spec text-sm uppercase tracking-[0.14em] text-white hover:bg-white/10 hover:text-white"
             >
-              <Github className="mr-2 h-4 w-4" /> Star on GitHub
+              <a href={REPO_URL} target="_blank" rel="noreferrer">
+                <Github className="mr-2 h-4 w-4" /> Star on GitHub
+              </a>
             </Button>
           </div>
         </div>
@@ -56,8 +97,25 @@ export default function Footer() {
             <h4 className="font-mono-spec text-[11px] uppercase tracking-[0.2em] text-white/45">{c.title}</h4>
             <ul className="mt-4 space-y-2.5">
               {c.links.map((l) => (
-                <li key={l}>
-                  <a href="#" className="text-sm text-white/70 transition-colors hover:text-accent">{l}</a>
+                <li key={l.label}>
+                  {l.external ? (
+                    <a
+                      href={l.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-white/70 transition-colors hover:text-accent"
+                    >
+                      {l.label}
+                    </a>
+                  ) : l.href.startsWith('/') ? (
+                    <Link to={l.href} className="text-sm text-white/70 transition-colors hover:text-accent">
+                      {l.label}
+                    </Link>
+                  ) : (
+                    <a href={l.href} className="text-sm text-white/70 transition-colors hover:text-accent">
+                      {l.label}
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>

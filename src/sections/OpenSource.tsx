@@ -1,5 +1,6 @@
 import { Github, GitFork, ScrollText, Map } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { REPO_URL, LICENSE_URL } from '@/lib/site'
 
 const FACTS = [
   { icon: ScrollText, k: 'license', v: 'MIT — all of it', note: 'widgets, gateway, SDKs, docs' },
@@ -28,14 +29,22 @@ export default function OpenSource() {
               is hosting, updates and support — never access to your own infrastructure.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
-              <Button className="rounded-none border border-primary bg-primary px-6 font-mono-spec text-xs uppercase tracking-[0.14em] hard-shadow-sm hover:bg-accent hover:border-accent">
-                <Github className="mr-2 h-4 w-4" /> github.com/openmind
+              <Button
+                asChild
+                className="rounded-none border border-primary bg-primary px-6 font-mono-spec text-xs uppercase tracking-[0.14em] hard-shadow-sm hover:bg-accent hover:border-accent"
+              >
+                <a href={REPO_URL} target="_blank" rel="noreferrer">
+                  <Github className="mr-2 h-4 w-4" /> github — openmind
+                </a>
               </Button>
               <Button
                 variant="outline"
+                asChild
                 className="rounded-none border-primary px-6 font-mono-spec text-xs uppercase tracking-[0.14em] hover:bg-secondary"
               >
-                Read the license
+                <a href={LICENSE_URL} target="_blank" rel="noreferrer">
+                  Read the license
+                </a>
               </Button>
             </div>
           </div>

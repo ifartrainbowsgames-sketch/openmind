@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+
+Sitemap: https://openmind-8ha.pages.dev/sitemap.xml
