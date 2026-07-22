@@ -1,17 +1,18 @@
 import { useState } from 'react'
-import { capabilities, providers } from '@/data/capabilities'
+import { providers } from '@/data/capabilities'
 import type { Source } from './types'
 import { Check, Plus, KeyRound } from 'lucide-react'
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 
 const REQUESTS = [42, 18, 9, 12, 7, 15, 22, 6, 11, 8]
+const REQUEST_HOURS = ['00', '03', '06', '09', '12', '15', '18', '21', '22', '23']
 const ACTIVITY = [
   ['09:41', 'chat', '2,104 requests · openai/gpt-4o-mini', '✓'],
-  ['09:38', 'docqa', 'knowledge base re-indexed · 412 chunks', '✓'],
-  ['09:12', 'image', 'batch render · 38 images · together/flux.1', '✓'],
-  ['08:57', 'stt', 'rate limit 80% — groq/whisper-v3', '!'],
-  ['08:30', 'translate', 'glossary updated · 214 terms', '✓'],
+  ['09:38', 'chat', 'knowledge base re-indexed · 412 chunks', '✓'],
+  ['09:12', 'chat', 'widget published to acme.com · anthropic/claude-4', '✓'],
+  ['08:57', 'chat', 'rate limit 80% — gateway queue enabled', '!'],
+  ['08:30', 'chat', 'greeting updated · “Hi! How can I help?”', '✓'],
 ]
 
 export function Overview({ sources }: { sources: Source[] }) {
@@ -38,9 +39,9 @@ export function Overview({ sources }: { sources: Source[] }) {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1.3fr_1fr]">
-        {/* requests by capability */}
+        {/* chatbot requests by hour */}
         <div className="border border-primary bg-card p-5 hard-shadow">
-          <span className="spec-label mb-5 block">Requests by capability — last 24h</span>
+          <span className="spec-label mb-5 block">Chatbot requests by hour — last 24h</span>
           <div className="flex items-end gap-2">
             {REQUESTS.map((v, i) => (
               <div key={i} className="group flex flex-1 flex-col items-center justify-end gap-1.5">
@@ -52,7 +53,7 @@ export function Overview({ sources }: { sources: Source[] }) {
                   style={{ height: `${Math.round((v / max) * 120)}px` }}
                 />
                 <span className="font-mono-spec text-[9px] uppercase text-muted-foreground">
-                  {capabilities[i].id.slice(0, 4)}
+                  {REQUEST_HOURS[i]}h
                 </span>
               </div>
             ))}

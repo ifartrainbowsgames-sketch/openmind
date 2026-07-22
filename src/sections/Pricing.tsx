@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Link } from 'react-router'
+import { TransitionLink } from '@/components/fx'
 import { Button } from '@/components/ui/button'
 import { Check, Minus } from 'lucide-react'
 import { gsap, useGsap } from '@/lib/anim'
@@ -14,7 +14,7 @@ interface Tier {
   cta: string
 }
 
-const FEATURES = ['Sites / widgets', 'All 10 capabilities', 'Analytics & logs', 'Server-side key vault', 'Team seats', 'Self-host license', 'Support']
+const FEATURES = ['Sites / widgets', 'Chatbot service', 'Analytics & logs', 'Server-side key vault', 'Team seats', 'Self-host license', 'Support']
 
 const TIERS: Tier[] = [
   {
@@ -66,7 +66,7 @@ export default function Pricing() {
         <div className="mb-12">
           <p className="spec-label mb-4 flex items-center gap-3">
             <span className="inline-block h-2 w-2 bg-accent" />
-            Fig. 08 — price sheet
+            Fig. 09 — price sheet
           </p>
           <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
             Software pricing.
@@ -132,7 +132,7 @@ export default function Pricing() {
                       }`}
                       variant={t.featured ? 'default' : 'outline'}
                     >
-                      <Link to="/login">{t.cta}</Link>
+                      <TransitionLink to="/login">{t.cta}</TransitionLink>
                     </Button>
                   </td>
                 ))}

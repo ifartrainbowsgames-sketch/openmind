@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, type CSSProperties } from 'react'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import { hashSeed, mulberry } from '@/lib/demo'
 import { PLAN_LIMITS, type Plan } from '@/hooks/usePlan'
+import CountUp from '@/components/dash-fx/CountUp'
 import { Eye, MessageSquare, Timer, MousePointerClick, Lock, Zap, TrendingUp, TrendingDown } from 'lucide-react'
 
 interface DayPoint { day: string; visitors: number; chats: number }
@@ -68,10 +69,10 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
   const liveNow = 3 + (new Date().getMinutes() % 5)
 
   const KPIS = [
-    { icon: Eye, label: `Visitors · ${days}d`, value: totals.visitors.toLocaleString(), delta: 12 },
-    { icon: MessageSquare, label: 'Chats started', value: totals.chats.toLocaleString(), delta: 18 },
-    { icon: MousePointerClick, label: 'Chat conversion', value: `${conv}%`, delta: 4 },
-    { icon: Timer, label: 'Avg. session', value: '2:38', delta: -3 },
+    { icon: Eye, label: `Visitors · ${days}d`, value: totals.visitors.toLocaleString(), delta: 12, countTo: totals.visitors },
+    { icon: MessageSquare, label: 'Chats started', value: totals.chats.toLocaleString(), delta: 18, countTo: totals.chats },
+    { icon: MousePointerClick, label: 'Chat conversion', value: `${conv}%`, delta: 4, countTo: null as number | null },
+    { icon: Timer, label: 'Avg. session', value: '2:38', delta: -3, countTo: null as number | null },
   ]
 
   return (
@@ -94,20 +95,22 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
 
       {/* KPI row */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {KPIS.map((k) => (
-          <div key={k.label} className="border border-primary bg-card p-4 hard-shadow-sm">
+        {KPIS.map((k, i) => (
+          <div key={k.label} className="dash-cascade border border-primary bg-card p-4 hard-shadow-sm" style={{ '--dash-i': i } as CSSProperties}>
             <div className="flex items-center justify-between">
               <k.icon className="h-4 w-4 text-accent" />
               <Delta v={k.delta} />
             </div>
-            <div className="mt-3 font-serif-display text-3xl font-semibold">{k.value}</div>
+            <div className="mt-3 font-serif-display text-3xl font-semibold">
+              {k.countTo === null ? k.value : <CountUp value={k.countTo} />}
+            </div>
             <div className="spec-label mt-1">{k.label}</div>
           </div>
         ))}
       </div>
 
       {/* visitors chart */}
-      <div className="border border-primary bg-card hard-shadow">
+      <div className="dash-feed-in border border-primary bg-card hard-shadow">
         <div className="flex items-center justify-between border-b border-primary px-5 py-2.5">
           <span className="spec-label">Visitors — last {days} days</span>
           {plan === 'free' && (
@@ -126,7 +129,8 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
                 contentStyle={{ background: '#17140f', border: 'none', borderRadius: 0, color: '#faf8f5', fontFamily: 'IBM Plex Mono', fontSize: 12 }}
                 labelStyle={{ color: '#ff4d00' }}
               />
-              <Area type="monotone" dataKey="visitors" stroke="#17140f" strokeWidth={1.5} fill="#ff4d00" fillOpacity={0.18} />
+              <Area type="monotone" dataKey="visitors" stroke="#17140f" strokeWidth={1.5} fill="#ff4d00" fillOpacity={0.18}
+                isAnimationActive animationDuration={700} animationEasing="ease-out" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -134,7 +138,7 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
 
       <div className="grid gap-4 xl:grid-cols-2">
         {/* chats bar chart */}
-        <div className="border border-primary bg-card">
+        <div className="dash-feed-in border border-primary bg-card">
           <div className="border-b border-primary px-5 py-2.5">
             <span className="spec-label">Chats started per day</span>
           </div>
@@ -147,21 +151,22 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
                   contentStyle={{ background: '#17140f', border: 'none', borderRadius: 0, color: '#faf8f5', fontFamily: 'IBM Plex Mono', fontSize: 12 }}
                   labelStyle={{ color: '#ff4d00' }}
                 />
-                <Bar dataKey="chats" fill="#ff4d00" />
+                <Bar dataKey="chats" fill="#ff4d00" isAnimationActive animationDuration={600} animationEasing="ease-out" />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* live feed */}
-        <div className="border border-primary bg-card">
+        <div className="dash-feed-in border border-primary bg-card">
           <div className="flex items-center justify-between border-b border-primary px-5 py-2.5">
             <span className="spec-label">Live — who comes in, who goes out</span>
             <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" />
           </div>
           <div className="bg-terminal">
             {LIVE_EVENTS.map((e, i) => (
-              <div key={e} className="flex items-center gap-3 border-b border-white/10 px-4 py-2.5 font-mono-spec text-[11px] text-white/75 last:border-b-0">
+              <div key={e} className="dash-cascade flex items-center gap-3 border-b border-white/10 px-4 py-2.5 font-mono-spec text-[11px] text-white/75 last:border-b-0"
+                style={{ '--dash-i': i } as CSSProperties}>
                 <span className="text-white/30">{String(i + 1).padStart(2, '0')}</span>
                 {e}
                 <span className="ml-auto text-white/30">{i * 14 + 2}s ago</span>
@@ -176,7 +181,7 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
         <div className="border-b border-primary px-5 py-2.5">
           <span className="spec-label">Top pages — views, clicks, chats</span>
         </div>
-        <div className={plan === 'free' ? 'select-none blur-[3px]' : ''}>
+        <div data-lenis-prevent className={`overflow-x-auto ${plan === 'free' ? 'select-none blur-[3px]' : ''}`}>
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-border/50">

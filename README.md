@@ -2,12 +2,12 @@
 
 **Your models. Your keys. One open stack.**
 
-The open-source integration layer for AI: ten model-agnostic capabilities (chatbot, vision, speech, RAG…) as embeddable widgets and one unified API — running on the customer's own provider keys with zero token markup.
+The open-source integration layer for AI: an embeddable chatbot (trained on your docs, answered by any model) as a two-line widget and one unified API — running on the customer's own provider keys with zero token markup.
 
 ## What's inside
 
 - **Marketing site** — spec-sheet editorial design, live request log, provider matrix
-- **Playground** — all 10 capabilities testable in the browser (six run genuinely client-side)
+- **Playground** — the chatbot testable in the browser via a secure gateway (zero keys on the page)
 - **Console** (`/dashboard`) — Data Studio (upload/index company data), Widget Builder (design + live preview: voice/video calls, image drop, Fix-with-AI), Inbox, Engage popups, Prompt Studio, per-service settings
 - **Auth** — Supabase Auth (email/password), route-guarded console
 - **Database** — Supabase Postgres with row-level security (profiles, sources, conversations, messages, subscriptions)

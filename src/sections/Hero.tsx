@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { ArrowRight, FlaskConical } from 'lucide-react'
 import { gsap, useGsap, prefersReduced } from '@/lib/anim'
 import Magnetic from '@/components/anim/Magnetic'
+import HeroLattice from '@/components/site-fx/HeroLattice'
 
 interface LogLine {
   id: number
@@ -16,14 +17,14 @@ interface LogLine {
 const ROUTES = [
   { path: '/v1/chat', route: '→ anthropic/claude-4' },
   { path: '/v1/chat', route: '→ ollama/llama3.3' },
-  { path: '/v1/images', route: '→ together/flux.1' },
-  { path: '/v1/audio/stt', route: '→ groq/whisper-v3' },
+  { path: '/v1/chat', route: '→ mistral/large-3' },
+  { path: '/v1/chat', route: '→ groq/llama-3.3-70b' },
   { path: '/v1/chat', route: '→ openai/gpt-5' },
-  { path: '/v1/rag/query', route: '→ vllm/self-hosted' },
-  { path: '/v1/embed', route: '→ cohere/embed-v4' },
-  { path: '/v1/translate', route: '→ deepl/v3' },
-  { path: '/v1/vision', route: '→ google/gemini-3' },
-  { path: '/v1/tts', route: '→ elevenlabs/v3' },
+  { path: '/v1/chat', route: '→ vllm/self-hosted' },
+  { path: '/v1/chat', route: '→ cohere/command-a' },
+  { path: '/v1/chat', route: '→ google/gemini-3' },
+  { path: '/v1/chat', route: '→ openrouter/auto' },
+  { path: '/v1/chat', route: '→ azure/gpt-5' },
 ]
 
 let logSeq = 0
@@ -118,7 +119,7 @@ function RequestLog() {
 }
 
 const SPECS = [
-  ['CAPABILITIES', '10'],
+  ['SERVICE', 'CHATBOT'],
   ['PROVIDERS', '12+'],
   ['TOKEN MARKUP', '0%'],
   ['LICENSE', 'MIT'],
@@ -180,8 +181,10 @@ export default function Hero() {
   })
 
   return (
-    <section id="top" ref={ref} className="bg-ruled border-b border-border pt-40 pb-0">
-      <div className="mx-auto max-w-7xl px-6">
+    <section id="top" ref={ref} className="bg-ruled relative overflow-hidden border-b border-border pt-40 pb-0">
+      {/* lazy three.js lattice — sits behind all hero content, inert to input */}
+      <HeroLattice className="hero-lattice pointer-events-none absolute inset-0" />
+      <div className="relative mx-auto max-w-7xl px-6">
         <div className="grid items-end gap-12 pb-16 lg:grid-cols-[1.15fr_1fr]">
           <div>
             <p className="hero-stamp spec-label mb-6 flex items-center gap-3">
@@ -202,8 +205,8 @@ export default function Hero() {
               </span>
             </h1>
             <p className="hero-sub mt-8 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              Ten AI capabilities — chatbot, vision, speech, RAG — as embeddable widgets and one
-              unified API. They run on <strong className="text-foreground">your provider keys</strong>,
+              An embeddable AI chatbot — trained on your docs, answered by any model you choose —
+              as a two-line widget and one unified API. It runs on <strong className="text-foreground">your provider keys</strong>,
               we never mark up a single token, and the whole stack is MIT-licensed.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
@@ -215,7 +218,7 @@ export default function Hero() {
                 >
                   <a href="#playground">
                     <FlaskConical className="mr-2 h-4 w-4" />
-                    Test all 10 live
+                    Test it live
                   </a>
                 </Button>
               </Magnetic>
@@ -239,7 +242,7 @@ export default function Hero() {
       </div>
 
       {/* spec strip */}
-      <div className="border-t border-border bg-card">
+      <div className="relative border-t border-border bg-card">
         <div className="mx-auto grid max-w-7xl grid-cols-2 md:grid-cols-4">
           {SPECS.map(([k, v], i) => (
             <div

@@ -34,7 +34,7 @@ export default function Security() {
         <div className="mb-12">
           <p className="spec-label mb-4 flex items-center gap-3">
             <span className="inline-block h-2 w-2 bg-accent" />
-            Fig. 06 — key handling
+            Fig. 07 — key handling
           </p>
           <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
             Your keys are <em className="font-normal italic text-accent">your problem.</em>

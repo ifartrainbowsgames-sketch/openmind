@@ -31,7 +31,7 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
   const [dragging, setDragging] = useState(false)
   const [url, setUrl] = useState('')
   const [text, setText] = useState('')
-  const [attachSel, setAttachSel] = useState<string[]>(['chat', 'docqa'])
+  const [attachSel, setAttachSel] = useState<string[]>(['chat'])
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -91,7 +91,7 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
           <h2 className="font-serif-display text-3xl font-semibold">Data Studio</h2>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
             Everything you upload is chunked, embedded with <em>your</em> provider key, and indexed
-            per capability. Files never leave your workspace unless you attach them to a service.
+            for the chatbot. Files never leave your workspace unless you attach them to it.
           </p>
         </div>
         <span className="font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -163,7 +163,7 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
 
       {/* attach selector */}
       <div className="border border-primary bg-card p-4">
-        <span className="spec-label mb-2 block">New sources feed these capabilities</span>
+        <span className="spec-label mb-2 block">New sources feed the chatbot</span>
         <div className="flex flex-wrap gap-2">
           {capabilities.map((c) => (
             <button

@@ -128,6 +128,25 @@
   0%, 100% { opacity: 0.25; }
   50% { opacity: 1; }
 }
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* report cards, approval cards, banners — small honest "stamp" entrance */
+@keyframes stampIn {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-stamp {
+  animation: stampIn 0.25s ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-stamp {
+    animation: none;
+  }
+}
 .pulse-dot {
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
@@ -142,4 +161,204 @@
 ::-webkit-scrollbar-thumb {
   background: #17140f;
   border: 2px solid #faf8f5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Lenis smooth scroll — recommended base styles (lenis docs)          */
+/* Lenis adds .lenis / .lenis-smooth to <html> while active.           */
+/* ------------------------------------------------------------------ */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  /* Lenis drives scrolling itself; kill native smooth-scroll while active */
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* View Transitions — global route crossfade + per-page variant        */
+/* Navigations wrapped via TransitionLink / navigateWithTransition.    */
+/* ------------------------------------------------------------------ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 220ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+/* opt-in named variant: put .vt-page on a page-level container for a
+   subtle vertical drift on top of the crossfade */
+.vt-page {
+  view-transition-name: vt-page;
+}
+::view-transition-old(vt-page) {
+  animation: vt-page-out 220ms ease-out both;
+}
+::view-transition-new(vt-page) {
+  animation: vt-page-in 220ms ease-out both;
+}
+@keyframes vt-page-out {
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+@keyframes vt-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* reduced motion: kill all view-transition animation (nav still happens) */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root),
+  ::view-transition-old(vt-page),
+  ::view-transition-new(vt-page) {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* site-fx — public-site motion accents (E2)                           */
+/* ------------------------------------------------------------------ */
+
+/* site-fx: three.js hero lattice canvas eases in once it mounts */
+.hero-lattice > canvas {
+  animation: site-fx-canvas-in 1.1s ease-out both;
+}
+@keyframes site-fx-canvas-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-lattice > canvas {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* dash-fx — dashboard motion system (additive; owned by track E3)     */
+/* All keyframes are transform+opacity (compositor-only, 60fps).       */
+/* ------------------------------------------------------------------ */
+
+/* dash-fx: content-pane entrance — crossfade+rise on view switch (~220ms) */
+@keyframes dashViewIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dash-view-enter {
+  animation: dashViewIn 220ms ease-out both;
+}
+
+/* dash-fx: generic rise used for feed rows, chart cards, tool chips */
+@keyframes dashRise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dash-feed-in {
+  animation: dashRise 240ms ease-out both;
+}
+
+/* dash-fx: staggered cascade — set --dash-i (0-based index) per child */
+.dash-cascade {
+  animation: dashRise 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--dash-i, 0) * 55ms);
+}
+
+/* dash-fx: WorkforceMap employee-node entrance (staggered pop) */
+@keyframes dashNodePop {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dash-node-pop {
+  animation: dashNodePop 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--dash-i, 0) * 70ms);
+}
+
+/* dash-fx: WorkforceMap edge draw-in — requires pathLength="1" on the path */
+.dash-edge-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: dashEdgeDraw 520ms ease-out forwards;
+  animation-delay: calc(var(--dash-i, 0) * 55ms);
+}
+@keyframes dashEdgeDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* dash-fx: sliding nav indicator — transform/height transitioned in JS-free CSS */
+.dash-nav-indicator {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), height 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+/* dash-fx: mechanical press for segmented controls (brain bar, tabs, autonomy) */
+.dash-press {
+  transition: transform 120ms ease-out, background-color 150ms ease-out, color 150ms ease-out;
+}
+.dash-press:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+/* dash-fx: mobile drawer slide + scrim fade (entrance and exit) */
+@keyframes dashDrawerIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.dash-drawer {
+  animation: dashDrawerIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.dash-drawer.dash-closing {
+  animation: dashDrawerIn 200ms ease-in reverse both;
+}
+@keyframes dashScrimIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.dash-scrim {
+  animation: dashScrimIn 220ms ease-out both;
+}
+.dash-scrim.dash-closing {
+  animation: dashScrimIn 180ms ease-in reverse both;
+}
+
+/* dash-fx: GraphFlow active-node glow (state feedback, not decoration) */
+.dash-glow-active {
+  box-shadow: 0 0 0 3px rgba(255, 77, 0, 0.18);
+}
+
+/* dash-fx: reduced motion — every dash-fx animation collapses to instant */
+@media (prefers-reduced-motion: reduce) {
+  .dash-view-enter,
+  .dash-feed-in,
+  .dash-cascade,
+  .dash-node-pop,
+  .dash-edge-draw,
+  .dash-drawer,
+  .dash-scrim {
+    animation: none;
+  }
+  .dash-edge-draw {
+    stroke-dashoffset: 0;
+  }
+  .dash-nav-indicator,
+  .dash-press {
+    transition: none;
+  }
+  .dash-press:active {
+    transform: none;
+  }
 }

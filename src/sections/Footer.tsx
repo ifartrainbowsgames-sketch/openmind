@@ -1,6 +1,6 @@
-import { Link } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { ArrowRight, Github } from 'lucide-react'
+import { TransitionLink } from '@/components/fx'
 import { REPO_URL, LICENSE_URL } from '@/lib/site'
 
 interface FooterLink {
@@ -14,7 +14,7 @@ const cols: { title: string; links: FooterLink[] }[] = [
     title: 'Product',
     links: [
       { label: 'Playground', href: '#playground' },
-      { label: 'Capabilities', href: '#capabilities' },
+      { label: 'Chatbot', href: '#capabilities' },
       { label: 'Providers', href: '#providers' },
       { label: 'Security', href: '#security' },
       { label: 'Pricing', href: '#pricing' },
@@ -48,7 +48,7 @@ export default function Footer() {
       {/* CTA */}
       <div className="border-b border-white/15">
         <div className="mx-auto max-w-7xl px-6 py-20 text-center">
-          <p className="spec-label mb-6 !text-white/50">Fig. 09 — begin</p>
+          <p className="spec-label mb-6 !text-white/50">Fig. 10 — begin</p>
           <h2 className="font-serif-display mx-auto max-w-3xl text-5xl font-semibold leading-[1.02] tracking-tight md:text-7xl">
             Stop renting
             <br />
@@ -63,9 +63,9 @@ export default function Footer() {
               asChild
               className="rounded-none border border-accent bg-accent px-8 py-6 font-mono-spec text-sm uppercase tracking-[0.14em] text-white hard-shadow-white hover:bg-accent/85"
             >
-              <Link to="/login">
+              <TransitionLink to="/login">
                 Start free <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              </TransitionLink>
             </Button>
             <Button
               size="lg"
@@ -88,7 +88,7 @@ export default function Footer() {
             OpenMind<span className="text-accent">.</span>
           </span>
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/55">
-            The open-source integration layer for AI. Ten capabilities, every provider, zero
+            The open-source integration layer for AI. One chatbot, every provider, zero
             token markup.
           </p>
         </div>
@@ -108,9 +108,9 @@ export default function Footer() {
                       {l.label}
                     </a>
                   ) : l.href.startsWith('/') ? (
-                    <Link to={l.href} className="text-sm text-white/70 transition-colors hover:text-accent">
+                    <TransitionLink to={l.href} className="text-sm text-white/70 transition-colors hover:text-accent">
                       {l.label}
-                    </Link>
+                    </TransitionLink>
                   ) : (
                     <a href={l.href} className="text-sm text-white/70 transition-colors hover:text-accent">
                       {l.label}

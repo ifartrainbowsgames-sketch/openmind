@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Pane, RunButton, ModeStamp, Field, inputCls, selectCls } from './shared'
+import { Pane, ModeStamp } from './shared'
 import { streamText } from '@/lib/demo'
 import { Send } from 'lucide-react'
 
@@ -128,122 +128,6 @@ export function ChatDemo() {
           </div>
         </Pane>
       </div>
-    </div>
-  )
-}
-
-// ── 05 · Translation ─────────────────────────────────────────────────────────
-
-const TRANSLATIONS: Record<string, (t: string) => string> = {
-  French: (t) => `[FR · simulé] Votre texte « ${t.slice(0, 60)}${t.length > 60 ? '…' : ''} » serait traduit par votre fournisseur — DeepL, GPT ou Claude — avec glossaire et registre de langue appliqués.`,
-  Spanish: (t) => `[ES · simulado] Su texto « ${t.slice(0, 60)}${t.length > 60 ? '…' : ''} » sería traducido por su proveedor con el glosario y la formalidad configurados.`,
-  German: (t) => `[DE · simuliert] Ihr Text „${t.slice(0, 60)}${t.length > 60 ? '…' : ''}" würde von Ihrem Anbieter übersetzt — mit Glossar und gewählter Anredeform.`,
-  Japanese: (t) => `[JA · シミュレーション] 入力テキスト「${t.slice(0, 40)}${t.length > 40 ? '…' : ''}」は、お客様のプロバイダーにより用語集と敬語レベルを適用して翻訳されます。`,
-}
-
-export function TranslateDemo() {
-  const [text, setText] = useState('Our refund policy allows returns within 30 days of purchase, no questions asked.')
-  const [lang, setLang] = useState('French')
-  const [out, setOut] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const run = async () => {
-    if (busy) return
-    setBusy(true)
-    setOut('')
-    await streamText(TRANSLATIONS[lang](text), setOut, { cps: 260 })
-    setBusy(false)
-  }
-
-  return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      <div className="space-y-4">
-        <ModeStamp mode="simulated" note="shows routing & formatting — quality comes from your provider" />
-        <Field label="Source text">
-          <textarea className={inputCls + ' min-h-24 resize-y'} value={text} onChange={(e) => setText(e.target.value)} />
-        </Field>
-        <Field label="Target language">
-          <select className={selectCls} value={lang} onChange={(e) => setLang(e.target.value)}>
-            {Object.keys(TRANSLATIONS).map((l) => <option key={l}>{l}</option>)}
-          </select>
-        </Field>
-        <RunButton onClick={run} running={busy} label="Translate" />
-      </div>
-      <Pane title={`output — ${lang.toLowerCase()}`}>
-        {out || <span className="text-white/35">// translation appears here…</span>}
-        {busy && <span className="cursor-blink text-accent">▊</span>}
-      </Pane>
-    </div>
-  )
-}
-
-// ── 06 · Code Copilot ────────────────────────────────────────────────────────
-
-const CODE_SNIPPETS: Record<string, string> = {
-  default: `async function fetchWithRetry(url: string, tries = 3): Promise<Response> {
-  let lastErr: unknown
-  for (let attempt = 1; attempt <= tries; attempt++) {
-    try {
-      const res = await fetch(url)
-      if (res.ok) return res
-      lastErr = new Error(\`HTTP \${res.status}\`)
-    } catch (err) {
-      lastErr = err
-    }
-    await new Promise((r) => setTimeout(r, 2 ** attempt * 250)) // backoff
-  }
-  throw lastErr
-}`,
-  debounce: `function debounce<A extends unknown[]>(fn: (...a: A) => void, ms: number) {
-  let timer: ReturnType<typeof setTimeout>
-  return (...args: A) => {
-    clearTimeout(timer)
-    timer = setTimeout(() => fn(...args), ms)
-  }
-}`,
-  cache: `const cache = new Map<string, { value: unknown; exp: number }>()
-
-function memo<T>(key: string, ttlMs: number, compute: () => T): T {
-  const hit = cache.get(key)
-  if (hit && hit.exp > Date.now()) return hit.value as T
-  const value = compute()
-  cache.set(key, { value, exp: Date.now() + ttlMs })
-  return value
-}`,
-}
-
-export function CodeDemo() {
-  const [task, setTask] = useState('fetch with retry and exponential backoff')
-  const [out, setOut] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  const run = async () => {
-    if (busy) return
-    setBusy(true)
-    setOut('')
-    const key = Object.keys(CODE_SNIPPETS).find((k) => task.toLowerCase().includes(k)) ?? 'default'
-    await streamText(CODE_SNIPPETS[key], setOut, { cps: 900 })
-    setBusy(false)
-  }
-
-  return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_1.4fr]">
-      <div className="space-y-4">
-        <ModeStamp mode="simulated" note="live mode streams from your provider of choice" />
-        <Field label="Describe the task">
-          <input className={inputCls} value={task} onChange={(e) => setTask(e.target.value)} />
-        </Field>
-        <p className="text-xs text-muted-foreground">
-          Try “debounce”, “cache”, or anything else — the copilot routes to your model.
-        </p>
-        <RunButton onClick={run} running={busy} label="Complete" />
-      </div>
-      <Pane title="completion — typescript">
-        <pre className="whitespace-pre-wrap text-emerald-300/90">
-          {out || <span className="text-white/35">// code appears here…</span>}
-          {busy && <span className="cursor-blink text-accent">▊</span>}
-        </pre>
-      </Pane>
     </div>
   )
 }

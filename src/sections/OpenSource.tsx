@@ -16,7 +16,7 @@ export default function OpenSource() {
           <div>
             <p className="spec-label mb-4 flex items-center gap-3">
               <span className="inline-block h-2 w-2 bg-accent" />
-              Fig. 07 — the stack itself
+              Fig. 08 — the stack itself
             </p>
             <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
               We sell convenience,
