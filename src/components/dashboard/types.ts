@@ -24,3 +24,19 @@ export const KEY_MODES = [
   { id: 'vault', name: 'Vaulted', desc: 'encrypted server-side' },
   { id: 'proxy', name: 'Gateway', desc: 'rate-limited + cached' },
 ] as const
+
+export interface CapSetting {
+  models: string[]
+  widget: boolean
+  params: ('temperature' | 'systemPrompt')[]
+  dataHint: string
+}
+
+export const CAP_SETTINGS: Record<string, CapSetting> = {
+  chat: {
+    models: ['gpt-4o', 'claude-3.5-sonnet', 'mistral-large', 'llama-3.1-70b'],
+    widget: true,
+    params: ['temperature', 'systemPrompt'],
+    dataHint: 'The chatbot answers strictly from these indexed sources — attach your help center, policies and product docs.',
+  },
+}

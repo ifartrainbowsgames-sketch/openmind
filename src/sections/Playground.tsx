@@ -1,31 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { capabilities } from '@/data/capabilities'
-import { ChatDemo, TranslateDemo, CodeDemo } from '@/components/demos/TextDemos'
-import { ImageDemo, SttDemo, TtsDemo } from '@/components/demos/MediaDemos'
-import { DocQaDemo, SentimentDemo, SummarizeDemo, VisionDemo } from '@/components/demos/LocalDemos'
+import { ChatDemo } from '@/components/demos/TextDemos'
 import { gsap, prefersReduced } from '@/lib/anim'
-import type { JSX } from 'react'
-
-const demoMap: Record<string, () => JSX.Element> = {
-  chat: ChatDemo,
-  image: ImageDemo,
-  stt: SttDemo,
-  tts: TtsDemo,
-  translate: TranslateDemo,
-  code: CodeDemo,
-  docqa: DocQaDemo,
-  sentiment: SentimentDemo,
-  summarize: SummarizeDemo,
-  vision: VisionDemo,
-}
 
 export default function Playground() {
-  const [active, setActive] = useState('chat')
-  const cap = capabilities.find((c) => c.id === active)!
-  const Demo = demoMap[active]
+  const cap = capabilities[0]
   const stageRef = useRef<HTMLDivElement>(null)
 
-  // binder flip — each demo page snaps in from the right with a hard stepped ease
+  // binder flip — the demo page snaps in from the right with a hard stepped ease
   useEffect(() => {
     const el = stageRef.current
     if (!el || prefersReduced()) return
@@ -34,7 +16,7 @@ export default function Playground() {
       { x: 30, opacity: 0 },
       { x: 0, opacity: 1, duration: 0.38, ease: 'steps(6)' },
     )
-  }, [active])
+  }, [])
 
   return (
     <section id="playground" className="border-b border-border bg-secondary/40 py-24">
@@ -52,39 +34,13 @@ export default function Playground() {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            All ten capabilities below are runnable right now. The chatbot answers with real
-            ChatGPT through our secure gateway — no key ever touches this page. The rest run
-            genuinely in your browser or stream as labelled simulations. That distinction is
-            the whole product, so we label it honestly.
+            The chatbot below is runnable right now — it answers with real ChatGPT through our
+            secure gateway, and no key ever touches this page. That distinction is the whole
+            product, so we label it honestly.
           </p>
         </div>
 
-        <div className="grid gap-0 border border-primary bg-card hard-shadow lg:grid-cols-[280px_1fr]">
-          {/* numbered rail */}
-          <div className="border-b border-primary lg:border-b-0 lg:border-r">
-            <div className="border-b border-primary px-4 py-2.5">
-              <span className="spec-label">select capability</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-1">
-              {capabilities.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setActive(c.id)}
-                  className={`flex items-baseline gap-2.5 border-b border-border/40 px-4 py-3 text-left transition-colors last:border-b-0 ${
-                    active === c.id
-                      ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-secondary'
-                  }`}
-                >
-                  <span className={`font-mono-spec text-[11px] ${active === c.id ? 'text-accent' : 'text-muted-foreground'}`}>
-                    {c.index}
-                  </span>
-                  <span className="text-sm font-medium">{c.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
+        <div className="border border-primary bg-card hard-shadow">
           {/* demo stage */}
           <div ref={stageRef} className="p-6 md:p-8">
             <div className="mb-6 flex flex-wrap items-baseline justify-between gap-2 border-b border-border/50 pb-4">
@@ -94,7 +50,7 @@ export default function Playground() {
               </h3>
               <span className="spec-label">{cap.tagline}</span>
             </div>
-            <Demo />
+            <ChatDemo />
           </div>
         </div>
       </div>

@@ -1,19 +1,38 @@
 import { useEffect, useState } from 'react'
-import type { Session } from '@supabase/supabase-js'
+import {
+  authMode, getSession, signOut as authSignOut, subscribe,
+  type AuthSession,
+} from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null)
+  const [session, setSession] = useState<AuthSession | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setLoading(false)
-    })
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s))
-    return () => sub.subscription.unsubscribe()
+    let mounted = true
+    const refresh = () =>
+      getSession().then((s) => {
+        if (mounted) setSession(s)
+      })
+
+    refresh().finally(() => mounted && setLoading(false))
+
+    // demo mode: explicit subscribe. live mode: supabase's own state stream.
+    const unsubDemo = subscribe(refresh)
+    const { data: sub } = supabase.auth.onAuthStateChange(() => refresh())
+
+    return () => {
+      mounted = false
+      unsubDemo()
+      sub.subscription.unsubscribe()
+    }
   }, [])
 
-  return { session, loading, signOut: () => supabase.auth.signOut() }
+  return {
+    session,
+    loading,
+    mode: authMode,
+    signOut: () => authSignOut(),
+  }
 }
