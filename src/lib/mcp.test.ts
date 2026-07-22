@@ -66,6 +66,7 @@ const SERVER = { id: 'github', url: 'https://mcp.example.test/mcp' } as const
 beforeEach(() => {
   fetchMock.mockReset()
   localStore.clear()
+  agent.clearSessionCredentials()
   supaMock.isSupabaseConfigured = false
   supaMock.SUPABASE_URL = null
 })
@@ -349,17 +350,42 @@ describe('probeConnection', () => {
 // ── persistence ──────────────────────────────────────────────────────────────
 
 describe('live connection persistence', () => {
-  it('upserts, loads and removes configs via localStorage', () => {
+  it('upserts, loads and removes configs, keeping the live status within the session', () => {
     expect(agent.loadLiveConnections()).toEqual([])
     agent.upsertLiveConnection({ connectionId: 'github', mode: 'mcp', status: 'untested', serverUrl: SERVER.url })
-    agent.upsertLiveConnection({ connectionId: 'zendesk', mode: 'rest', status: 'live', serverUrl: 'https://acme.zendesk.com' })
-    agent.upsertLiveConnection({ connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: SERVER.url })
+    agent.upsertLiveConnection({ connectionId: 'zendesk', mode: 'rest', status: 'live', serverUrl: 'https://acme.zendesk.com', token: 'me@acme.com/token:zzz' })
+    agent.upsertLiveConnection({ connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: SERVER.url, token: 'ghp_secret' })
     const all = agent.loadLiveConnections()
     expect(all).toHaveLength(2)
+    // Same session → the in-memory token keeps the connection live.
     expect(all.find((c) => c.connectionId === 'github')?.status).toBe('live')
+    expect(all.find((c) => c.connectionId === 'github')?.token).toBe('ghp_secret')
     expect(JSON.parse(localStore.getItem(agent.LIVE_CONNECTIONS_KEY) ?? '[]')).toHaveLength(2)
     agent.removeLiveConnection('github')
     expect(agent.loadLiveConnections().map((c) => c.connectionId)).toEqual(['zendesk'])
+  })
+
+  it('never writes secret tokens to localStorage', () => {
+    agent.upsertLiveConnection({ connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: SERVER.url, token: 'ghp_topsecret' })
+    const raw = localStore.getItem(agent.LIVE_CONNECTIONS_KEY) ?? ''
+    expect(raw).not.toContain('ghp_topsecret')
+    expect(raw).not.toContain('token')
+    // The persisted config is present but credential-free.
+    const stored = JSON.parse(raw) as Record<string, unknown>[]
+    expect(stored).toHaveLength(1)
+    expect(stored[0]).not.toHaveProperty('token')
+  })
+
+  it('downgrades a persisted live connection to untested when its session token is gone', () => {
+    // Simulate a reload: config survives in localStorage, but the in-memory
+    // token store starts empty for a fresh page load.
+    localStore.setItem(
+      agent.LIVE_CONNECTIONS_KEY,
+      JSON.stringify([{ connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: SERVER.url }]),
+    )
+    const [conn] = agent.loadLiveConnections()
+    expect(conn.status).toBe('untested')
+    expect(conn.token).toBeUndefined()
   })
 
   it('falls back to presets for server URLs', () => {

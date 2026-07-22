@@ -291,10 +291,12 @@ export interface LiveConnectionConfig {
   serverUrl?: string
   /**
    * Bearer token (MCP) or "email/token:API_TOKEN" (Zendesk basic auth).
-   * Stored in localStorage — a deliberate BYOK tradeoff, same as the app's
-   * existing provider-key handling: the key never leaves the user's browser
-   * except to the upstream service (via the proxy). Server-side vaulting is
-   * the documented next step, not implemented here.
+   * Kept in memory only for the current session — it is NEVER written to
+   * localStorage (see saveLiveConnections). A live credential in localStorage
+   * is readable by any script on the page (XSS) and by anyone on a shared
+   * machine, so we redact it before persisting. After a reload the token is
+   * gone and the connection must be re-tested. Durable, safe cross-session
+   * storage is the job of the server-side vault (Phase 2).
    */
   token?: string
   status: 'untested' | 'live' | 'error' | 'mock'
@@ -378,9 +380,23 @@ export function stampToolResult(source: 'LIVE' | 'MOCK', connectionId: string, b
   return `[${source} · ${connectionId}] ${body}`
 }
 
-// ── Persistence (localStorage, BYOK — see note on LiveConnectionConfig.token) ─
+// ── Persistence (localStorage for config, in-memory only for secrets) ────────
+// Non-secret config (which connections exist, their URL, live/mock status) is
+// persisted so the UI can show what you set up. The bearer/API token is NOT —
+// it lives in `sessionTokens` for the current tab only and is stripped before
+// anything is written to disk. Reloading the page therefore drops live
+// credentials and asks you to reconnect; the server-side vault (Phase 2) will
+// restore durable, encrypted persistence without exposing keys to the browser.
 
 export const LIVE_CONNECTIONS_KEY = 'om-live-connections'
+
+/** In-memory, session-scoped store for secret tokens — never serialized. */
+const sessionTokens = new Map<string, string>()
+
+/** Drop every in-memory connection secret — call on sign-out or lock. */
+export function clearSessionCredentials(): void {
+  sessionTokens.clear()
+}
 
 export function loadLiveConnections(): LiveConnectionConfig[] {
   try {
@@ -388,8 +404,20 @@ export function loadLiveConnections(): LiveConnectionConfig[] {
     if (!raw) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((c): c is LiveConnectionConfig =>
-      !!c && typeof c === 'object' && typeof (c as LiveConnectionConfig).connectionId === 'string')
+    return parsed
+      .filter((c): c is LiveConnectionConfig =>
+        !!c && typeof c === 'object' && typeof (c as LiveConnectionConfig).connectionId === 'string')
+      .map((c) => {
+        const token = sessionTokens.get(c.connectionId)
+        if (token) return { ...c, token }
+        // No in-session token (e.g. right after a reload): a persisted "live" or
+        // "error" status can't be trusted without its credential, so surface the
+        // connection as needing a reconnect instead of firing unauthenticated calls.
+        if (c.status === 'live' || c.status === 'error') {
+          return { ...c, token: undefined, status: 'untested' as const, lastError: undefined }
+        }
+        return { ...c, token: undefined }
+      })
   } catch {
     return []
   }
@@ -397,14 +425,21 @@ export function loadLiveConnections(): LiveConnectionConfig[] {
 
 export function saveLiveConnections(configs: LiveConnectionConfig[]): void {
   try {
-    localStorage.setItem(LIVE_CONNECTIONS_KEY, JSON.stringify(configs))
+    // Redact secrets — the token is session-only and must never hit disk.
+    const redacted = configs.map((c) => {
+      const rest = { ...c }
+      delete rest.token
+      return rest
+    })
+    localStorage.setItem(LIVE_CONNECTIONS_KEY, JSON.stringify(redacted))
   } catch {
     /* storage unavailable (private mode, quota) — configs stay in memory */
   }
 }
 
-/** Insert or replace one config, persist, and return the full list. */
+/** Insert or replace one config, persist (secret-free), and return the full list. */
 export function upsertLiveConnection(cfg: LiveConnectionConfig): LiveConnectionConfig[] {
+  if (cfg.token) sessionTokens.set(cfg.connectionId, cfg.token)
   const all = loadLiveConnections().filter((c) => c.connectionId !== cfg.connectionId)
   all.push(cfg)
   saveLiveConnections(all)
@@ -412,6 +447,7 @@ export function upsertLiveConnection(cfg: LiveConnectionConfig): LiveConnectionC
 }
 
 export function removeLiveConnection(connectionId: string): LiveConnectionConfig[] {
+  sessionTokens.delete(connectionId)
   const all = loadLiveConnections().filter((c) => c.connectionId !== connectionId)
   saveLiveConnections(all)
   return all

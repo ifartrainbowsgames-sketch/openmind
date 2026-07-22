@@ -75,26 +75,27 @@ export default function ServiceSettings({ cap, sources }: { cap: Capability; sou
             <div className="mt-4">
               <span className="spec-label mb-1.5 block">Key mode</span>
               <div className="grid grid-cols-2 border border-border/60">
-                {(['browser', 'vault'] as const).map((m) => (
-                  <button
-                    key={m}
-                    onClick={() => setKeyMode(m)}
-                    className={`flex items-center justify-center gap-2 px-3 py-2.5 font-mono-spec text-[11px] uppercase tracking-wider transition-colors ${
-                      keyMode === m ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
-                    }`}
-                  >
-                    <KeyRound className="h-3.5 w-3.5" />
-                    {m === 'browser' ? 'Browser-direct' : 'Encrypted vault'}
-                  </button>
-                ))}
+                <button
+                  onClick={() => setKeyMode('browser')}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 font-mono-spec text-[11px] uppercase tracking-wider transition-colors ${
+                    keyMode === 'browser' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
+                  }`}
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Browser-direct
+                </button>
+                <button
+                  disabled
+                  title="Server-side key vault is on the roadmap — not available yet."
+                  className="flex cursor-not-allowed items-center justify-center gap-2 px-3 py-2.5 font-mono-spec text-[11px] uppercase tracking-wider text-muted-foreground/50"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  Encrypted vault — soon
+                </button>
               </div>
-              {keyMode === 'vault' && (
-                <input className={`${inputCls} mt-3`} type="password" placeholder="Paste provider key — encrypted with AES-256" />
-              )}
               <p className="mt-2 text-xs text-muted-foreground">
-                {keyMode === 'browser'
-                  ? 'Key stays in the visitor\'s browser. Requests go straight to the provider.'
-                  : 'Key is stored encrypted per workspace and used only by your gateway.'}
+                Key stays in the visitor&apos;s browser and requests go straight to the provider.
+                A server-side encrypted vault (keys never reach the browser) is on the roadmap.
               </p>
             </div>
 
