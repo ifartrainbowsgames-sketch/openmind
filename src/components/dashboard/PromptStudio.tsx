@@ -11,7 +11,7 @@ const TONES = [
   {
     id: 'sales', label: 'Sales',
     prompt: 'You are Acme Corp\'s product specialist. Your goal is to understand the visitor\'s use case and point them to the right plan. Be enthusiastic but honest. Always end with a next step.',
-    sample: 'Great question — and honestly, the timing is perfect. Based on what you described, Pro fits: all 10 capabilities, 5 sites, zero token markup. Want me to set up a trial while we chat?',
+    sample: 'Great question — and honestly, the timing is perfect. Based on what you described, Pro fits: the full chatbot on 5 sites, zero token markup. Want me to set up a trial while we chat?',
   },
   {
     id: 'formal', label: 'Formal',
