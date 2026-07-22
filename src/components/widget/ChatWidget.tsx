@@ -103,8 +103,8 @@ export function fixSentence(s: string): string {
 
 const REPLIES: [RegExp, string][] = [
   [/refund|return/i, 'Per your attached refund policy: returns are accepted within 30 days, no questions asked. Want me to start one?'],
-  [/price|pricing|plan|cost/i, 'Pro is $10/mo for 5 sites with all capabilities — you pay your provider directly for tokens, we add 0% markup.'],
-  [/image|picture|photo/i, 'Drop it right into this chat — I\'ll run vision on it and answer questions about what I see.'],
+  [/price|pricing|plan|cost/i, 'Pro is $10/mo for the chatbot on 5 sites — you pay your provider directly for tokens, we add 0% markup.'],
+  [/image|picture|photo/i, 'Drop it right into this chat — I\'ll take a look and answer questions about what I see.'],
   [/call|talk|phone|video/i, 'Use the call icons in my header — voice or video, a human (or me) picks up in seconds.'],
 ]
 
@@ -140,9 +140,14 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
   const accent = p?.accent ?? config.accent
   const fontFamily = FONT_STACKS[config.font ?? 'system']
 
-  useEffect(() => {
+  // reset the conversation when the builder changes greeting/agent — the
+  // React-endorsed "adjust state during render" pattern (avoids effect cascades)
+  const resetKey = `${config.greeting}|${config.agentName}`
+  const [prevResetKey, setPrevResetKey] = useState(resetKey)
+  if (prevResetKey !== resetKey) {
+    setPrevResetKey(resetKey)
     setMsgs([{ from: 'agent', text: config.greeting }])
-  }, [config.greeting, config.agentName])
+  }
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
