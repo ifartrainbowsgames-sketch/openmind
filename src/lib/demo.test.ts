@@ -57,7 +57,8 @@ describe('analyzeSentiment', () => {
   })
 
   it('labels text with both polarities as Mixed', () => {
-    expect(analyzeSentiment('I love the design but hate the slow loading').label).toBe('Mixed')
+    const r = analyzeSentiment('I love the design but hate the slow loading')
+    expect(r.label).toBe('Mixed')
   })
 
   it('labels lexicon-free text as Neutral', () => {
