@@ -49,7 +49,7 @@ export default function ServicesPanel({ plan, services, toggleService, onUpgrade
         <div className="flex flex-wrap items-center gap-3 border border-primary bg-terminal px-5 py-3.5">
           <Zap className="h-4 w-4 shrink-0 text-accent" />
           <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-            Free plan runs {PLAN_LIMITS.free.services} services at once — Pro ($10/mo) unlocks all ten.
+            Free plan runs {PLAN_LIMITS.free.services} services at once — Pro ($10/mo) removes the cap.
           </p>
           <button
             onClick={onUpgrade}
