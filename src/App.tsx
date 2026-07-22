@@ -6,6 +6,7 @@ import { LenisProvider } from './components/fx'
 // route-level code splitting — each page ships as its own chunk
 const Home = lazy(() => import('./pages/Home'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Setup = lazy(() => import('./pages/Setup'))
 const Login = lazy(() => import('./pages/Login'))
 const Employees = lazy(() => import('./pages/Employees'))
 
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/dashboard/setup" element={<Setup />} />
           <Route path="/employees" element={<Employees />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

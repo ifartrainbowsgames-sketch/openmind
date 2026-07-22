@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { capabilities } from '@/data/capabilities'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlan } from '@/hooks/usePlan'
+import { useOnboarding } from '@/hooks/useOnboarding'
 import { supabase } from '@/lib/supabase'
 import type { Source } from '@/components/dashboard/types'
 import ParticleField from '@/components/dash-fx/ParticleField'
@@ -18,9 +19,14 @@ import { Overview, ProvidersKeys } from '@/components/dashboard/Panels'
 import WorkforceStudio from '@/components/workforce/WorkforceStudio'
 import {
   LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
-  Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Zap, Loader2,
+  Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Loader2,
   Boxes, BarChart3, Bot, Menu, X,
 } from 'lucide-react'
+
+// Billing is not wired (no Stripe checkout), so upgrade prompts are inert until
+// real checkout exists — see the plan-gating panels. Kept as a stable no-op so
+// those panels keep their prop contract without showing a dead "Upgrade" path.
+const noUpgrade = () => {}
 
 const SEED_ROWS = [
   { name: 'refund-policy.pdf', type: 'file', size: '1.2 MB', attached: ['chat'] },
@@ -48,7 +54,8 @@ type View = 'overview' | 'data' | 'providers' | string
 const NAV_TOP = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'services', label: 'Services', icon: Boxes },
-  { id: 'workforce', label: 'AI Employees', icon: Bot },
+  // AI Employees run no real tasks yet — gated until the task backend exists.
+  { id: 'workforce', label: 'AI Employees', icon: Bot, soon: true },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'data', label: 'Data Studio', icon: Database },
   { id: 'widget', label: 'Widget Builder', icon: Paintbrush },
@@ -71,11 +78,22 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: string) => voi
   return (
     <>
       <div className="px-4 pb-2 spec-label">Workspace</div>
-      {NAV_TOP.map((n) => (
-        <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
-          <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
-        </button>
-      ))}
+      {NAV_TOP.map((n) =>
+        'soon' in n && n.soon ? (
+          <div
+            key={n.id}
+            className="flex w-full cursor-not-allowed items-center gap-3 px-4 py-2.5 font-mono-spec text-[12px] uppercase tracking-[0.12em] text-muted-foreground/40"
+            title="Available once the task backend ships"
+          >
+            <n.icon className="h-4 w-4" /> {n.label}
+            <span className="ml-auto border border-border/40 px-1.5 py-0.5 text-[8px] tracking-[0.14em]">soon</span>
+          </div>
+        ) : (
+          <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
+            <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
+          </button>
+        ),
+      )}
 
       <div className="px-4 pb-2 pt-5 spec-label">Live ops</div>
       {NAV_OPS.map((n) => (
@@ -100,7 +118,6 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: string) => voi
 export default function Dashboard() {
   const [view, setView] = useState<View>('data')
   const [sources, setSources] = useState<Source[]>([])
-  const [billingNote, setBillingNote] = useState(false)
   // dash-fx: mobile drawer — 'closing' plays the exit slide before unmount
   const [drawer, setDrawer] = useState<'closed' | 'open' | 'closing'>('closed')
   const drawerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -109,6 +126,7 @@ export default function Dashboard() {
   const [indicator, setIndicator] = useState<{ top: number; height: number; on: boolean }>({ top: 0, height: 0, on: false })
   const { session, loading, signOut } = useAuth()
   const { plan, setPlan, services, toggleService } = usePlan(session?.user.id)
+  const onboarding = useOnboarding(session?.user.id)
   const navigate = useNavigate()
 
   const closeDrawer = () => {
@@ -138,6 +156,13 @@ export default function Dashboard() {
   useEffect(() => {
     if (!loading && !session) navigate('/login')
   }, [loading, session, navigate])
+
+  // first-run guard — new users go through setup before seeing the console
+  useEffect(() => {
+    if (!loading && session && !onboarding.loading && !onboarding.state.completed) {
+      navigate('/dashboard/setup')
+    }
+  }, [loading, session, onboarding.loading, onboarding.state.completed, navigate])
 
   // load sources from Supabase; seed demo data on first login
   useEffect(() => {
@@ -218,7 +243,7 @@ export default function Dashboard() {
     supabase.from('sources').update({ attached: next }).eq('id', id).then()
   }
 
-  if (loading) {
+  if (loading || (session && onboarding.loading)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-6 w-6 animate-spin text-accent" />
@@ -301,14 +326,7 @@ export default function Dashboard() {
               <span className="border border-border/60 px-3 py-1.5 font-mono-spec text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 {plan} plan
               </span>
-              {plan === 'free' ? (
-                <button
-                  onClick={() => setBillingNote((b) => !b)}
-                  className="flex items-center gap-1.5 border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
-                >
-                  <Zap className="h-3 w-3" /> Upgrade to Pro
-                </button>
-              ) : (
+              {plan !== 'free' && (
                 <button
                   onClick={() => setPlan('free')}
                   className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
@@ -320,44 +338,21 @@ export default function Dashboard() {
             </div>
           </header>
 
-        {billingNote && (
-          <div className="border-b border-primary bg-terminal px-8 py-3">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
-              <Zap className="h-4 w-4 text-accent" />
-              <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-                Pro will be $10/mo when billing launches — during early access it's free to activate.
-              </p>
-              <button
-                onClick={() => { setPlan('pro'); setBillingNote(false) }}
-                className="border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
-              >
-                Activate Pro free
-              </button>
-              <button
-                onClick={() => setBillingNote(false)}
-                className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
-              >
-                dismiss
-              </button>
-            </div>
-          </div>
-        )}
-
         <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
           {/* dash-fx: keyed pane — crossfade+rise whenever the view switches */}
           <div key={view} className="dash-view-enter">
           {view === 'overview' && <Overview sources={sources} />}
           {view === 'services' && (
-            <ServicesPanel plan={plan} services={services} toggleService={toggleService} onUpgrade={() => setBillingNote(true)} />
+            <ServicesPanel plan={plan} services={services} toggleService={toggleService} onUpgrade={noUpgrade} />
           )}
           {view === 'workforce' && <WorkforceStudio embedded />}
-          {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={() => setBillingNote(true)} />}
+          {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={noUpgrade} />}
           {view === 'data' && (
             <DataStudio
               sources={sources}
               plan={plan}
               userId={session?.user.id}
-              onUpgrade={() => setBillingNote(true)}
+              onUpgrade={noUpgrade}
               addSources={addSources}
               removeSource={removeSource}
               toggleAttach={toggleAttach}

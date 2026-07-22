@@ -102,8 +102,8 @@ export function ProvidersKeys() {
       <div>
         <h2 className="font-serif-display text-3xl font-semibold">Providers & keys</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Keys are used only to authenticate with <em>your</em> provider. Vault keys are AES-256
-          encrypted; browser keys never touch our servers.
+          Keys are used only to authenticate with <em>your</em> provider and are held for the current
+          session only — they never touch our servers. A server-side encrypted vault is on the roadmap.
         </p>
       </div>
 
