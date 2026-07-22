@@ -15,9 +15,9 @@ const om = new OpenMind({
   apiKey: process.env.ANTHROPIC_KEY,
 });
 
-const answer = await om.run("summarize", {
-  input: quarterlyReport,
-  length: "brief",
+const reply = await om.run("chatbot", {
+  message: "What's your refund policy?",
+  knowledge: "acme-corp/docs",   // answers cite your sources
 });`,
   },
   {
@@ -60,7 +60,7 @@ export default function Integrate() {
           <div>
             <p className="spec-label mb-4 flex items-center gap-3">
               <span className="inline-block h-2 w-2 bg-accent" />
-              Fig. 05 — integration
+              Fig. 06 — integration
             </p>
             <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
               Three ways in,
@@ -70,7 +70,7 @@ export default function Integrate() {
           </div>
           <p className="max-w-md text-muted-foreground lg:ml-auto">
             A typed SDK for your backend, a two-line embed for any website, or the entire stack on
-            your own hardware. Same capabilities, same config, your keys everywhere.
+            your own hardware. Same chatbot, same config, your keys everywhere.
           </p>
         </div>
 

@@ -9,7 +9,7 @@ export default function Providers() {
         <div className="mb-12">
           <p className="spec-label mb-4 flex items-center gap-3 !text-white/50">
             <span className="inline-block h-2 w-2 bg-accent" />
-            Fig. 04 — provider matrix
+            Fig. 05 — provider matrix
           </p>
           <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
             Connect <em className="font-normal italic text-accent">anything.</em>
