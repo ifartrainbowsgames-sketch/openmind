@@ -772,132 +772,135 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                   <span className="h-9 w-1" style={{ background: employee.accent }} />
                   <div>
                     <div className="font-serif-display text-lg font-semibold leading-tight">{employee.name}</div>
-                    <div className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{employee.role}</div>
+                    <div className="spec-label !text-[10px]">{employee.role}</div>
                   </div>
+                  <span
+                    className={`ml-1 border px-2 py-1 font-mono-spec text-[9px] uppercase tracking-[0.14em] ${
+                      liveReady ? 'border-emerald-700 bg-emerald-50 text-emerald-800' : 'border-amber-600 bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {brainStamp}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`border px-2 py-1 font-mono-spec text-[9px] uppercase tracking-[0.14em] ${
-                    autonomy === 'auto'
-                      ? 'border-emerald-700 bg-emerald-50 text-emerald-800'
-                      : autonomy === 'ask'
-                      ? 'border-amber-600 bg-amber-50 text-amber-800'
-                      : 'border-border/60 bg-secondary/60 text-muted-foreground'
-                  }`}>
-                    {autonomy === 'auto' ? 'auto — runs tools' : autonomy === 'ask' ? 'ask first — approvals on' : 'draft mode — previews only'}
+                  <span className="hidden items-center gap-1.5 font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground sm:flex">
+                    <ShieldCheck className="h-3 w-3" /> trust
                   </span>
-                  <ModeStamp mode={liveReady ? 'live' : 'simulated'} note={brainStamp} liveLabel={provider.model} />
+                  <AutonomyControl value={autonomy} onChange={(a) => setAutonomy(employee.id, a)} />
                 </div>
               </div>
 
-              {/* thread */}
-              <div ref={scrollRef} className="bg-terminal max-h-96 min-h-64 space-y-4 overflow-y-auto p-4">
+              <div ref={scrollRef} data-lenis-prevent className="bg-terminal h-[24rem] overflow-y-auto p-4">
                 {msgs.length === 0 && !running && !approval && (
-                  <div className="space-y-2 pt-2 font-mono-spec text-[12px] text-white/40">
-                    <p>// {employee.name} is on duty. Assign a task — the graph plans, acts and answers.</p>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {["What's in my inbox?", "Review this code: …", 'Summarize our refund policy'].map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => setDraft(q)}
-                          className="border border-white/20 px-2 py-1 text-[10px] text-white/55 hover:border-accent hover:text-accent"
-                        >
-                          {q}
-                        </button>
-                      ))}
+                  <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+                    <Workflow className="h-6 w-6 text-white/30" />
+                    <p className="max-w-xs font-mono-spec text-[12px] leading-relaxed text-white/45">
+                      Give {employee.name} a task — try "What's in my inbox?", "Review this code: …"
+                      or "What is 128 × 46?" and watch the workflow light up.
+                    </p>
+                    <p className="flex items-center gap-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/35">
+                      <ClipboardCheck className="h-3 w-3" /> every run gets a report card
+                    </p>
+                  </div>
+                )}
+                <div className="space-y-4">
+                  {msgs.map((m, i) => (
+                    <div key={i} className={`dash-feed-in flex ${m.from === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-[85%] px-3.5 py-2.5 font-mono-spec text-[13px] leading-relaxed whitespace-pre-wrap ${
+                          m.from === 'user' ? 'text-white' : m.error ? 'border border-red-500/50 text-red-300' : 'border border-white/15 text-white/85'
+                        }`}
+                        style={m.from === 'user' ? { background: employee.accent } : undefined}
+                      >
+                        {m.text}
+                        {m.from === 'agent' && m.brainStamp && (
+                          <div className="mt-1.5 font-mono-spec text-[9px] uppercase tracking-[0.16em] text-white/35">{m.brainStamp}</div>
+                        )}
+                        {m.from === 'agent' && m.trace && m.trace.length > 0 && <TraceBlock trace={m.trace} />}
+                        {m.from === 'agent' && m.score && <ReportCard score={m.score} employeeName={employee.name} />}
+                      </div>
                     </div>
-                  </div>
-                )}
-                {msgs.map((m, i) => (
-                  <div key={i} className={m.from === 'user' ? 'text-right' : ''}>
-                    <span className={`inline-block max-w-[85%] border px-3 py-2 text-left text-[13px] leading-relaxed ${
-                      m.from === 'user'
-                        ? 'border-accent/60 bg-accent/15 text-white'
-                        : m.error
-                        ? 'border-red-500/50 bg-red-500/10 text-red-200'
-                        : 'border-white/20 bg-white/5 text-white/90'
-                    }`}>
-                      {m.text}
-                      {running && i === msgs.length - 1 && m.from === 'agent' && <span className="cursor-blink text-accent">▊</span>}
-                    </span>
-                    {m.brainStamp && (
-                      <div className="mt-1 font-mono-spec text-[9px] uppercase tracking-[0.14em] text-white/35">{m.brainStamp}</div>
-                    )}
-                    {m.trace && <TraceBlock trace={m.trace} />}
-                    {m.score && <ReportCard score={m.score} employeeName={employee.name} />}
-                  </div>
-                ))}
-                {running && msgs[msgs.length - 1]?.from === 'user' && (
-                  <div className="flex items-center gap-2 font-mono-spec text-[11px] text-white/50">
-                    <Loader2 className="h-3 w-3 animate-spin text-accent" /> {employee.name} is thinking…
-                  </div>
-                )}
-                {scoring && !running && (
-                  <div className="flex items-center gap-2 font-mono-spec text-[11px] text-white/50">
-                    <ClipboardCheck className="h-3 w-3 text-accent" /> scoring the run…
-                  </div>
-                )}
+                  ))}
+                  {running && (
+                    <div className="flex items-start gap-2">
+                      <div className="max-w-[85%] border border-white/15 px-3.5 py-2.5">
+                        <span className="flex items-center gap-2 font-mono-spec text-[12px] text-white/60">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" /> graph running…
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {scoring && !running && (
+                    <div className="flex items-center gap-2 font-mono-spec text-[11px] text-white/45">
+                      <Loader2 className="h-3 w-3 animate-spin text-accent" /> scoring the run…
+                    </div>
+                  )}
+                  {approval && (
+                    <div className="border border-amber-500/60 bg-amber-500/10 p-3.5 animate-stamp">
+                      <div className="mb-2 flex items-center gap-2 font-mono-spec text-[10px] uppercase tracking-[0.16em] text-amber-300">
+                        <ShieldCheck className="h-3.5 w-3.5" /> approval required — {employee.name} wants to run
+                      </div>
+                      <p className="mb-2 font-mono-spec text-[11px] text-white/60">"{approval.input}"</p>
+                      <div className="mb-3 space-y-1">
+                        {approval.plan.map((p, i) => {
+                          const conn = (employee.connections ?? []).find((c) => p.tool === c || p.tool.startsWith(`${c}__`))
+                          const st = conn ? connStatus(liveConfigs, conn) : null
+                          return (
+                            <div key={i} className="flex items-center gap-2 font-mono-spec text-[11px] text-white/75">
+                              <Wrench className="h-3 w-3 shrink-0 text-accent" />
+                              <span className="truncate">{p.tool} — "{p.input.length > 60 ? p.input.slice(0, 57) + '…' : p.input}"</span>
+                              {st && (
+                                <span className={`shrink-0 border px-1.5 py-0.5 text-[9px] uppercase ${
+                                  st === 'live' ? 'border-emerald-500/60 text-emerald-300' : st === 'error' ? 'border-red-500/60 text-red-300' : 'border-amber-500/60 text-amber-300'
+                                }`}>
+                                  {st}
+                                </span>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={() => executeRun(approval.input)}
+                          className="border border-emerald-500/70 bg-emerald-500/15 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-emerald-300 hover:bg-emerald-500/25"
+                        >
+                          Approve & run
+                        </button>
+                        <button
+                          onClick={() => executeRun(approval.input, { scrubConnections: true })}
+                          className="border border-white/25 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/70 hover:bg-white/10"
+                        >
+                          Run without connection tools
+                        </button>
+                        <button
+                          onClick={() => { setDraft(approval.input); setApproval(null) }}
+                          className="border border-red-500/50 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-red-300 hover:bg-red-500/10"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* approval card (ask-first) */}
-              {approval && (
-                <div className="border-t border-amber-500/60 bg-amber-500/10 px-4 py-3 animate-stamp">
-                  <p className="flex items-center gap-2 font-mono-spec text-[11px] uppercase tracking-[0.14em] text-amber-200">
-                    <ShieldCheck className="h-3.5 w-3.5" /> {employee.name} wants to use {approval.plan.length} tool{approval.plan.length > 1 ? 's' : ''}
-                  </p>
-                  <p className="mt-1 font-mono-spec text-[11px] text-white/60">for: "{approval.input}"</p>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {approval.plan.map((p, i) => (
-                      <span key={i} className="border border-white/25 px-2 py-0.5 font-mono-spec text-[10px] text-white/80">
-                        {toolName(p.tool)}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      onClick={() => executeRun(approval.input)}
-                      className="border border-emerald-600 bg-emerald-700 px-4 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-emerald-600"
-                    >
-                      Approve & run
-                    </button>
-                    <button
-                      onClick={() => executeRun(approval.input, { scrubConnections: true })}
-                      className="border border-white/30 px-4 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/80 hover:border-accent hover:text-accent"
-                    >
-                      Run without connections
-                    </button>
-                    <button
-                      onClick={() => setApproval(null)}
-                      className="px-3 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-white"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* composer */}
               <div className="flex gap-2 border-t border-primary p-3">
                 <input
-                  className="flex-1 border border-border/60 bg-background px-3 py-2.5 text-sm outline-none focus:border-accent rounded-none"
+                  className={inputCls}
                   placeholder={
                     autonomy === 'draft'
-                      ? `Ask ${employee.name} — preview only, nothing executes…`
+                      ? `Assign ${employee.name} a task… (draft mode — previews only)`
                       : autonomy === 'ask'
-                      ? `Ask ${employee.name} — you'll approve any connection use first…`
+                      ? `Assign ${employee.name} a task… (asks before using connections)`
                       : `Assign ${employee.name} a task…`
                   }
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && run()}
+                  onKeyDown={(e) => { if (e.key === 'Enter') run() }}
                 />
-                <button
-                  onClick={run}
-                  disabled={!draft.trim() || running || planning || !!approval}
-                  className="border border-primary bg-primary px-5 text-primary-foreground transition-colors hover:border-accent hover:bg-accent disabled:opacity-40"
-                  aria-label="Send"
-                >
-                  {running || planning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </button>
+                <RunButton onClick={run} running={running || planning} label="Run" stopLabel="Working…" disabled={!draft.trim() || !!approval} />
+                <span className="hidden items-center text-muted-foreground/40 sm:flex"><Send className="h-4 w-4" /></span>
               </div>
             </div>
           </div>
