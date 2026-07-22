@@ -21,9 +21,9 @@ const SEED: Convo[] = [
     id: 'c1', visitor: 'Visitor #4821', loc: 'Berlin, DE', device: 'Chrome · macOS', page: '/pricing',
     started: '2m ago', status: 'ai', unread: true,
     msgs: [
-      { from: 'visitor', text: 'Hey — does the Pro plan include the translation widget?', t: '09:41' },
-      { from: 'ai', text: 'Yes! Pro includes all 10 capabilities, translation included, on up to 5 sites. You pay your provider directly for tokens — we add 0% markup.', t: '09:41' },
-      { from: 'visitor', text: 'Nice. Can I bring my own DeepL key?', t: '09:42' },
+      { from: 'visitor', text: 'Hey — does the Pro plan include the chatbot widget?', t: '09:41' },
+      { from: 'ai', text: 'Yes! The chatbot is included on every plan — Pro runs it on up to 5 sites. You pay your provider directly for tokens — we add 0% markup.', t: '09:41' },
+      { from: 'visitor', text: 'Nice. Can I bring my own OpenAI key?', t: '09:42' },
     ],
   },
   {
