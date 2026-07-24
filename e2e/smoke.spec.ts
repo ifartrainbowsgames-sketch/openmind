@@ -25,7 +25,13 @@ test('employees route renders the workforce surface', async ({ page }) => {
 })
 
 test('connection marketplace exposes n8n and OpenClaw plugins', async ({ page }) => {
-  await page.goto('/employees')
+  await page.goto('/login')
+  await page.getByRole('button', { name: 'Sign up', exact: true }).click()
+  await page.getByLabel('Email').fill('marketplace@example.com')
+  await page.getByLabel('Password').fill('testing123')
+  await page.getByRole('button', { name: 'Create account' }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await page.getByRole('button', { name: 'AI Employees' }).click()
   await page.getByRole('button', { name: /Connections\s+0 ready/i }).click()
   await expect(page.getByText('Connection marketplace', { exact: true })).toBeVisible()
   await expect(page.getByText('n8n', { exact: true }).first()).toBeVisible()

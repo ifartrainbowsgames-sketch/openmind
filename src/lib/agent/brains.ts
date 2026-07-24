@@ -15,7 +15,7 @@ const CONNECTION_ROUTES: { pattern: RegExp; ids: string[]; unless?: RegExp }[] =
   { pattern: /\blinear\b/i, ids: ['linear'] },
   { pattern: /\bjira\b/i, ids: ['jira'] },
   { pattern: /\b(tickets?|queue)\b/i, ids: ['zendesk', 'jira'], unless: /\bjira\b/i },
-  { pattern: /\b(deals?|crm|leads?|pipeline|contacts?)\b/i, ids: ['hubspot'] },
+  { pattern: /\b(deals?|crm|leads?|pipeline|contacts?)\b/i, ids: ['hubspot'], unless: /\bn8n\b/i },
   { pattern: /\b(notion|wiki|pages?)\b/i, ids: ['notion'] },
   { pattern: /\b(drive|files?|folders?|spreadsheets?|docs?)\b/i, ids: ['gdrive', 'notion'], unless: /\bnotion\b/i },
 ]
