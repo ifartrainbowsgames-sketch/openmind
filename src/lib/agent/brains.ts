@@ -1,19 +1,21 @@
 import { toolName } from './connections'
-import { parsePlan } from './plan'
+import { parsePlannerOutput } from './plan'
 import type { AgentBrain, PlanStep } from './types'
 
 const ARITHMETIC = /[-\d(][\d\s+\-*/().%]*\d\)*/
-const CONNECTION_ROUTES: { pattern: RegExp; ids: string[] }[] = [
-  { pattern: /\b(e-?mails?|inbox|mail)\b/i, ids: ['gmail', 'outlook'] },
+const CONNECTION_ROUTES: { pattern: RegExp; ids: string[]; unless?: RegExp }[] = [
+  { pattern: /\bgmail\b/i, ids: ['gmail'] },
+  { pattern: /\boutlook\b/i, ids: ['outlook'] },
+  { pattern: /\b(e-?mails?|inbox|mail)\b/i, ids: ['gmail', 'outlook'], unless: /\b(gmail|outlook)\b/i },
   { pattern: /\b(calendar|meetings?|schedule|agenda|events?)\b/i, ids: ['gcal'] },
   { pattern: /\b(slack|channels?|mentions?)\b/i, ids: ['slack'] },
   { pattern: /\b(github|pull requests?|prs?|commits?|merge)\b/i, ids: ['github'] },
   { pattern: /\blinear\b/i, ids: ['linear'] },
   { pattern: /\bjira\b/i, ids: ['jira'] },
-  { pattern: /\b(tickets?|queue)\b/i, ids: ['zendesk', 'jira'] },
+  { pattern: /\b(tickets?|queue)\b/i, ids: ['zendesk', 'jira'], unless: /\bjira\b/i },
   { pattern: /\b(deals?|crm|leads?|pipeline|contacts?)\b/i, ids: ['hubspot'] },
   { pattern: /\b(notion|wiki|pages?)\b/i, ids: ['notion'] },
-  { pattern: /\b(drive|files?|folders?|spreadsheets?|docs?)\b/i, ids: ['gdrive', 'notion'] },
+  { pattern: /\b(drive|files?|folders?|spreadsheets?|docs?)\b/i, ids: ['gdrive', 'notion'], unless: /\bnotion\b/i },
 ]
 
 export function simulatedBrain(): AgentBrain {
@@ -29,10 +31,10 @@ export function simulatedBrain(): AgentBrain {
       if (/\b(code|bug|refactor|function|script|typescript|javascript|python|review this)\b/i.test(input) && has('code_review')) {
         push('code_review', input)
       }
-      for (const { pattern, ids } of CONNECTION_ROUTES) {
+      for (const { pattern, ids, unless } of CONNECTION_ROUTES) {
         if (steps.length >= 3) break
         const hit = ids.find(has)
-        if (hit && pattern.test(input)) push(hit, input)
+        if (hit && pattern.test(input) && !unless?.test(input)) push(hit, input)
       }
       if (/summar|tl;dr|shorten|condense|key points/i.test(input) && has('summarize')) push('summarize', input)
       if (/sentiment|feeling|feels|opinion|feedback|happy|angry|upset|satisfied/i.test(input) && has('sentiment')) {
@@ -111,11 +113,19 @@ export function liveBrain(provider: LiveProvider & { fixedParams?: boolean }): A
   return {
     plan: async (input, tools) => {
       if (!tools.length) return []
+      const contracts = tools.map((tool) => ({
+        id: tool.id,
+        description: tool.desc,
+        inputSchema: tool.inputSchema ?? null,
+      }))
       const system =
-        'You are the planning node of a LangGraph agent. Reply ONLY with up to 3 lines in the exact format ' +
-        '"TOOL: <id> | <input to the tool>". If no tool is needed, reply "NONE".\nAvailable tools:\n' +
-        tools.map((tool) => `- ${tool.id}: ${tool.desc}`).join('\n')
-      return parsePlan(await chatComplete(provider, system, input), tools.map((tool) => tool.id))
+        'You are the planning node of a LangGraph agent. Return JSON only, without markdown, using this contract: ' +
+        '{"steps":[{"tool":"exact advertised id","input":"short human-readable instruction",' +
+        '"arguments":{"schemaField":"typed value"}}]}. Use at most 3 steps. Use {"steps":[]} when no tool is needed. ' +
+        'Never invent a tool or argument field. For tools with an inputSchema, satisfy every required field and use ' +
+        'the declared JSON types. For tools without a schema, omit arguments and put the request in input.\n' +
+        `Available tools:\n${JSON.stringify(contracts)}`
+      return parsePlannerOutput(await chatComplete(provider, system, input), tools.map((tool) => tool.id))
     },
     respond: async (input, observations, employee) => {
       const system =

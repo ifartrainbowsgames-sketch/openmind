@@ -279,6 +279,42 @@ describe('resolveConnectionTools stamping', () => {
     expect(dispatched).toMatch(/^\[LIVE · github\] /)
   })
 
+  it('forwards validated structured arguments to live MCP tools', async () => {
+    const server = fakeMcpServer({
+      initialize: () => ({}),
+      'tools/call': (params) => {
+        expect(params).toEqual({
+          name: 'search_issues',
+          arguments: { query: 'is:open label:bug', limit: 3 },
+        })
+        return { content: [{ type: 'text', text: 'three bugs' }] }
+      },
+    })
+    fetchMock.mockImplementation(server.impl)
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'live',
+      serverUrl: SERVER.url,
+      toolNames: ['search_issues'],
+      toolSchemas: {
+        search_issues: {
+          type: 'object',
+          properties: { query: { type: 'string' }, limit: { type: 'integer' } },
+          required: ['query', 'limit'],
+        },
+      },
+    }
+    const tool = agent.resolveConnectionTools(empWith(['github']), [cfg])
+      .find((candidate) => candidate.id === 'github__search_issues')!
+    const output = await tool.run('find open bugs', {
+      query: 'is:open label:bug',
+      limit: 3,
+      ignored: true,
+    })
+    expect(output).toContain('three bugs')
+  })
+
   it('stamps live-call errors honestly instead of silently mocking', async () => {
     fetchMock.mockResolvedValue(new Response('down', { status: 503 }))
     const cfg: LiveConnectionConfig = {

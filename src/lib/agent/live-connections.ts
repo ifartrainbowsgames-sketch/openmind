@@ -1,6 +1,6 @@
 import { callServerTool, listServerTools, restFetch, type McpServerSpec } from '../mcp'
 import { CONNECTION_IDS, CONNECTIONS, mockLookup } from './connections'
-import { argsFromSchema } from './plan'
+import { argumentsForSchema } from './plan'
 import type { Employee, ToolSpec } from './types'
 
 export type LiveConnectionMode = 'mcp' | 'rest' | 'mock'
@@ -330,24 +330,30 @@ export function resolveConnectionTools(
     if (config?.status === 'live' && config.mode === 'mcp' && config.toolNames?.length) {
       const server = serverSpecFor(config)
       const names = config.toolNames
-      const call = (name: string, input: string) =>
-        callServerTool(server, name, argsFromSchema(config.toolSchemas?.[name], input), config.token)
+      const call = (name: string, input: string, args?: Record<string, unknown>) =>
+        callServerTool(
+          server,
+          name,
+          argumentsForSchema(config.toolSchemas?.[name], args, input),
+          config.token,
+        )
       for (const name of names) {
         output.push({
           id: `${id}__${name}`,
           name: `${connection.name}: ${name}`,
           desc: `LIVE ${connection.name} MCP tool "${name}"`,
-          run: async (input) => runStamped(id, () => call(name, input)),
+          inputSchema: config.toolSchemas?.[name],
+          run: async (input, args) => runStamped(id, () => call(name, input, args)),
         })
       }
       output.push({
         id,
         name: connection.name,
         desc: `LIVE ${connection.name} via MCP — ${names.length} tools`,
-        run: async (input) => {
+        run: async (input, args) => {
           const name = pickTool(names, input)
           return name
-            ? runStamped(id, () => call(name, input))
+            ? runStamped(id, () => call(name, input, args))
             : stampToolResult('LIVE', id, 'error: no live tools advertised by the server')
         },
       })

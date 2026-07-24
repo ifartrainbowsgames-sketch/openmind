@@ -16,11 +16,14 @@ export interface Employee {
 export interface PlanStep {
   tool: string
   input: string
+  /** Structured arguments produced by the planner for schema-aware tools. */
+  args?: Record<string, unknown>
 }
 
 export interface ToolCall {
   tool: string
   input: string
+  args?: Record<string, unknown>
   output: string
 }
 
@@ -41,7 +44,8 @@ export interface ToolSpec {
   id: string
   name: string
   desc: string
-  run: (input: string) => string | Promise<string>
+  inputSchema?: unknown
+  run: (input: string, args?: Record<string, unknown>) => string | Promise<string>
 }
 
 export interface AgentTool extends ToolSpec {

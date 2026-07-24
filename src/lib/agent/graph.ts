@@ -41,10 +41,10 @@ export function buildEmployeeGraph(
   const actNode = async (state: AgentGraphState): Promise<Partial<AgentGraphState>> => {
     const spec = state.plan[state.step]
     const tool = toolMap[spec.tool] ?? ALL_TOOLS[spec.tool]
-    const output = tool ? await tool.run(spec.input) : `error: unknown tool "${spec.tool}"`
+    const output = tool ? await tool.run(spec.input, spec.args) : `error: unknown tool "${spec.tool}"`
     return {
       step: state.step + 1,
-      observations: [{ tool: spec.tool, input: spec.input, output }],
+      observations: [{ tool: spec.tool, input: spec.input, args: spec.args, output }],
       trace: [{
         node: 'act',
         text: `${spec.tool}("${spec.input.length > 60 ? `${spec.input.slice(0, 57)}…` : spec.input}") → ${
