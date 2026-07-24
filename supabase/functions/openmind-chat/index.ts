@@ -532,7 +532,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (origin && !allowedOrigins().has(origin)) return json(req, 403, { error: 'origin not allowed' })
   }
 
-  if (config && event === 'config') {
+  if (event === 'config') {
+    if (!config) return json(req, 400, { error: 'widget key required for configuration' })
     return json(req, 200, {
       text: 'configuration',
       widgetConfig: {
