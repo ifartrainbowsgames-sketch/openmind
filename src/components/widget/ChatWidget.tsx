@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamText } from '@/lib/demo'
+import { requestChat } from '@/lib/chat-gateway'
 import { Phone, Video, ImagePlus, Sparkles, Send, PhoneOff, Bot } from 'lucide-react'
 
 export type WidgetPreset = 'openmind' | 'discord' | 'telegram' | 'instagram'
@@ -114,9 +115,6 @@ const FALLBACK = [
   'Noted! Every conversation here also lands in the Inbox — with visitor location, device and page journey.',
 ]
 
-// Secure demo gateway — same one the playground uses. Key lives server-side.
-const GATEWAY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/openmind-chat`
-
 export default function ChatWidget({ config, live = false }: { config: WidgetConfig; live?: boolean }) {
   const [msgs, setMsgs] = useState<Msg[]>([{ from: 'agent', text: config.greeting }])
   const [draft, setDraft] = useState('')
@@ -125,6 +123,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
   const [call, setCall] = useState<'voice' | 'video' | null>(null)
   const [callSecs, setCallSecs] = useState(0)
   const [dragOver, setDragOver] = useState(false)
+  const [gatewayMode, setGatewayMode] = useState<'pending' | 'live' | 'fallback'>(live ? 'pending' : 'fallback')
   const fileRef = useRef<HTMLInputElement>(null)
   const replyIdx = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -173,22 +172,25 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
     // Live mode (marketing site): real ChatGPT via the secure gateway, canned fallback.
     if (live) {
       try {
-        const history = msgs.slice(-6).map((m) => ({
-          role: m.from === 'agent' ? 'assistant' : 'user',
-          content: m.text,
-        }))
-        const res = await fetch(GATEWAY_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [...history, { role: 'user', content: userText }] }),
-        })
-        if (!res.ok) throw new Error(`gateway ${res.status}`)
-        const text = String((await res.json())?.text ?? '').trim()
-        if (!text) throw new Error('empty reply')
+        const history = msgs.slice(-6)
+          .filter((message) => Boolean(message.text?.trim()))
+          .map((message) => ({
+            role: message.from === 'agent' ? 'assistant' : 'user',
+            content: message.text!,
+          }))
+        const text = await requestChat([
+          ...history.map((message) => ({
+            role: message.role as 'user' | 'assistant',
+            content: message.content ?? '',
+          })),
+          { role: 'user', content: userText },
+        ])
+        setGatewayMode('live')
         await streamReply(text)
         setBusy(false)
         return
       } catch {
+        setGatewayMode('fallback')
         // fall through to canned replies
       }
     }
@@ -236,7 +238,8 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
         <div className="flex-1 leading-tight">
           <div className="text-sm font-semibold" style={{ color: p?.headerText ?? '#fff' }}>{config.agentName}</div>
           <div className="flex items-center gap-1.5 text-[11px]" style={{ color: p ? `${p.headerText}cc` : 'rgba(255,255,255,0.8)' }}>
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> online · replies instantly
+            <span className={`h-1.5 w-1.5 rounded-full ${gatewayMode === 'live' ? 'bg-emerald-300' : 'bg-amber-300'}`} />
+            {gatewayMode === 'live' ? 'live gateway' : gatewayMode === 'pending' ? 'gateway pending' : 'local preview'}
           </div>
         </div>
         {config.voice && (
@@ -302,6 +305,7 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
             </>
           )}
           <textarea
+            aria-label="Chat message"
             rows={1}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

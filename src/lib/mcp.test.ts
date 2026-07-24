@@ -7,6 +7,11 @@ const supaMock = vi.hoisted(() => ({
   isSupabaseConfigured: false,
   SUPABASE_URL: null as string | null,
   SUPABASE_KEY: null as string | null,
+  supabase: {
+    auth: {
+      getSession: vi.fn(async () => ({ data: { session: { access_token: 'user-jwt' } } })),
+    },
+  },
 }))
 vi.mock('./supabase', () => supaMock)
 
@@ -20,7 +25,9 @@ class MemStorage implements Storage {
   removeItem(k: string) { this.m.delete(k) }
 }
 const localStore = new MemStorage()
+const sessionStore = new MemStorage()
 Object.defineProperty(globalThis, 'localStorage', { value: localStore })
+Object.defineProperty(globalThis, 'sessionStorage', { value: sessionStore })
 
 import type { Employee, LiveConnectionConfig } from './agent'
 
@@ -66,8 +73,11 @@ const SERVER = { id: 'github', url: 'https://mcp.example.test/mcp' } as const
 beforeEach(() => {
   fetchMock.mockReset()
   localStore.clear()
+  sessionStore.clear()
+  mcp.clearMcpSessions()
   supaMock.isSupabaseConfigured = false
   supaMock.SUPABASE_URL = null
+  supaMock.SUPABASE_KEY = null
 })
 
 // ── (a) initialize + tools/list, plain JSON ──────────────────────────────────
@@ -144,6 +154,26 @@ describe('callServerTool', () => {
     fetchMock.mockImplementation(server.impl)
     await expect(mcp.callServerTool(SERVER, 'x', {})).rejects.toMatchObject({ name: 'McpError' })
   })
+
+  it('reuses an advertised MCP session across tool calls', async () => {
+    fetchMock.mockImplementation(async (_url, init) => {
+      const req = JSON.parse(init.body ?? '{}') as { id?: number; method: string }
+      if (req.id === undefined) return new Response('', { status: 202 })
+      if (req.method === 'initialize') {
+        return jsonRes({ jsonrpc: '2.0', id: req.id, result: {} }, 200, { 'mcp-session-id': 'session-1' })
+      }
+      return jsonRes({
+        jsonrpc: '2.0',
+        id: req.id,
+        result: { content: [{ type: 'text', text: 'ok' }] },
+      })
+    })
+    await mcp.callServerTool(SERVER, 'x', {})
+    await mcp.callServerTool(SERVER, 'x', {})
+    const methods = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse(init.body ?? '{}') as { method: string })
+    expect(methods.filter((request) => request.method === 'initialize')).toHaveLength(1)
+  })
 })
 
 // ── (d) HTTP errors → typed McpError ─────────────────────────────────────────
@@ -178,6 +208,7 @@ describe('transport', () => {
   it('posts { url, headers, payload } to the mcp-proxy when Supabase is configured', async () => {
     supaMock.isSupabaseConfigured = true
     supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
     const server = fakeMcpServer(handshake)
     fetchMock.mockImplementation(async (url, init) => {
       // unwrap the proxy envelope, then answer as the upstream server
@@ -185,6 +216,8 @@ describe('transport', () => {
       expect(url).toBe('https://proj.supabase.co/functions/v1/mcp-proxy')
       expect(wrapper.url).toBe(SERVER.url)
       expect(wrapper.headers.Authorization).toBe('Bearer tok')
+      expect(init.headers?.Authorization).toBe('Bearer user-jwt')
+      expect(init.headers?.apikey).toBe('publishable-key')
       return server.impl(SERVER.url, { ...init, body: JSON.stringify(wrapper.payload) })
     })
     const tools = await mcp.listServerTools(SERVER, 'tok')
@@ -203,6 +236,7 @@ describe('transport', () => {
     expect(await mcp.getTransport()).toEqual({ kind: 'direct' })
     supaMock.isSupabaseConfigured = true
     supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
     expect(await mcp.getTransport()).toEqual({ kind: 'proxy', url: 'https://proj.supabase.co/functions/v1/mcp-proxy' })
   })
 })
@@ -312,7 +346,12 @@ describe('probeConnection', () => {
   it('mcp success → live with tool names', async () => {
     const server = fakeMcpServer({
       initialize: () => ({}),
-      'tools/list': () => ({ tools: [{ name: 'a' }, { name: 'b' }] }),
+      'tools/list': () => ({
+        tools: [
+          { name: 'a', inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] } },
+          { name: 'b' },
+        ],
+      }),
     })
     fetchMock.mockImplementation(server.impl)
     const out = await agent.probeConnection({
@@ -320,6 +359,11 @@ describe('probeConnection', () => {
     })
     expect(out.status).toBe('live')
     expect(out.toolNames).toEqual(['a', 'b'])
+    expect(out.toolSchemas?.a).toEqual({
+      type: 'object',
+      properties: { q: { type: 'string' } },
+      required: ['q'],
+    })
     expect(out.lastError).toBeUndefined()
   })
 
@@ -360,6 +404,20 @@ describe('live connection persistence', () => {
     expect(JSON.parse(localStore.getItem(agent.LIVE_CONNECTIONS_KEY) ?? '[]')).toHaveLength(2)
     agent.removeLiveConnection('github')
     expect(agent.loadLiveConnections().map((c) => c.connectionId)).toEqual(['zendesk'])
+  })
+
+  it('keeps credentials session-only and out of persistent config JSON', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'live',
+      serverUrl: SERVER.url,
+      token: 'secret-token',
+    })
+    expect(localStore.getItem(agent.LIVE_CONNECTIONS_KEY)).not.toContain('secret-token')
+    expect(agent.loadLiveConnections()[0].token).toBe('secret-token')
+    sessionStore.clear()
+    expect(agent.loadLiveConnections()[0].token).toBeUndefined()
   })
 
   it('falls back to presets for server URLs', () => {

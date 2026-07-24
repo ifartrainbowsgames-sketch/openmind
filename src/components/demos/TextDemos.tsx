@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Pane, ModeStamp } from './shared'
 import { streamText } from '@/lib/demo'
+import { requestChat } from '@/lib/chat-gateway'
 import { Send } from 'lucide-react'
 
 // ── 01 · Chatbot ─────────────────────────────────────────────────────────────
@@ -14,16 +15,14 @@ const CHAT_REPLIES = [
 
 interface Msg { role: 'user' | 'assistant'; text: string }
 
-// Secure demo gateway — the OpenAI key lives on the server, never in the browser.
-const GATEWAY_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/openmind-chat`
-
 export function ChatDemo() {
   const [messages, setMessages] = useState<Msg[]>([
-    { role: 'assistant', text: 'Hi — I\'m the embeddable support agent, answering with real ChatGPT. Ask me anything about the product.' },
+    { role: 'assistant', text: 'Hi — I\'m the embeddable support-agent demo. Ask me anything about the product.' },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [live, setLive] = useState<boolean | null>(null)
+  const [gatewayError, setGatewayError] = useState<string | null>(null)
   const replyIdx = useRef(0)
 
   const send = async () => {
@@ -36,25 +35,17 @@ export function ChatDemo() {
 
     // Real ChatGPT via the secure gateway — no key ever touches this page.
     try {
-      const res = await fetch(GATEWAY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: history.slice(-6).map((m) => ({ role: m.role, content: m.text })),
-        }),
-      })
-      if (!res.ok) throw new Error(`gateway ${res.status}`)
-      const data = await res.json()
-      const text = String(data?.text ?? '').trim()
-      if (!text) throw new Error('empty reply')
+      const text = await requestChat(history.map((message) => ({ role: message.role, content: message.text })))
       setLive(true)
+      setGatewayError(null)
       await streamText(text, (partial) =>
         setMessages((m) => [...m.slice(0, -1), { role: 'assistant', text: partial }]),
         { cps: 500 },
       )
-    } catch {
+    } catch (error) {
       // Gateway offline or unconfigured — fall back to canned answers.
       setLive(false)
+      setGatewayError(error instanceof Error ? error.message : 'The gateway is unavailable.')
       const reply = CHAT_REPLIES[replyIdx.current % CHAT_REPLIES.length]
       replyIdx.current++
       await streamText(reply, (partial) =>
@@ -68,7 +59,7 @@ export function ChatDemo() {
     <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
       <div className="space-y-4">
         <ModeStamp
-          mode={live ? 'live' : 'simulated'}
+          mode={live === null ? 'pending' : live ? 'live' : 'simulated'}
           liveLabel="via secure gateway"
           note={
             live === true
@@ -78,6 +69,7 @@ export function ChatDemo() {
                 : 'asks our secure gateway first — zero keys on this page'
           }
         />
+        {gatewayError && <p role="status" className="text-xs text-amber-700">{gatewayError} Showing a local canned response.</p>}
         <p className="text-xs leading-relaxed text-muted-foreground">
           This demo talks to real ChatGPT through our server-side gateway. The API key lives in
           a server vault — it is never sent to, stored in, or requested by your browser.
@@ -112,6 +104,7 @@ export function ChatDemo() {
           </div>
           <div className="mt-3 flex gap-2 border-t border-white/15 pt-3">
             <input
+              aria-label="Chat demo message"
               className="flex-1 border border-white/25 bg-transparent px-3 py-2 text-[13px] text-white outline-none placeholder:text-white/35 focus:border-accent rounded-none"
               placeholder="Ask something…"
               value={input}

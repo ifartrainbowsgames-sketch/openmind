@@ -4,12 +4,14 @@ export interface Source {
   type: 'file' | 'url' | 'text'
   size: string
   chunks: number
-  status: 'indexing' | 'indexed'
+  status: 'stored' | 'indexing' | 'indexed' | 'error'
   progress: number
   attached: string[] // capability ids
   addedAt: string
   sizeBytes?: number
   filePath?: string
+  sourceUrl?: string
+  content?: string
 }
 
 export function formatBytes(b: number) {

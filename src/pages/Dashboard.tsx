@@ -19,10 +19,10 @@ import WorkforceStudio from '@/components/workforce/WorkforceStudio'
 import {
   LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
   Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Zap, Loader2,
-  Boxes, BarChart3, Bot, Menu, X,
+  Boxes, BarChart3, Bot, Menu, X, AlertTriangle,
 } from 'lucide-react'
 
-const SEED_ROWS = [
+const SEED_ROWS: Pick<Source, 'name' | 'type' | 'size' | 'attached'>[] = [
   { name: 'refund-policy.pdf', type: 'file', size: '1.2 MB', attached: ['chat'] },
   { name: 'https://docs.acme.com', type: 'url', size: '—', attached: ['chat'] },
   { name: 'FAQ (pasted)', type: 'text', size: '3.9 KB', attached: ['chat'] },
@@ -35,12 +35,14 @@ const rowToSource = (r: any): Source => ({
   type: r.type,
   size: r.size ?? '—',
   chunks: r.chunks ?? 0,
-  status: r.status === 'indexed' ? 'indexed' : 'indexing',
-  progress: r.status === 'indexed' ? 100 : 40,
+  status: ['stored', 'indexing', 'indexed', 'error'].includes(r.status) ? r.status : 'stored',
+  progress: r.status === 'indexed' ? 100 : 0,
   attached: r.attached ?? [],
   addedAt: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'just now',
   sizeBytes: r.size_bytes ?? 0,
   filePath: r.file_path ?? undefined,
+  sourceUrl: r.source_url ?? undefined,
+  content: r.content ?? undefined,
 })
 
 type View = 'overview' | 'data' | 'providers' | string
@@ -77,7 +79,7 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: string) => voi
         </button>
       ))}
 
-      <div className="px-4 pb-2 pt-5 spec-label">Live ops</div>
+      <div className="px-4 pb-2 pt-5 spec-label">Ops previews</div>
       {NAV_OPS.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
@@ -101,6 +103,7 @@ export default function Dashboard() {
   const [view, setView] = useState<View>('data')
   const [sources, setSources] = useState<Source[]>([])
   const [billingNote, setBillingNote] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   // dash-fx: mobile drawer — 'closing' plays the exit slide before unmount
   const [drawer, setDrawer] = useState<'closed' | 'open' | 'closing'>('closed')
   const drawerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -108,7 +111,7 @@ export default function Dashboard() {
   const navRef = useRef<HTMLElement>(null)
   const [indicator, setIndicator] = useState<{ top: number; height: number; on: boolean }>({ top: 0, height: 0, on: false })
   const { session, loading, signOut } = useAuth()
-  const { plan, setPlan, services, toggleService } = usePlan(session?.user.id)
+  const { plan, services, toggleService, error: planError } = usePlan(session?.demo ? undefined : session?.user.id)
   const navigate = useNavigate()
 
   const closeDrawer = () => {
@@ -139,48 +142,48 @@ export default function Dashboard() {
     if (!loading && !session) navigate('/login')
   }, [loading, session, navigate])
 
-  // load sources from Supabase; seed demo data on first login
+  // Load persisted sources. Demo auth gets clearly marked local sample rows.
   useEffect(() => {
     if (!session) return
+    if (session.demo) {
+      setSources(SEED_ROWS.map((source, index) => ({
+        ...source,
+        id: `demo-source-${index}`,
+        chunks: 0,
+        status: 'stored',
+        progress: 0,
+        addedAt: 'sample',
+        sizeBytes: 0,
+      })))
+      return
+    }
     const uid = session.user.id
-    supabase.from('sources').select('*').order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setSources(data.map(rowToSource))
-        } else if (data) {
-          supabase.from('sources')
-            .insert(SEED_ROWS.map((s) => ({ ...s, user_id: uid, status: 'indexed', chunks: 40 })))
-            .select()
-            .then(({ data: seeded }) => { if (seeded) setSources(seeded.map(rowToSource)) })
+    supabase.from('sources').select('*').eq('user_id', uid).order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          setWorkspaceError(`Could not load sources: ${error.message}`)
+          return
         }
+        setSources((data ?? []).map(rowToSource))
       })
   }, [session])
 
-  // simulate indexing finishing, and persist the flip
-  useEffect(() => {
-    const t = setInterval(() => {
-      setSources((ss) =>
-        ss.map((s) => {
-          if (s.status !== 'indexing') return s
-          const p = Math.min(100, s.progress + 8)
-          const done = p >= 100
-          if (done) {
-            supabase.from('sources').update({ status: 'indexed', chunks: 40 + Math.floor(Math.random() * 20) }).eq('id', s.id).then()
-          }
-          return {
-            ...s,
-            progress: p,
-            status: done ? 'indexed' : 'indexing',
-            chunks: done ? s.chunks || 42 : s.chunks,
-          }
-        }),
-      )
-    }, 700)
-    return () => clearInterval(t)
-  }, [])
-
   const addSources = (items: Omit<Source, 'id' | 'addedAt' | 'status' | 'progress' | 'chunks'>[]) => {
     if (!session) return
+    if (session.demo) {
+      setSources((current) => [
+        ...items.map((source, index) => ({
+          ...source,
+          id: `demo-${Date.now()}-${index}`,
+          addedAt: 'just now',
+          status: 'stored' as const,
+          progress: 0,
+          chunks: 0,
+        })),
+        ...current,
+      ])
+      return
+    }
     supabase
       .from('sources')
       .insert(
@@ -191,12 +194,21 @@ export default function Dashboard() {
           attached: s.attached,
           size_bytes: s.sizeBytes ?? 0,
           file_path: s.filePath ?? null,
+          source_url: s.sourceUrl ?? null,
+          content: s.content ?? null,
           user_id: session.user.id,
-          status: 'indexing',
+          status: 'stored',
         })),
       )
       .select()
-      .then(({ data }) => {
+      .then(async ({ data, error }) => {
+        if (error) {
+          setWorkspaceError(`Could not save source: ${error.message}`)
+          const uploaded = items.map((item) => item.filePath).filter((path): path is string => Boolean(path))
+          if (uploaded.length) await supabase.storage.from('sources').remove(uploaded)
+          return
+        }
+        setWorkspaceError(null)
         if (data) setSources((ss) => [...data.map(rowToSource), ...ss])
       })
   }
@@ -204,8 +216,15 @@ export default function Dashboard() {
   const removeSource = (id: string) => {
     const victim = sources.find((s) => s.id === id)
     setSources((ss) => ss.filter((s) => s.id !== id))
-    supabase.from('sources').delete().eq('id', id).then()
-    if (victim?.filePath) supabase.storage.from('sources').remove([victim.filePath]).then()
+    if (session?.demo) return
+    void supabase.from('sources').delete().eq('id', id).then(async ({ error }) => {
+      if (error) {
+        if (victim) setSources((current) => [victim, ...current])
+        setWorkspaceError(`Could not remove source: ${error.message}`)
+        return
+      }
+      if (victim?.filePath) await supabase.storage.from('sources').remove([victim.filePath])
+    })
   }
 
   const toggleAttach = (id: string, cap: string) => {
@@ -215,7 +234,13 @@ export default function Dashboard() {
       ? target.attached.filter((c) => c !== cap)
       : [...target.attached, cap]
     setSources((ss) => ss.map((s) => (s.id === id ? { ...s, attached: next } : s)))
-    supabase.from('sources').update({ attached: next }).eq('id', id).then()
+    if (session?.demo) return
+    void supabase.from('sources').update({ attached: next }).eq('id', id).then(({ error }) => {
+      if (error) {
+        setSources((current) => current.map((source) => source.id === id ? target : source))
+        setWorkspaceError(`Could not update source: ${error.message}`)
+      }
+    })
   }
 
   if (loading) {
@@ -309,13 +334,9 @@ export default function Dashboard() {
                   <Zap className="h-3 w-3" /> Upgrade to Pro
                 </button>
               ) : (
-                <button
-                  onClick={() => setPlan('free')}
-                  className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
-                  title="Early access — switch back anytime"
-                >
-                  early access · switch to free
-                </button>
+                <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-emerald-700">
+                  billing managed
+                </span>
               )}
             </div>
           </header>
@@ -325,14 +346,8 @@ export default function Dashboard() {
             <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
               <Zap className="h-4 w-4 text-accent" />
               <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-                Pro will be $10/mo when billing launches — during early access it's free to activate.
+                Pro will be $10/mo when billing launches. Plan changes are server-controlled so they cannot be forged in the browser.
               </p>
-              <button
-                onClick={() => { setPlan('pro'); setBillingNote(false) }}
-                className="border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
-              >
-                Activate Pro free
-              </button>
               <button
                 onClick={() => setBillingNote(false)}
                 className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
@@ -343,7 +358,13 @@ export default function Dashboard() {
           </div>
         )}
 
-        <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
+        <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 md:px-8">
+          {(workspaceError || planError) && (
+            <div role="alert" className="mb-5 flex items-start gap-2 border border-red-600 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              {workspaceError || planError}
+            </div>
+          )}
           {/* dash-fx: keyed pane — crossfade+rise whenever the view switches */}
           <div key={view} className="dash-view-enter">
           {view === 'overview' && <Overview sources={sources} />}
@@ -357,6 +378,7 @@ export default function Dashboard() {
               sources={sources}
               plan={plan}
               userId={session?.user.id}
+              demo={session.demo}
               onUpgrade={() => setBillingNote(true)}
               addSources={addSources}
               removeSource={removeSource}

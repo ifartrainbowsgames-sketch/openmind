@@ -22,7 +22,7 @@ export function ModeStamp({
   note,
   liveLabel = 'in your browser',
 }: {
-  mode: 'live' | 'simulated'
+  mode: 'live' | 'simulated' | 'pending'
   note: string
   /** Where the live computation happens — defaults to the browser. */
   liveLabel?: string
@@ -32,11 +32,15 @@ export function ModeStamp({
       className={`flex items-center gap-2 border px-3 py-2 font-mono-spec text-[11px] uppercase tracking-[0.14em] ${
         mode === 'live'
           ? 'border-emerald-700 bg-emerald-50 text-emerald-800'
-          : 'border-amber-600 bg-amber-50 text-amber-800'
+          : mode === 'simulated'
+            ? 'border-amber-600 bg-amber-50 text-amber-800'
+            : 'border-border bg-secondary text-muted-foreground'
       }`}
     >
-      <span className={`pulse-dot inline-block h-2 w-2 rounded-full ${mode === 'live' ? 'bg-emerald-600' : 'bg-amber-500'}`} />
-      {mode === 'live' ? `Running live — ${liveLabel}` : 'Simulated'} · {note}
+      <span className={`pulse-dot inline-block h-2 w-2 rounded-full ${
+        mode === 'live' ? 'bg-emerald-600' : mode === 'simulated' ? 'bg-amber-500' : 'bg-muted-foreground'
+      }`} />
+      {mode === 'live' ? `Running live — ${liveLabel}` : mode === 'simulated' ? 'Simulated' : 'Gateway pending'} · {note}
     </div>
   )
 }

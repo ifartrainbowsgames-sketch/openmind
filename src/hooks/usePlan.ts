@@ -17,6 +17,7 @@ export function usePlan(userId: string | undefined) {
   const [plan, setPlanState] = useState<Plan>('free')
   const [services, setServices] = useState<string[]>(['chat'])
   const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!userId) return
@@ -25,7 +26,12 @@ export function usePlan(userId: string | undefined) {
       .select('plan, services')
       .eq('id', userId)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error: queryError }) => {
+        if (queryError) {
+          setError(`Could not load your plan: ${queryError.message}`)
+          setLoaded(true)
+          return
+        }
         if (data) {
           setPlanState(data.plan === 'pro' ? 'pro' : 'free')
           if (Array.isArray(data.services)) setServices(data.services as string[])
@@ -34,33 +40,23 @@ export function usePlan(userId: string | undefined) {
       })
   }, [userId])
 
-  const setPlan = useCallback(
-    (p: Plan) => {
-      if (!userId) return
-      setPlanState(p)
-      // downgrading trims activations to the free allowance
-      if (p === 'free') {
-        setServices((s) => {
-          const trimmed = s.slice(0, PLAN_LIMITS.free.services)
-          supabase.from('profiles').update({ plan: p, services: trimmed }).eq('id', userId).then()
-          return trimmed
-        })
-        return
-      }
-      supabase.from('profiles').update({ plan: p }).eq('id', userId).then()
-    },
-    [userId],
-  )
-
   /** Returns false when the free-tier activation cap blocks the toggle. */
   const toggleService = useCallback(
     (id: string): boolean => {
       if (!userId) return false
       let blocked = false
       setServices((current) => {
+        const previous = current
         if (current.includes(id)) {
           const next = current.filter((s) => s !== id)
-          supabase.from('profiles').update({ services: next }).eq('id', userId).then()
+          void supabase.from('profiles').update({ services: next }).eq('id', userId).then(({ error: updateError }) => {
+            if (updateError) {
+              setServices(previous)
+              setError(`Could not update services: ${updateError.message}`)
+            } else {
+              setError(null)
+            }
+          })
           return next
         }
         if (current.length >= PLAN_LIMITS[plan].services) {
@@ -68,7 +64,14 @@ export function usePlan(userId: string | undefined) {
           return current
         }
         const next = [...current, id]
-        supabase.from('profiles').update({ services: next }).eq('id', userId).then()
+        void supabase.from('profiles').update({ services: next }).eq('id', userId).then(({ error: updateError }) => {
+          if (updateError) {
+            setServices(previous)
+            setError(`Could not update services: ${updateError.message}`)
+          } else {
+            setError(null)
+          }
+        })
         return next
       })
       return !blocked
@@ -76,5 +79,5 @@ export function usePlan(userId: string | undefined) {
     [userId, plan],
   )
 
-  return { plan, setPlan, services, toggleService, loaded, limits: PLAN_LIMITS[plan] }
+  return { plan, services, toggleService, loaded, error, limits: PLAN_LIMITS[plan] }
 }

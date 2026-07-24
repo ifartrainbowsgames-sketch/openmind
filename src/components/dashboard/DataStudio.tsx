@@ -21,13 +21,14 @@ interface Props {
   sources: Source[]
   plan: Plan
   userId?: string
+  demo?: boolean
   onUpgrade: () => void
   addSources: (s: Omit<Source, 'id' | 'addedAt' | 'status' | 'progress' | 'chunks'>[]) => void
   removeSource: (id: string) => void
   toggleAttach: (id: string, cap: string) => void
 }
 
-export default function DataStudio({ sources, plan, userId, onUpgrade, addSources, removeSource, toggleAttach }: Props) {
+export default function DataStudio({ sources, plan, userId, demo = false, onUpgrade, addSources, removeSource, toggleAttach }: Props) {
   const [dragging, setDragging] = useState(false)
   const [url, setUrl] = useState('')
   const [text, setText] = useState('')
@@ -55,7 +56,20 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
     }
     setUploads((us) => [...us, { name: f.name, progress: 30 }])
 
-    // real upload — file lands in your private Supabase bucket
+    if (demo) {
+      addSources([{
+        name: f.name,
+        type: 'file',
+        size: formatBytes(f.size),
+        attached: attachSel,
+        sizeBytes: f.size,
+      }])
+      setUpload(f.name, { progress: 100 })
+      setTimeout(() => setUploads((items) => items.filter((item) => item.name !== f.name)), 1800)
+      return
+    }
+
+    // Live mode: the file lands in the user's private Supabase bucket.
     const path = `${userId}/${Date.now()}_${f.name.replace(/[^\w.-]/g, '_')}`
     const { error } = await supabase.storage.from('sources').upload(path, f)
     if (error) {
@@ -90,8 +104,8 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
         <div>
           <h2 className="font-serif-display text-3xl font-semibold">Data Studio</h2>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            Everything you upload is chunked, embedded with <em>your</em> provider key, and indexed
-            for the chatbot. Files never leave your workspace unless you attach them to it.
+            Sources are stored in your private workspace. Automatic crawling, chunking and embedding
+            require the indexing worker and are not active in this build.
           </p>
         </div>
         <span className="font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -214,32 +228,34 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
           <span className="spec-label mb-2 flex items-center gap-2"><Globe className="h-3.5 w-3.5" /> Crawl a website</span>
           <div className="flex gap-2">
             <input
+              aria-label="Website URL"
               className="flex-1 border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-accent rounded-none"
               placeholder="https://docs.acme.com"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
             />
             <button
-              onClick={() => { if (url.trim()) { addSources([{ name: url.trim(), type: 'url', size: '—', attached: attachSel }]); setUrl('') } }}
+              onClick={() => { if (url.trim()) { addSources([{ name: url.trim(), type: 'url', size: '—', attached: attachSel, sourceUrl: url.trim() }]); setUrl('') } }}
               className="border border-primary bg-primary px-4 font-mono-spec text-xs uppercase tracking-wider text-primary-foreground hover:bg-accent hover:border-accent"
             >
               Add
             </button>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">We crawl, clean and re-sync on a schedule.</p>
+          <p className="mt-2 text-xs text-muted-foreground">Stores the URL now; scheduled crawling is coming later.</p>
         </div>
 
         {/* paste text */}
         <div className="border border-primary bg-card p-4">
           <span className="spec-label mb-2 flex items-center gap-2"><Type className="h-3.5 w-3.5" /> Paste raw text</span>
           <textarea
+            aria-label="Raw source text"
             className="min-h-20 w-full resize-y border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-accent rounded-none"
             placeholder="Refund policy: customers may return…"
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
           <button
-            onClick={() => { if (text.trim()) { addSources([{ name: `Pasted text (${text.trim().split(/\s+/).length} words)`, type: 'text', size: formatBytes(text.length), attached: attachSel }]); setText('') } }}
+            onClick={() => { if (text.trim()) { addSources([{ name: `Pasted text (${text.trim().split(/\s+/).length} words)`, type: 'text', size: formatBytes(text.length), attached: attachSel, content: text.trim() }]); setText('') } }}
             className="mt-2 border border-primary bg-primary px-4 py-2 font-mono-spec text-xs uppercase tracking-wider text-primary-foreground hover:bg-accent hover:border-accent"
           >
             Add source
@@ -267,12 +283,12 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
       <div className="border border-primary bg-card hard-shadow">
         <div className="flex items-center justify-between border-b border-primary px-5 py-2.5">
           <span className="spec-label">Workspace sources</span>
-          <span className="font-mono-spec text-[10px] text-muted-foreground">auto chunk + embed on upload</span>
+          <span className="font-mono-spec text-[10px] text-muted-foreground">private storage · indexing worker pending</span>
         </div>
         {sources.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <FileText className="mx-auto mb-3 h-6 w-6 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No data yet — drop a file above and watch it index.</p>
+            <p className="text-sm text-muted-foreground">No data yet — add a source to store it in this workspace.</p>
           </div>
         ) : (
           sources.map((s) => (
@@ -296,8 +312,14 @@ export default function DataStudio({ sources, plan, userId, onUpgrade, addSource
                       : 'border-amber-500/60 text-amber-700'
                   }`}
                 >
-                  {s.status === 'indexed' ? <Check className="h-3 w-3" /> : <Loader2 className="h-3 w-3 animate-spin" />}
-                  {s.status === 'indexed' ? `indexed · ${s.chunks} chunks` : `indexing ${s.progress}%`}
+                  {s.status === 'indexed' ? <Check className="h-3 w-3" /> : s.status === 'indexing' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Database className="h-3 w-3" />}
+                  {s.status === 'indexed'
+                    ? `indexed · ${s.chunks} chunks`
+                    : s.status === 'indexing'
+                      ? `indexing ${s.progress}%`
+                      : s.status === 'error'
+                        ? 'indexing error'
+                        : 'stored · not indexed'}
                 </span>
                 <button onClick={() => removeSource(s.id)} className="text-muted-foreground hover:text-accent" aria-label="Remove">
                   <Trash2 className="h-4 w-4" />

@@ -1,0 +1,9 @@
+project_id = "openmind"
+
+[functions.mcp-proxy]
+verify_jwt = true
+
+# The marketing playground is public. The function applies origin, payload and
+# best-effort per-isolate rate limits; production should add an edge/WAF limit.
+[functions.openmind-chat]
+verify_jwt = false
