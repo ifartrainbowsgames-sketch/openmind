@@ -1,7 +1,7 @@
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
-function additionalData(context?: string): Uint8Array {
-  return encoder.encode(`openmind-connector-v1:${context ?? 'default'}`)
+function additionalData(context?: string): ArrayBuffer {
+  return arrayBuffer(encoder.encode(`openmind-connector-v1:${context ?? 'default'}`))
 }
 
 function base64Url(bytes: Uint8Array): string {
