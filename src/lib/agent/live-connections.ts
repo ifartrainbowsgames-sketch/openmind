@@ -13,6 +13,10 @@ export interface LiveConnectionConfig {
   serverUrl?: string
   /** Session-only credential; never written to persistent localStorage. */
   token?: string
+  /** Server-side OAuth installation; its credential never enters browser JS. */
+  installationId?: string
+  authSource?: 'oauth' | 'manual'
+  accountLabel?: string
   status: ConnectionStatus
   toolNames?: string[]
   toolSchemas?: Record<string, unknown>
@@ -142,6 +146,9 @@ function normalizeConfig(value: unknown): LiveConnectionConfig | null {
     mode,
     status,
     ...(typeof raw.serverUrl === 'string' ? { serverUrl: raw.serverUrl } : {}),
+    ...(typeof raw.installationId === 'string' ? { installationId: raw.installationId } : {}),
+    ...(raw.authSource === 'oauth' || raw.authSource === 'manual' ? { authSource: raw.authSource } : {}),
+    ...(typeof raw.accountLabel === 'string' ? { accountLabel: raw.accountLabel } : {}),
     ...(Array.isArray(raw.toolNames) ? { toolNames: raw.toolNames.filter((name): name is string => typeof name === 'string') } : {}),
     ...(raw.toolSchemas && typeof raw.toolSchemas === 'object' ? { toolSchemas: raw.toolSchemas as Record<string, unknown> } : {}),
     ...(agentId ? { options: { agentId } } : {}),
@@ -222,7 +229,12 @@ function serverSpecFor(cfg: LiveConnectionConfig): McpServerSpec {
   const rawUrl = cfg.serverUrl ?? preset?.serverUrl
   if (!rawUrl) throw new Error(`No server URL for ${cfg.connectionId}.`)
   const url = validateConnectionUrl(rawUrl).toString()
-  return { id: cfg.connectionId, url, authHeader: preset?.auth === 'none' ? 'none' : 'bearer' }
+  return {
+    id: cfg.connectionId,
+    url,
+    authHeader: preset?.auth === 'none' ? 'none' : 'bearer',
+    ...(cfg.installationId ? { installationId: cfg.installationId } : {}),
+  }
 }
 
 function zendeskBase(cfg: LiveConnectionConfig): string {

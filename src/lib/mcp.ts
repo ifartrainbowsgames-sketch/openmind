@@ -19,6 +19,8 @@ export interface McpServerSpec {
   url: string
   /** 'bearer' → send `Authorization: Bearer <token>`; 'none' → no auth header. */
   authHeader?: 'bearer' | 'none'
+  /** Server-vaulted OAuth installation; the browser never receives its token. */
+  installationId?: string
 }
 
 /** One tool as advertised by `tools/list`. */
@@ -71,7 +73,7 @@ interface RawReply {
  */
 async function transportFetch(
   url: string,
-  init: { method: string; headers: Record<string, string>; payload?: unknown },
+  init: { method: string; headers: Record<string, string>; payload?: unknown; installationId?: string },
   timeoutMs: number,
 ): Promise<RawReply> {
   const ac = new AbortController()
@@ -92,10 +94,19 @@ async function transportFetch(
           apikey: SUPABASE_KEY,
           Authorization: `Bearer ${accessToken}`,
         },
-        body: JSON.stringify({ url, method: init.method, headers: init.headers, payload: init.payload }),
+        body: JSON.stringify({
+          url,
+          method: init.method,
+          headers: init.headers,
+          payload: init.payload,
+          ...(init.installationId ? { installationId: init.installationId } : {}),
+        }),
         signal: ac.signal,
       })
       return { status: res.status, ok: res.ok, body: await res.text(), headers: res.headers }
+    }
+    if (init.installationId) {
+      throw new McpError('vault_unavailable', 'Server-vaulted connectors require a signed-in Supabase workspace.')
     }
     const res = await fetch(url, {
       method: init.method,
@@ -197,7 +208,12 @@ async function rpc(
   const id = nextId++
   const reply = await transportFetch(
     server.url,
-    { method: 'POST', headers, payload: { jsonrpc: '2.0', id, method, params } },
+    {
+      method: 'POST',
+      headers,
+      payload: { jsonrpc: '2.0', id, method, params },
+      installationId: server.installationId,
+    },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   )
   const sessionId = reply.headers.get('mcp-session-id') ?? opts.sessionId
@@ -226,7 +242,12 @@ async function notify(
   if (opts.sessionId) headers['Mcp-Session-Id'] = opts.sessionId
   const reply = await transportFetch(
     server.url,
-    { method: 'POST', headers, payload: { jsonrpc: '2.0', method } },
+    {
+      method: 'POST',
+      headers,
+      payload: { jsonrpc: '2.0', method },
+      installationId: server.installationId,
+    },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   )
   if (!reply.ok) {
@@ -252,7 +273,8 @@ interface CachedSession {
 
 const SESSION_TTL_MS = 15 * 60_000
 const sessions = new Map<string, CachedSession>()
-const sessionKey = (server: McpServerSpec, token?: string) => `${server.url}\0${token ?? ''}`
+const sessionKey = (server: McpServerSpec, token?: string) =>
+  `${server.url}\0${server.installationId ?? ''}\0${token ?? ''}`
 
 export function clearMcpSessions(): void {
   sessions.clear()

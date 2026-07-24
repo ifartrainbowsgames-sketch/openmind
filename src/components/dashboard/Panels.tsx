@@ -8,7 +8,7 @@ export function ProvidersKeys() {
       <div>
         <h2 className="font-serif-display text-3xl font-semibold">Providers & keys</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          The encrypted provider vault is not connected in this build. Do not paste production keys here.
+          The encrypted model-provider key vault is not connected in this build. OAuth connector tokens use a separate server vault.
         </p>
       </div>
 
@@ -17,8 +17,8 @@ export function ProvidersKeys() {
         <div className="flex items-start gap-3 border border-amber-600/60 bg-amber-50 p-4 text-amber-900">
           <Lock className="mt-0.5 h-4 w-4 shrink-0" />
           <p className="text-sm">
-            Coming after the backend key-management service is deployed. AI Employee provider keys remain memory-only
-            for the current tab; connection credentials are session-only.
+            Model API key storage remains planned. AI Employee provider keys remain memory-only for the current tab;
+            manual connection credentials are session-only, while installed OAuth connectors are encrypted server-side.
           </p>
         </div>
       </div>

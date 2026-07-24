@@ -14,8 +14,8 @@ import {
   Loader2, PenLine, Plug, Radio, ScanText, Send, ShieldCheck, Sparkles, Trash2, Users, Workflow, Wrench, X,
 } from 'lucide-react'
 import {
-  ALL_TOOLS, CONNECTIONS, LIVE_PROVIDERS, loadLiveConnections, resolveConnectionTools, runEmployee,
-  simulatedBrain, liveBrain, toolName,
+  ALL_TOOLS, CONNECTIONS, LIVE_PROVIDERS, loadLiveConnections, probeConnection, resolveConnectionTools, runEmployee,
+  saveLiveConnections, simulatedBrain, liveBrain, toolName,
   type AgentBrain, type Employee, type LiveConnectionConfig, type PlanStep, type TraceLine,
 } from '@/lib/agent'
 import { planWorkforce, StaffingError, type StaffingStage } from '@/lib/llm-staffing'
@@ -29,6 +29,7 @@ import {
 } from '@/data/employees'
 import { loadScorecards, recordScore, scoreRun, type RunScore } from '@/lib/reportcard'
 import { streamText } from '@/lib/demo'
+import { loadOAuthConnections, mergeConnectionConfigs } from '@/lib/oauth-connections'
 import { inputCls, ModeStamp, RunButton, textareaCls } from '@/components/demos/shared'
 import WorkforceMap from './WorkforceMap'
 import GraphFlow from './GraphFlow'
@@ -203,7 +204,10 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
   const [creatorError, setCreatorError] = useState<string | null>(null)
 
   // sections
-  const [tab, setTab] = useState<'studio' | 'connections'>('studio')
+  const [tab, setTab] = useState<'studio' | 'connections'>(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('connections') === '1'
+      ? 'connections'
+      : 'studio')
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -225,7 +229,23 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
   useEffect(() => {
     setCustom(loadCustomEmployees())
     setConnectionOverrides(loadEmployeeConnectionOverrides())
-    setLiveConfigs(loadLiveConnections())
+    const localConnections = loadLiveConnections()
+    setLiveConfigs(localConnections)
+    void loadOAuthConnections()
+      .then(async (oauthConnections) => {
+        const merged = mergeConnectionConfigs(localConnections, oauthConnections)
+        const checked = await Promise.all(
+          merged.map((config) =>
+            config.authSource === 'oauth' && config.status === 'ready'
+              ? probeConnection(config)
+              : Promise.resolve(config)),
+        )
+        saveLiveConnections(checked)
+        setLiveConfigs(checked)
+      })
+      .catch(() => {
+        // Manual/session connections remain available when server metadata cannot load.
+      })
     setAutonomyMap(loadAutonomy())
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])

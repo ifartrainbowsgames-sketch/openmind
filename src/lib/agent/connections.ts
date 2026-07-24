@@ -11,6 +11,8 @@ export interface Connection {
   featured?: boolean
   badge?: string
   docsUrl?: string
+  /** Web authorization is available through the server-side connector broker. */
+  auth?: 'oauth' | 'manual'
 }
 
 /**
@@ -44,7 +46,17 @@ export const PLUGIN_CATALOG: Record<string, Connection> = {
   gdrive: { id: 'gdrive', name: 'Google Drive', desc: 'Find files and documents', category: 'docs', transports: ['mcp'] },
   notion: { id: 'notion', name: 'Notion', desc: 'Search workspace pages', category: 'notes', transports: ['mcp'] },
   slack: { id: 'slack', name: 'Slack', desc: 'Read channels and mentions', category: 'chat', transports: ['mcp'] },
-  github: { id: 'github', name: 'GitHub', desc: 'Issues, PRs and reviews', category: 'code', transports: ['mcp'] },
+  github: {
+    id: 'github',
+    name: 'GitHub',
+    desc: 'Issues, PRs and reviews',
+    category: 'code',
+    transports: ['mcp'],
+    auth: 'oauth',
+    featured: true,
+    badge: 'Web install',
+    docsUrl: 'https://docs.github.com/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps',
+  },
   linear: { id: 'linear', name: 'Linear', desc: 'Track issues and cycles', category: 'tickets', transports: ['mcp'] },
   jira: { id: 'jira', name: 'Jira', desc: 'Track tickets and sprints', category: 'tickets', transports: ['mcp'] },
   zendesk: { id: 'zendesk', name: 'Zendesk', desc: 'Support ticket queue', category: 'tickets', transports: ['rest'] },

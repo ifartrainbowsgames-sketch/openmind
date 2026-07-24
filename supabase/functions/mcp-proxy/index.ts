@@ -1,4 +1,6 @@
 // Authenticated browser → proxy → remote MCP/REST endpoint.
+import { decryptSecret, encryptSecret } from '../_shared/oauth-vault.ts'
+
 const MAX_BODY_BYTES = 1_048_576
 const MAX_RESPONSE_BYTES = 2_097_152
 const UPSTREAM_TIMEOUT_MS = 25_000
@@ -76,20 +78,221 @@ async function assertPublicTarget(target: URL): Promise<void> {
   }
 }
 
-async function authenticated(req: Request): Promise<boolean> {
+async function authenticated(req: Request): Promise<{ id: string } | null> {
   const authorization = req.headers.get('authorization')
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
-  if (!authorization?.startsWith('Bearer ') || !supabaseUrl || !anonKey) return false
+  if (!authorization?.startsWith('Bearer ') || !supabaseUrl || !anonKey) return null
   try {
     const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
       headers: { Authorization: authorization, apikey: anonKey },
       signal: AbortSignal.timeout(5_000),
     })
-    return response.ok
+    if (!response.ok) return null
+    const user = await response.json() as { id?: unknown }
+    return typeof user.id === 'string' ? { id: user.id } : null
   } catch {
-    return false
+    return null
   }
+}
+
+function serviceHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+  return { apikey: key, Authorization: `Bearer ${key}`, ...extra }
+}
+
+async function database<T>(
+  table: string,
+  query = '',
+  init: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const baseUrl = Deno.env.get('SUPABASE_URL')
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!baseUrl || !serviceKey) throw new Error('database service credentials are unavailable')
+  const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/rest/v1/${table}${query ? `?${query}` : ''}`, {
+    method: init.method ?? 'GET',
+    headers: serviceHeaders({ 'Content-Type': 'application/json' }),
+    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+  })
+  if (!response.ok) throw new Error(`database ${init.method ?? 'GET'} ${table} failed (${response.status})`)
+  const text = await response.text()
+  return (text ? JSON.parse(text) : null) as T
+}
+
+interface VaultedConnection {
+  installationId: string
+  pluginId: string
+  serverUrl: string
+  token: string
+  tokenType: string
+}
+
+interface ConnectorSecretRow {
+  access_token_ciphertext: string
+  refresh_token_ciphertext?: string | null
+  token_type?: string
+}
+
+const OAUTH_HOSTS: Record<string, string> = {
+  github: 'api.githubcopilot.com',
+}
+
+async function vaultedConnection(userId: string, installationId: string): Promise<VaultedConnection> {
+  const installationQuery = new URLSearchParams({
+    id: `eq.${installationId}`,
+    user_id: `eq.${userId}`,
+    status: 'in.(authorized,live)',
+    select: 'id,plugin_id,server_url,token_expires_at',
+    limit: '1',
+  })
+  const installations = await database<{
+    id: string
+    plugin_id: string
+    server_url: string
+    token_expires_at?: string | null
+  }[]>('connector_installations', installationQuery.toString())
+  const installation = installations[0]
+  if (!installation) throw new Error('OAuth connector installation not found or needs authorization')
+  const target = new URL(installation.server_url)
+  if (target.hostname !== OAUTH_HOSTS[installation.plugin_id]) throw new Error('OAuth connector host is not allowlisted')
+
+  const secretQuery = new URLSearchParams({
+    installation_id: `eq.${installation.id}`,
+    select: 'access_token_ciphertext,refresh_token_ciphertext,token_type',
+    limit: '1',
+  })
+  const secrets = await database<ConnectorSecretRow[]>(
+    'connector_secrets',
+    secretQuery.toString(),
+  )
+  let secret = secrets[0]
+  if (!secret) throw new Error('OAuth connector credentials are unavailable')
+  if (installation.token_expires_at && new Date(installation.token_expires_at).getTime() <= Date.now() + 60_000) {
+    try {
+      secret = await refreshGithubCredential(installation.id, secret)
+    } catch {
+      await markInstallation(installation.id, {
+        status: 'needs_reauth',
+        last_error: 'OAuth token expired and could not be refreshed',
+      }).catch(() => undefined)
+      throw new Error('OAuth connector authorization expired; reinstall the connector')
+    }
+  }
+  return {
+    installationId: installation.id,
+    pluginId: installation.plugin_id,
+    serverUrl: installation.server_url,
+    token: await decryptSecret(secret.access_token_ciphertext),
+    tokenType: secret.token_type || 'Bearer',
+  }
+}
+
+async function refreshGithubCredential(
+  installationId: string,
+  current: ConnectorSecretRow,
+): Promise<ConnectorSecretRow> {
+  const clientId = Deno.env.get('GITHUB_CONNECTOR_CLIENT_ID')
+  const clientSecret = Deno.env.get('GITHUB_CONNECTOR_CLIENT_SECRET')
+  if (!clientId || !clientSecret || !current.refresh_token_ciphertext) throw new Error('refresh unavailable')
+  const response = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: await decryptSecret(current.refresh_token_ciphertext),
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  const token = await response.json().catch(() => ({})) as {
+    access_token?: unknown
+    refresh_token?: unknown
+    token_type?: unknown
+    expires_in?: unknown
+  }
+  if (!response.ok || typeof token.access_token !== 'string') throw new Error('refresh failed')
+  const next: ConnectorSecretRow = {
+    access_token_ciphertext: await encryptSecret(token.access_token),
+    refresh_token_ciphertext: typeof token.refresh_token === 'string'
+      ? await encryptSecret(token.refresh_token)
+      : current.refresh_token_ciphertext,
+    token_type: typeof token.token_type === 'string' ? token.token_type : current.token_type,
+  }
+  await database(
+    'connector_secrets',
+    new URLSearchParams({ installation_id: `eq.${installationId}` }).toString(),
+    { method: 'PATCH', body: next },
+  )
+  await markInstallation(installationId, {
+    status: 'authorized',
+    token_expires_at: typeof token.expires_in === 'number'
+      ? new Date(Date.now() + token.expires_in * 1_000).toISOString()
+      : null,
+    last_error: null,
+  })
+  return next
+}
+
+async function markInstallation(
+  installationId: string,
+  values: Record<string, unknown>,
+): Promise<void> {
+  await database(
+    'connector_installations',
+    new URLSearchParams({ id: `eq.${installationId}` }).toString(),
+    { method: 'PATCH', body: values },
+  )
+}
+
+function mcpToolMetadata(body: ArrayBuffer): {
+  toolNames: string[]
+  toolSchemas: Record<string, unknown>
+} | null {
+  const text = new TextDecoder().decode(body).trim()
+  if (!text) return null
+  const candidates: unknown[] = []
+  if (text.startsWith('data:') || text.includes('\ndata:')) {
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.startsWith('data:')) continue
+      try {
+        candidates.push(JSON.parse(line.slice(5).trim()))
+      } catch {
+        // Ignore non-JSON keepalive/event lines.
+      }
+    }
+  } else {
+    try {
+      const parsed = JSON.parse(text) as unknown
+      candidates.push(...(Array.isArray(parsed) ? parsed : [parsed]))
+    } catch {
+      return null
+    }
+  }
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const result = (candidate as Record<string, unknown>).result
+    const tools = result && typeof result === 'object'
+      ? (result as Record<string, unknown>).tools
+      : undefined
+    if (!Array.isArray(tools)) continue
+    const normalized = tools.flatMap((value) => {
+      if (!value || typeof value !== 'object') return []
+      const tool = value as Record<string, unknown>
+      return typeof tool.name === 'string' && tool.name
+        ? [{ name: tool.name, inputSchema: tool.inputSchema }]
+        : []
+    })
+    return {
+      toolNames: normalized.map((tool) => tool.name),
+      toolSchemas: Object.fromEntries(
+        normalized
+          .filter((tool) => tool.inputSchema !== undefined)
+          .map((tool) => [tool.name, tool.inputSchema]),
+      ),
+    }
+  }
+  return null
 }
 
 const STRIP_HEADERS = new Set([
@@ -103,7 +306,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (origin && !allowedOrigins().has(origin)) return json(req, 403, { error: 'origin not allowed' })
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(req) })
   if (req.method !== 'POST') return json(req, 405, { error: 'POST only' })
-  if (!await authenticated(req)) return json(req, 401, { error: 'valid user session required' })
+  const user = await authenticated(req)
+  if (!user) return json(req, 401, { error: 'valid user session required' })
 
   const declared = Number(req.headers.get('content-length') ?? 0)
   if (declared > MAX_BODY_BYTES) return json(req, 413, { error: 'request body too large' })
@@ -113,17 +317,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(req, 413, { error: 'request body missing or too large' })
   }
 
-  let body: { url?: unknown; method?: unknown; headers?: unknown; payload?: unknown }
+  let body: {
+    url?: unknown
+    method?: unknown
+    headers?: unknown
+    payload?: unknown
+    installationId?: unknown
+  }
   try {
     body = JSON.parse(bodyText)
   } catch {
     return json(req, 400, { error: 'body must be valid JSON' })
   }
-  if (typeof body.url !== 'string') return json(req, 400, { error: 'missing url' })
+  const installationId = typeof body.installationId === 'string' ? body.installationId : undefined
+  let vaulted: VaultedConnection | undefined
+  if (installationId) {
+    try {
+      vaulted = await vaultedConnection(user.id, installationId)
+    } catch (error) {
+      return json(req, 403, { error: error instanceof Error ? error.message : 'OAuth connector unavailable' })
+    }
+  }
+  if (!vaulted && typeof body.url !== 'string') return json(req, 400, { error: 'missing url' })
 
   let target: URL
   try {
-    target = new URL(body.url)
+    target = new URL(vaulted?.serverUrl ?? body.url as string)
+    if (vaulted && typeof body.url === 'string' && new URL(body.url).toString() !== target.toString()) {
+      throw new Error('OAuth connector target does not match its installation')
+    }
     await assertPublicTarget(target)
   } catch (error) {
     return json(req, 403, { error: error instanceof Error ? error.message : 'target not allowed' })
@@ -137,9 +359,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const headers: Record<string, string> = {}
   if (body.headers && typeof body.headers === 'object') {
     for (const [key, value] of Object.entries(body.headers as Record<string, unknown>)) {
-      if (!STRIP_HEADERS.has(key.toLowerCase()) && typeof value === 'string') headers[key] = value
+      if (
+        !STRIP_HEADERS.has(key.toLowerCase()) &&
+        !(vaulted && key.toLowerCase() === 'authorization') &&
+        typeof value === 'string'
+      ) {
+        headers[key] = value
+      }
     }
   }
+  if (vaulted) headers.Authorization = `${vaulted.tokenType} ${vaulted.token}`
 
   let upstream: Response
   try {
@@ -171,5 +400,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const sessionId = upstream.headers.get('mcp-session-id')
   if (sessionId) responseHeaders['Mcp-Session-Id'] = sessionId
+  if (vaulted) {
+    const rpcMethod = body.payload && typeof body.payload === 'object'
+      ? (body.payload as Record<string, unknown>).method
+      : undefined
+    if (upstream.status === 401 || upstream.status === 403) {
+      await markInstallation(vaulted.installationId, {
+        status: 'needs_reauth',
+        last_error: `Provider returned HTTP ${upstream.status}`,
+      }).catch(() => undefined)
+    } else if (upstream.ok && rpcMethod === 'tools/list') {
+      const metadata = mcpToolMetadata(responseBody)
+      await markInstallation(vaulted.installationId, {
+        status: 'live',
+        ...(metadata ? { tool_names: metadata.toolNames, tool_schemas: metadata.toolSchemas } : {}),
+        last_probed_at: new Date().toISOString(),
+        last_error: null,
+      }).catch(() => undefined)
+    }
+  }
   return new Response(responseBody, { status: upstream.status, headers: responseHeaders })
 })

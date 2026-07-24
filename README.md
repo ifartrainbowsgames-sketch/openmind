@@ -52,6 +52,7 @@ Apply migrations and deploy functions with the Supabase CLI:
 ```bash
 supabase db push
 supabase functions deploy mcp-proxy
+supabase functions deploy oauth-connector --no-verify-jwt
 supabase functions deploy openmind-chat --no-verify-jwt
 supabase functions deploy telegram-webhook --no-verify-jwt
 ```
@@ -64,6 +65,11 @@ supabase secrets set \
   OPENMIND_CHAT_API_KEY=... \
   OPENMIND_CHAT_BASE_URL=https://api.openai.com/v1 \
   OPENMIND_CHAT_MODEL=gpt-4o-mini \
+  GITHUB_CONNECTOR_CLIENT_ID=... \
+  GITHUB_CONNECTOR_CLIENT_SECRET=... \
+  OAUTH_TOKEN_ENCRYPTION_KEY=... \
+  OAUTH_CONNECTOR_CALLBACK_URL=https://your-project.supabase.co/functions/v1/oauth-connector/callback \
+  OAUTH_APP_URL=https://your-app.example \
   TELEGRAM_BOT_TOKEN=... \
   TELEGRAM_WEBHOOK_SECRET=... \
   WHATSAPP_ACCESS_TOKEN=... \
@@ -71,7 +77,7 @@ supabase secrets set \
   WHATSAPP_NOTIFICATION_TEMPLATE=openmind_staff_alert
 ```
 
-`SUPABASE_URL` and `SUPABASE_ANON_KEY` are supplied automatically to hosted Edge Functions. `mcp-proxy` verifies the user again through Supabase Auth in addition to gateway JWT verification.
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and the service-role credential are supplied automatically to hosted Edge Functions. `mcp-proxy` verifies the user again through Supabase Auth in addition to gateway JWT verification.
 
 The public chat function has payload/origin checks and a best-effort per-isolate limit. Production deployments should also enforce a distributed rate limit at the edge.
 
@@ -94,11 +100,14 @@ Set `VITE_TELEGRAM_BOT_USERNAME` to the bot's public username, then register
 
 Configure plugins in **Dashboard → Workforce → Connections**, then attach only the required plugins to each employee in the Studio.
 
+- GitHub: click **Install**, approve access on GitHub, and return to the Connections page. OAuth state and PKCE are single-use; access tokens are encrypted server-side and injected only by the authenticated proxy.
 - n8n: use its instance-level MCP server for discoverable tools, or a production workflow webhook for a single automation.
 - OpenClaw: enable gateway hooks and provide the HTTPS endpoint ending in `/hooks/agent`, its hooks token, and optionally an allowed agent ID.
 - Webhook setup is marked `READY` without firing it. Its first employee task is the real execution check.
 
-Non-secret plugin configuration is browser-local. Credentials are held in `sessionStorage` and disappear when the tab session ends; the server-managed vault remains planned.
+Register the exact `OAUTH_CONNECTOR_CALLBACK_URL` in the GitHub OAuth App settings. Generate `OAUTH_TOKEN_ENCRYPTION_KEY` from 32 random bytes and keep it stable; rotating it requires re-authorizing existing connector installations.
+
+OAuth connector credentials are encrypted in a service-role-only server vault and never returned to the browser. Manual plugin credentials remain in `sessionStorage` and disappear when the tab session ends. n8n and OpenClaw remain manual because their self-hosted endpoints do not expose one shared consumer OAuth install flow.
 
 ## Quality checks
 
@@ -119,6 +128,7 @@ CI runs all checks and Chromium smoke tests. Install the browser locally with `n
 
 - Never put provider service-role keys in `VITE_*` variables.
 - The MCP proxy permits only HTTPS port 443, resolves DNS before requests, blocks private/reserved addresses, and rejects redirects.
+- Vaulted connector calls are bound to the installation owner and a provider-specific upstream host; browser-supplied authorization headers are ignored for OAuth installations.
 - Public widget keys are identifiers, not secrets. Embedding-site origins are policy-checked, requests consume database-backed tenant/visitor quotas, and conversation resumption additionally requires an unguessable visitor token. Origin headers are not treated as authentication.
 - Widget API CORS is restricted to deployment-owned app origins. The iframe derives the customer origin from the browser referrer and fails closed when it is unavailable; add the widget host to `ALLOWED_ORIGINS` and do not embed it under a `no-referrer` policy.
 - Browser-direct provider keys remain visible to JavaScript for the current tab. Use only scoped keys until the server-managed vault exists.

@@ -13,3 +13,8 @@ verify_jwt = false
 # X-Telegram-Bot-Api-Secret-Token; the function verifies it explicitly.
 [functions.telegram-webhook]
 verify_jwt = false
+
+# Start verifies the Supabase user explicitly; callback is authenticated by
+# short-lived, single-use OAuth state and PKCE.
+[functions.oauth-connector]
+verify_jwt = false

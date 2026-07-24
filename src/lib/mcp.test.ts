@@ -225,6 +225,28 @@ describe('transport', () => {
     expect(fetchMock).toHaveBeenCalled()
   })
 
+  it('uses an installation id without exposing its OAuth token', async () => {
+    supaMock.isSupabaseConfigured = true
+    supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
+    const server = fakeMcpServer(handshake)
+    fetchMock.mockImplementation(async (url, init) => {
+      const wrapper = JSON.parse(init.body ?? '{}') as {
+        url: string
+        headers: Record<string, string>
+        payload: unknown
+        installationId?: string
+      }
+      expect(url).toBe('https://proj.supabase.co/functions/v1/mcp-proxy')
+      expect(wrapper.installationId).toBe('install-123')
+      expect(wrapper.headers.Authorization).toBeUndefined()
+      expect(JSON.stringify(wrapper)).not.toContain('provider-secret')
+      return server.impl(SERVER.url, { ...init, body: JSON.stringify(wrapper.payload) })
+    })
+    await mcp.listServerTools({ ...SERVER, installationId: 'install-123' })
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it('goes browser-direct when Supabase is not configured', async () => {
     const server = fakeMcpServer(handshake)
     fetchMock.mockImplementation(server.impl)
@@ -568,6 +590,24 @@ describe('live connection persistence', () => {
       options: { agentId: 'operations' },
       token: 'hooks-secret',
     })
+  })
+
+  it('persists only the non-secret reference for OAuth installations', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'ready',
+      serverUrl: SERVER.url,
+      installationId: 'install-123',
+      authSource: 'oauth',
+      accountLabel: 'octocat',
+    })
+    expect(agent.loadLiveConnections()[0]).toMatchObject({
+      installationId: 'install-123',
+      authSource: 'oauth',
+      accountLabel: 'octocat',
+    })
+    expect(localStore.getItem(agent.LIVE_CONNECTIONS_KEY)).not.toContain('provider-secret')
   })
 
   it('falls back to presets for server URLs', () => {

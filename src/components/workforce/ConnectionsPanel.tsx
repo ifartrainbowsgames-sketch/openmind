@@ -4,13 +4,14 @@
 import { useState, type CSSProperties } from 'react'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Link2, Loader2,
-  Plug, Search, Sparkles, Unplug,
+  LockKeyhole, Plug, Search, Sparkles, Unplug,
 } from 'lucide-react'
 import {
   CONNECTIONS, MCP_PRESETS, probeConnection, removeLiveConnection, upsertLiveConnection,
   type LiveConnectionConfig,
 } from '@/lib/agent'
 import { inputCls } from '@/components/demos/shared'
+import { disconnectConnectorInstallation, startConnectorInstall } from '@/lib/oauth-connections'
 
 interface Props {
   configs: LiveConnectionConfig[]
@@ -27,6 +28,7 @@ interface FormState {
   email: string
   apiToken: string
   probing: boolean
+  installing: boolean
   formError?: string
 }
 
@@ -40,6 +42,7 @@ const EMPTY_FORM: FormState = {
   email: '',
   apiToken: '',
   probing: false,
+  installing: false,
 }
 
 export type MarketplaceStatus = 'live' | 'ready' | 'error' | 'mock'
@@ -101,6 +104,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         mode: 'rest',
         serverUrl: `https://${sub}.zendesk.com`,
         token: `${f.email.trim()}/token:${f.apiToken.trim()}`,
+        authSource: 'manual',
         status: 'untested',
       }
     }
@@ -119,6 +123,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         mode: 'webhook',
         serverUrl: url,
         token: f.token.trim() || undefined,
+        authSource: 'manual',
         status: 'untested',
         ...(id === 'openclaw' && f.agentId.trim() ? { options: { agentId: f.agentId.trim() } } : {}),
       }
@@ -130,6 +135,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
       mode: 'mcp',
       serverUrl: url,
       token: f.token.trim() || undefined,
+      authSource: 'manual',
       status: 'untested',
     }
   }
@@ -149,10 +155,33 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
     }
   }
 
-  const disconnect = (id: string) => {
-    onChange(removeLiveConnection(id))
-    patch(id, { formError: undefined })
+  const install = async (id: string) => {
+    patch(id, { installing: true, formError: undefined })
+    try {
+      await startConnectorInstall(id)
+    } catch (error) {
+      patch(id, {
+        installing: false,
+        formError: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
+
+  const disconnect = async (id: string) => {
+    const cfg = configs.find((config) => config.connectionId === id)
+    try {
+      if (cfg?.installationId) await disconnectConnectorInstallation(cfg.installationId)
+      onChange(removeLiveConnection(id))
+      patch(id, { formError: undefined })
+    } catch (error) {
+      patch(id, { formError: error instanceof Error ? error.message : String(error) })
+    }
+  }
+
+  const callbackParams = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search)
+  const oauthStatus = callbackParams?.get('oauthStatus')
+  const oauthPlugin = callbackParams?.get('oauth')
+  const oauthReason = callbackParams?.get('reason')
 
   return (
     <div className="border border-border/60 bg-card p-5">
@@ -165,10 +194,29 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Configure plugins here, then attach them to an employee in the Studio. n8n can expose MCP tools or one
+        Click Install on supported connectors to authorize on the provider's website. Credentials are encrypted
+        server-side and never returned to the browser or AI. Configure manual plugins here, then attach them to an employee.
+        n8n can expose MCP tools or one
         workflow webhook; OpenClaw accepts delegated tasks through <span className="text-foreground">/hooks/agent</span>.
-        Tokens stay only in this tab session. Webhooks are saved as READY without firing them; the first task is their execution check.
+        Manual tokens stay only in this tab session. Webhooks are saved as READY without firing them.
       </p>
+
+      {oauthStatus && (
+        <div className={`mb-4 flex items-start gap-2 border px-3 py-2.5 text-sm ${
+          oauthStatus === 'connected'
+            ? 'border-emerald-700 bg-emerald-50 text-emerald-800'
+            : 'border-red-600 bg-red-50 text-red-700'
+        }`}>
+          {oauthStatus === 'connected'
+            ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
+          <span>
+            {oauthStatus === 'connected'
+              ? `${CONNECTIONS[oauthPlugin ?? '']?.name ?? 'Connector'} authorized. OpenMind is checking its live tools.`
+              : `Authorization failed${oauthReason ? ` (${oauthReason.replace(/_/g, ' ')})` : ''}.`}
+          </span>
+        </div>
+      )}
 
       <label className="mb-4 flex max-w-md items-center gap-2 border border-border/60 bg-background px-3">
         <Search className="h-3.5 w-3.5 text-muted-foreground" />
@@ -242,6 +290,38 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                 </p>
               )}
 
+              {conn.auth === 'oauth' && (
+                <div className="mt-2.5 border border-emerald-700/40 bg-emerald-50/60 p-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => void install(conn.id)}
+                      disabled={f.installing}
+                      className="inline-flex items-center gap-2 border border-emerald-800 bg-emerald-800 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-emerald-700 disabled:opacity-40"
+                    >
+                      {f.installing
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <LockKeyhole className="h-3 w-3" />}
+                      {f.installing
+                        ? 'Opening authorization…'
+                        : cfg?.authSource === 'oauth' ? 'Reauthorize' : 'Install'}
+                    </button>
+                    {cfg?.authSource === 'oauth' && (
+                      <button
+                        onClick={() => void disconnect(conn.id)}
+                        className="inline-flex items-center gap-1.5 border border-border/60 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:border-red-600 hover:text-red-600"
+                      >
+                        <Unplug className="h-3 w-3" /> Disconnect
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1.5 font-mono-spec text-[9px] leading-relaxed text-emerald-900/75">
+                    {cfg?.authSource === 'oauth'
+                      ? `Authorized${cfg.accountLabel ? ` as ${cfg.accountLabel}` : ''} · token stored in the server vault`
+                      : 'Opens the provider consent page · no token copy and paste'}
+                  </p>
+                </div>
+              )}
+
               <button
                 onClick={() =>
                   patch(conn.id, {
@@ -258,7 +338,9 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                 className="mt-2 flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
               >
                 {f.open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                {status === 'mock' ? 'Configure plugin' : 'Edit configuration'}
+                {conn.auth === 'oauth'
+                  ? f.open ? 'Hide manual setup' : 'Advanced manual setup'
+                  : status === 'mock' ? 'Configure plugin' : 'Edit configuration'}
               </button>
 
               {f.open && preset && (
@@ -379,7 +461,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                     </button>
                     {cfg && (
                       <button
-                        onClick={() => disconnect(conn.id)}
+                        onClick={() => void disconnect(conn.id)}
                         className="inline-flex items-center gap-2 border border-border/60 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:border-red-600 hover:text-red-600"
                       >
                         <Unplug className="h-3 w-3" /> Disconnect

@@ -75,6 +75,12 @@ const NAV_ADVANCED: { id: View; label: string; icon: typeof LayoutDashboard }[] 
   { id: 'providers', label: 'Providers & keys', icon: KeyRound },
 ]
 
+function initialView(): View {
+  if (typeof window === 'undefined') return 'home'
+  const requested = new URLSearchParams(window.location.search).get('view')
+  return requested === 'workforce' ? 'workforce' : 'home'
+}
+
 const navBtnCls = (active: boolean) =>
   `flex w-full items-center gap-3 px-4 py-2.5 text-left font-mono-spec text-[12px] uppercase tracking-[0.12em] transition-colors ${
     active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
@@ -102,7 +108,7 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: View) => void 
 }
 
 export default function Dashboard() {
-  const [view, setView] = useState<View>('home')
+  const [view, setView] = useState<View>(initialView)
   const [sources, setSources] = useState<Source[]>([])
   const [billingNote, setBillingNote] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
