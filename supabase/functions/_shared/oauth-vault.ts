@@ -14,12 +14,16 @@ function fromBase64Url(value: string): Uint8Array {
   return Uint8Array.from(binary, (char) => char.charCodeAt(0))
 }
 
+function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
 async function encryptionKey(): Promise<CryptoKey> {
   const configured = Deno.env.get('OAUTH_TOKEN_ENCRYPTION_KEY')
   if (!configured) throw new Error('OAuth token encryption key is not configured')
   const raw = fromBase64Url(configured.trim())
   if (raw.byteLength !== 32) throw new Error('OAuth token encryption key must decode to 32 bytes')
-  return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
+  return crypto.subtle.importKey('raw', arrayBuffer(raw), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 
 export function randomBase64Url(bytes = 32): string {
@@ -49,9 +53,9 @@ export async function decryptSecret(value: string): Promise<string> {
   const [version, encodedIv, encodedCiphertext] = value.split('.')
   if (version !== 'v1' || !encodedIv || !encodedCiphertext) throw new Error('Unsupported OAuth ciphertext')
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: fromBase64Url(encodedIv), additionalData: AAD },
+    { name: 'AES-GCM', iv: arrayBuffer(fromBase64Url(encodedIv)), additionalData: AAD },
     await encryptionKey(),
-    fromBase64Url(encodedCiphertext),
+    arrayBuffer(fromBase64Url(encodedCiphertext)),
   )
   return decoder.decode(plaintext)
 }
