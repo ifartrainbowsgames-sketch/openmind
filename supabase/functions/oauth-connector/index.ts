@@ -161,7 +161,7 @@ async function start(req: Request): Promise<Response> {
   const state = randomBase64Url(32)
   const verifier = randomBase64Url(48)
   const stateHash = await sha256Base64Url(state)
-  const verifierCiphertext = await encryptSecret(verifier)
+  const verifierCiphertext = await encryptSecret(verifier, `pending:${stateHash}`)
   await database(
     'connector_oauth_pending',
     new URLSearchParams({ expires_at: `lt.${new Date().toISOString()}` }).toString(),
@@ -211,10 +211,10 @@ async function disconnect(req: Request): Promise<Response> {
   const installQuery = new URLSearchParams({
     id: `eq.${body.installationId}`,
     user_id: `eq.${user.id}`,
-    select: 'id,plugin_id',
+    select: 'id,plugin_id,user_id',
     limit: '1',
   })
-  const installations = await database<{ id: string; plugin_id: Provider['id'] }[]>(
+  const installations = await database<{ id: string; plugin_id: Provider['id']; user_id: string }[]>(
     'connector_installations',
     installQuery.toString(),
   )
@@ -240,7 +240,12 @@ async function disconnect(req: Request): Promise<Response> {
         'User-Agent': 'OpenMind-Connector',
         'X-GitHub-Api-Version': '2022-11-28',
       },
-      body: JSON.stringify({ access_token: await decryptSecret(secret.access_token_ciphertext) }),
+      body: JSON.stringify({
+        access_token: await decryptSecret(
+          secret.access_token_ciphertext,
+          `connector:${installation.user_id}:${installation.plugin_id}`,
+        ),
+      }),
       signal: AbortSignal.timeout(10_000),
     })
     if (!revoke.ok && revoke.status !== 404 && revoke.status !== 422) {
@@ -280,17 +285,12 @@ async function callback(req: Request): Promise<Response> {
   if (!state) return appRedirect(fallbackOrigin(), 'github', 'error', 'missing_state')
 
   const stateHash = await sha256Base64Url(state)
-  const params = new URLSearchParams({ state_hash: `eq.${stateHash}`, select: '*' })
-  const pendingRows = await database<PendingRow[]>('connector_oauth_pending', params.toString())
+  const pendingRows = await database<PendingRow[]>('rpc/claim_connector_oauth_pending', '', {
+    method: 'POST',
+    body: { p_state_hash: stateHash },
+  })
   const pending = pendingRows[0]
   if (!pending) return appRedirect(fallbackOrigin(), 'github', 'error', 'invalid_or_used_state')
-
-  await database('connector_oauth_pending', new URLSearchParams({ state_hash: `eq.${stateHash}` }).toString(), {
-    method: 'DELETE',
-  })
-  if (new Date(pending.expires_at).getTime() <= Date.now()) {
-    return appRedirect(pending.return_origin, pending.plugin_id, 'error', 'expired_state')
-  }
   if (url.searchParams.get('error')) {
     return appRedirect(pending.return_origin, pending.plugin_id, 'error', 'authorization_denied')
   }
@@ -313,7 +313,7 @@ async function callback(req: Request): Promise<Response> {
       client_secret: clientSecret,
       code,
       redirect_uri: callbackUrl(),
-      code_verifier: await decryptSecret(pending.code_verifier_ciphertext),
+      code_verifier: await decryptSecret(pending.code_verifier_ciphertext, `pending:${stateHash}`),
     }),
     signal: AbortSignal.timeout(15_000),
   })
@@ -333,51 +333,29 @@ async function callback(req: Request): Promise<Response> {
   const scopes = typeof token.scope === 'string'
     ? token.scope.split(/[,\s]+/).map((scope) => scope.trim()).filter(Boolean)
     : provider.scopes
-  const expiresAt = typeof token.expires_in === 'number'
-    ? new Date(Date.now() + token.expires_in * 1_000).toISOString()
+  const expiresIn = Number(token.expires_in)
+  const expiresAt = Number.isFinite(expiresIn) && expiresIn > 0
+    ? new Date(Date.now() + expiresIn * 1_000).toISOString()
     : null
   const accountLabel = await githubAccountLabel(token.access_token)
-  const installations = await database<{ id: string }[]>(
-    'connector_installations',
-    'on_conflict=user_id%2Cplugin_id',
-    {
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates,return=representation',
-      body: {
-        user_id: pending.user_id,
-        plugin_id: provider.id,
-        status: 'authorized',
-        account_label: accountLabel,
-        scopes,
-        server_url: provider.serverUrl,
-        tool_names: [],
-        tool_schemas: {},
-        token_expires_at: expiresAt,
-        last_error: null,
-      },
+  const secretContext = `connector:${pending.user_id}:${provider.id}`
+  const installationId = await database<string>('rpc/store_connector_oauth_installation', '', {
+    method: 'POST',
+    body: {
+      p_user_id: pending.user_id,
+      p_plugin_id: provider.id,
+      p_account_label: accountLabel,
+      p_scopes: scopes,
+      p_server_url: provider.serverUrl,
+      p_token_expires_at: expiresAt,
+      p_access_token_ciphertext: await encryptSecret(token.access_token, secretContext),
+      p_refresh_token_ciphertext: typeof token.refresh_token === 'string'
+        ? await encryptSecret(token.refresh_token, secretContext)
+        : null,
+      p_token_type: typeof token.token_type === 'string' ? token.token_type : 'Bearer',
     },
-  )
-  const installationId = installations[0]?.id
-  if (!installationId) {
-    return appRedirect(pending.return_origin, pending.plugin_id, 'error', 'installation_save_failed')
-  }
-  await database(
-    'connector_secrets',
-    'on_conflict=installation_id',
-    {
-      method: 'POST',
-      prefer: 'resolution=merge-duplicates',
-      body: {
-        installation_id: installationId,
-        access_token_ciphertext: await encryptSecret(token.access_token),
-        refresh_token_ciphertext: typeof token.refresh_token === 'string'
-          ? await encryptSecret(token.refresh_token)
-          : null,
-        token_type: typeof token.token_type === 'string' ? token.token_type : 'Bearer',
-        key_version: 1,
-      },
-    },
-  )
+  })
+  if (!installationId) return appRedirect(pending.return_origin, pending.plugin_id, 'error', 'installation_save_failed')
   return appRedirect(pending.return_origin, pending.plugin_id, 'connected')
 }
 

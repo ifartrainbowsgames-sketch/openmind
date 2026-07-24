@@ -1,7 +1,7 @@
 // Connection marketplace — configure a plugin once, then attach it to employees.
 // Credentials remain session-only; public plugin metadata and non-secret config
 // are persisted separately.
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Link2, Loader2,
   LockKeyhole, Plug, Search, Sparkles, Unplug,
@@ -16,6 +16,7 @@ import { disconnectConnectorInstallation, startConnectorInstall } from '@/lib/oa
 interface Props {
   configs: LiveConnectionConfig[]
   onChange: (configs: LiveConnectionConfig[]) => void
+  loadError?: string | null
 }
 
 interface FormState {
@@ -78,9 +79,20 @@ export function StatusChip({ status }: { status: MarketplaceStatus }) {
   )
 }
 
-export default function ConnectionsPanel({ configs, onChange }: Props) {
+export default function ConnectionsPanel({ configs, onChange, loadError }: Props) {
   const [forms, setForms] = useState<Record<string, FormState>>({})
   const [query, setQuery] = useState('')
+  const [oauthNotice] = useState(() => {
+    if (typeof window === 'undefined') return null
+    const params = new URLSearchParams(window.location.search)
+    const status = params.get('oauthStatus')
+    if (!status) return null
+    return {
+      status,
+      plugin: params.get('oauth'),
+      reason: params.get('reason'),
+    }
+  })
 
   const form = (id: string): FormState => forms[id] ?? EMPTY_FORM
   const patch = (id: string, p: Partial<FormState>) =>
@@ -178,10 +190,14 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
     }
   }
 
-  const callbackParams = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search)
-  const oauthStatus = callbackParams?.get('oauthStatus')
-  const oauthPlugin = callbackParams?.get('oauth')
-  const oauthReason = callbackParams?.get('reason')
+  useEffect(() => {
+    if (!oauthNotice || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('oauth')
+    url.searchParams.delete('oauthStatus')
+    url.searchParams.delete('reason')
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [oauthNotice])
 
   return (
     <div className="border border-border/60 bg-card p-5">
@@ -201,21 +217,26 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         Manual tokens stay only in this tab session. Webhooks are saved as READY without firing them.
       </p>
 
-      {oauthStatus && (
+      {oauthNotice && (
         <div className={`mb-4 flex items-start gap-2 border px-3 py-2.5 text-sm ${
-          oauthStatus === 'connected'
+          oauthNotice.status === 'connected'
             ? 'border-emerald-700 bg-emerald-50 text-emerald-800'
             : 'border-red-600 bg-red-50 text-red-700'
         }`}>
-          {oauthStatus === 'connected'
+          {oauthNotice.status === 'connected'
             ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
             : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
           <span>
-            {oauthStatus === 'connected'
-              ? `${CONNECTIONS[oauthPlugin ?? '']?.name ?? 'Connector'} authorized. OpenMind is checking its live tools.`
-              : `Authorization failed${oauthReason ? ` (${oauthReason.replace(/_/g, ' ')})` : ''}.`}
+            {oauthNotice.status === 'connected'
+              ? `${CONNECTIONS[oauthNotice.plugin ?? '']?.name ?? 'Connector'} authorized. OpenMind is checking its live tools.`
+              : `Authorization failed${oauthNotice.reason ? ` (${oauthNotice.reason.replace(/_/g, ' ')})` : ''}.`}
           </span>
         </div>
+      )}
+      {loadError && (
+        <p className="mb-4 flex items-start gap-2 border border-amber-600 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {loadError}
+        </p>
       )}
 
       <label className="mb-4 flex max-w-md items-center gap-2 border border-border/60 bg-background px-3">
@@ -281,7 +302,10 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
               )}
               {status === 'ready' && (
                 <p className="mt-1.5 flex items-center gap-1.5 font-mono-spec text-[10px] text-sky-700">
-                  <CheckCircle2 className="h-3 w-3" /> saved · executes on first employee task
+                  <CheckCircle2 className="h-3 w-3" />
+                  {cfg?.authSource === 'oauth'
+                    ? 'authorized · checking live tool access'
+                    : 'saved · executes on first employee task'}
                 </p>
               )}
               {status === 'error' && cfg?.lastError && (
@@ -319,6 +343,11 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                       ? `Authorized${cfg.accountLabel ? ` as ${cfg.accountLabel}` : ''} · token stored in the server vault`
                       : 'Opens the provider consent page · no token copy and paste'}
                   </p>
+                  {f.formError && (
+                    <p className="mt-1.5 flex items-start gap-1.5 font-mono-spec text-[10px] text-red-600">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {f.formError}
+                    </p>
+                  )}
                 </div>
               )}
 

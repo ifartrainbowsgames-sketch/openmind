@@ -92,6 +92,15 @@ export function mergeConnectionConfigs(
   local: LiveConnectionConfig[],
   oauth: LiveConnectionConfig[],
 ): LiveConnectionConfig[] {
-  const oauthIds = new Set(oauth.map((config) => config.connectionId))
-  return [...local.filter((config) => !oauthIds.has(config.connectionId)), ...oauth]
+  const merged = new Map(
+    local
+      .filter((config) => config.authSource !== 'oauth')
+      .map((config) => [config.connectionId, config]),
+  )
+  for (const config of oauth) {
+    const manual = merged.get(config.connectionId)
+    if (config.status === 'error' && manual) continue
+    merged.set(config.connectionId, config)
+  }
+  return [...merged.values()]
 }

@@ -167,9 +167,10 @@ async function vaultedConnection(userId: string, installationId: string): Promis
   )
   let secret = secrets[0]
   if (!secret) throw new Error('OAuth connector credentials are unavailable')
+  const secretContext = `connector:${userId}:${installation.plugin_id}`
   if (installation.token_expires_at && new Date(installation.token_expires_at).getTime() <= Date.now() + 60_000) {
     try {
-      secret = await refreshGithubCredential(installation.id, secret)
+      secret = await refreshGithubCredential(installation.id, secret, secretContext)
     } catch {
       await markInstallation(installation.id, {
         status: 'needs_reauth',
@@ -182,7 +183,7 @@ async function vaultedConnection(userId: string, installationId: string): Promis
     installationId: installation.id,
     pluginId: installation.plugin_id,
     serverUrl: installation.server_url,
-    token: await decryptSecret(secret.access_token_ciphertext),
+    token: await decryptSecret(secret.access_token_ciphertext, secretContext),
     tokenType: secret.token_type || 'Bearer',
   }
 }
@@ -190,6 +191,7 @@ async function vaultedConnection(userId: string, installationId: string): Promis
 async function refreshGithubCredential(
   installationId: string,
   current: ConnectorSecretRow,
+  secretContext: string,
 ): Promise<ConnectorSecretRow> {
   const clientId = Deno.env.get('GITHUB_CONNECTOR_CLIENT_ID')
   const clientSecret = Deno.env.get('GITHUB_CONNECTOR_CLIENT_SECRET')
@@ -199,7 +201,7 @@ async function refreshGithubCredential(
     headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: await decryptSecret(current.refresh_token_ciphertext),
+      refresh_token: await decryptSecret(current.refresh_token_ciphertext, secretContext),
       client_id: clientId,
       client_secret: clientSecret,
     }),
@@ -213,9 +215,9 @@ async function refreshGithubCredential(
   }
   if (!response.ok || typeof token.access_token !== 'string') throw new Error('refresh failed')
   const next: ConnectorSecretRow = {
-    access_token_ciphertext: await encryptSecret(token.access_token),
+    access_token_ciphertext: await encryptSecret(token.access_token, secretContext),
     refresh_token_ciphertext: typeof token.refresh_token === 'string'
-      ? await encryptSecret(token.refresh_token)
+      ? await encryptSecret(token.refresh_token, secretContext)
       : current.refresh_token_ciphertext,
     token_type: typeof token.token_type === 'string' ? token.token_type : current.token_type,
   }
@@ -224,10 +226,11 @@ async function refreshGithubCredential(
     new URLSearchParams({ installation_id: `eq.${installationId}` }).toString(),
     { method: 'PATCH', body: next },
   )
+  const expiresIn = Number(token.expires_in)
   await markInstallation(installationId, {
     status: 'authorized',
-    token_expires_at: typeof token.expires_in === 'number'
-      ? new Date(Date.now() + token.expires_in * 1_000).toISOString()
+    token_expires_at: Number.isFinite(expiresIn) && expiresIn > 0
+      ? new Date(Date.now() + expiresIn * 1_000).toISOString()
       : null,
     last_error: null,
   })
@@ -397,6 +400,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const responseHeaders: Record<string, string> = {
     ...cors(req),
     'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+    ...(vaulted ? { 'Cache-Control': 'no-store' } : {}),
   }
   const sessionId = upstream.headers.get('mcp-session-id')
   if (sessionId) responseHeaders['Mcp-Session-Id'] = sessionId

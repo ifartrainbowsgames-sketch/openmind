@@ -175,6 +175,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
   const [connectionOverrides, setConnectionOverrides] = useState<Record<string, string[]>>({})
   const [selectedId, setSelectedId] = useState(PRESET_EMPLOYEES[0].id)
   const [liveConfigs, setLiveConfigs] = useState<LiveConnectionConfig[]>([])
+  const [connectionSyncError, setConnectionSyncError] = useState<string | null>(null)
   const [autonomyMap, setAutonomyMap] = useState<Record<string, Autonomy>>({})
   const [scoresVersion, setScoresVersion] = useState(0)
 
@@ -242,9 +243,14 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
         )
         saveLiveConnections(checked)
         setLiveConfigs(checked)
+        setConnectionSyncError(null)
       })
-      .catch(() => {
-        // Manual/session connections remain available when server metadata cannot load.
+      .catch((error) => {
+        setConnectionSyncError(
+          error instanceof Error
+            ? error.message
+            : 'Installed connectors could not be loaded. Manual connections remain available.',
+        )
       })
     setAutonomyMap(loadAutonomy())
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
@@ -597,7 +603,13 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
         </button>
       </div>
 
-      {tab === 'connections' && <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />}
+      {tab === 'connections' && (
+        <ConnectionsPanel
+          configs={liveConfigs}
+          onChange={setLiveConfigs}
+          loadError={connectionSyncError}
+        />
+      )}
 
       {tab === 'studio' && (
         <>

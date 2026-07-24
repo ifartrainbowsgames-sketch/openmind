@@ -1,6 +1,8 @@
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
-const AAD = encoder.encode('openmind-connector-v1')
+function additionalData(context?: string): Uint8Array {
+  return encoder.encode(`openmind-connector-v1:${context ?? 'default'}`)
+}
 
 function base64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -39,21 +41,25 @@ export async function pkceChallenge(verifier: string): Promise<string> {
   return sha256Base64Url(verifier)
 }
 
-export async function encryptSecret(value: string): Promise<string> {
+export async function encryptSecret(value: string, context?: string): Promise<string> {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: AAD },
+    { name: 'AES-GCM', iv, additionalData: additionalData(context) },
     await encryptionKey(),
     encoder.encode(value),
   )
   return `v1.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`
 }
 
-export async function decryptSecret(value: string): Promise<string> {
+export async function decryptSecret(value: string, context?: string): Promise<string> {
   const [version, encodedIv, encodedCiphertext] = value.split('.')
   if (version !== 'v1' || !encodedIv || !encodedCiphertext) throw new Error('Unsupported OAuth ciphertext')
   const plaintext = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: arrayBuffer(fromBase64Url(encodedIv)), additionalData: AAD },
+    {
+      name: 'AES-GCM',
+      iv: arrayBuffer(fromBase64Url(encodedIv)),
+      additionalData: additionalData(context),
+    },
     await encryptionKey(),
     arrayBuffer(fromBase64Url(encodedCiphertext)),
   )
