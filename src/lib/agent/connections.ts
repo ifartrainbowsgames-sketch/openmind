@@ -5,27 +5,69 @@ export interface Connection {
   id: string
   name: string
   desc: string
-  category: 'email' | 'calendar' | 'docs' | 'chat' | 'code' | 'tickets' | 'crm' | 'notes'
+  category: 'email' | 'calendar' | 'docs' | 'chat' | 'code' | 'tickets' | 'crm' | 'notes' | 'automation' | 'agents'
+  /** Transports this marketplace plugin can use. */
+  transports: ('mcp' | 'rest' | 'webhook')[]
+  featured?: boolean
+  badge?: string
+  docsUrl?: string
 }
 
-export const CONNECTIONS: Record<string, Connection> = {
-  gmail: { id: 'gmail', name: 'Gmail', desc: 'Read and triage the inbox', category: 'email' },
-  outlook: { id: 'outlook', name: 'Outlook', desc: 'Read and triage the inbox', category: 'email' },
-  gcal: { id: 'gcal', name: 'Google Calendar', desc: 'Check schedule and meetings', category: 'calendar' },
-  gdrive: { id: 'gdrive', name: 'Google Drive', desc: 'Find files and documents', category: 'docs' },
-  notion: { id: 'notion', name: 'Notion', desc: 'Search workspace pages', category: 'notes' },
-  slack: { id: 'slack', name: 'Slack', desc: 'Read channels and mentions', category: 'chat' },
-  github: { id: 'github', name: 'GitHub', desc: 'Issues, PRs and reviews', category: 'code' },
-  linear: { id: 'linear', name: 'Linear', desc: 'Track issues and cycles', category: 'tickets' },
-  jira: { id: 'jira', name: 'Jira', desc: 'Track tickets and sprints', category: 'tickets' },
-  zendesk: { id: 'zendesk', name: 'Zendesk', desc: 'Support ticket queue', category: 'tickets' },
-  hubspot: { id: 'hubspot', name: 'HubSpot', desc: 'Deals, contacts and CRM', category: 'crm' },
+/**
+ * Versioned plugin manifests for the connection marketplace. A manifest is
+ * public metadata only; tenant URLs and credentials live in LiveConnectionConfig.
+ */
+export const PLUGIN_CATALOG: Record<string, Connection> = {
+  n8n: {
+    id: 'n8n',
+    name: 'n8n',
+    desc: 'Run and manage automations through MCP or a workflow webhook',
+    category: 'automation',
+    transports: ['mcp', 'webhook'],
+    featured: true,
+    badge: 'First-class',
+    docsUrl: 'https://docs.n8n.io/connect/connect-to-n8n-mcp-server',
+  },
+  openclaw: {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    desc: 'Delegate work to an OpenClaw agent through its secure webhook gateway',
+    category: 'agents',
+    transports: ['webhook'],
+    featured: true,
+    badge: 'First-class',
+    docsUrl: 'https://github.com/openclaw/openclaw/blob/main/docs/automation/webhook.md',
+  },
+  gmail: { id: 'gmail', name: 'Gmail', desc: 'Read and triage the inbox', category: 'email', transports: ['mcp'] },
+  outlook: { id: 'outlook', name: 'Outlook', desc: 'Read and triage the inbox', category: 'email', transports: ['mcp'] },
+  gcal: { id: 'gcal', name: 'Google Calendar', desc: 'Check schedule and meetings', category: 'calendar', transports: ['mcp'] },
+  gdrive: { id: 'gdrive', name: 'Google Drive', desc: 'Find files and documents', category: 'docs', transports: ['mcp'] },
+  notion: { id: 'notion', name: 'Notion', desc: 'Search workspace pages', category: 'notes', transports: ['mcp'] },
+  slack: { id: 'slack', name: 'Slack', desc: 'Read channels and mentions', category: 'chat', transports: ['mcp'] },
+  github: { id: 'github', name: 'GitHub', desc: 'Issues, PRs and reviews', category: 'code', transports: ['mcp'] },
+  linear: { id: 'linear', name: 'Linear', desc: 'Track issues and cycles', category: 'tickets', transports: ['mcp'] },
+  jira: { id: 'jira', name: 'Jira', desc: 'Track tickets and sprints', category: 'tickets', transports: ['mcp'] },
+  zendesk: { id: 'zendesk', name: 'Zendesk', desc: 'Support ticket queue', category: 'tickets', transports: ['rest'] },
+  hubspot: { id: 'hubspot', name: 'HubSpot', desc: 'Deals, contacts and CRM', category: 'crm', transports: ['mcp'] },
 }
+
+/** Backwards-compatible name consumed by staffing and the graph runtime. */
+export const CONNECTIONS = PLUGIN_CATALOG
 
 export const CONNECTION_IDS = Object.keys(CONNECTIONS)
 
 // Canned-but-plausible datasets used only when a connection is visibly MOCK.
 export const MOCK: Record<string, string[]> = {
+  n8n: [
+    'Workflow "Qualify inbound lead" — active, last run succeeded 8 minutes ago.',
+    'Workflow "Daily support digest" — active, scheduled for 17:00 UTC.',
+    'Workflow "Sync CRM contacts" — paused after an authentication error.',
+  ],
+  openclaw: [
+    'Agent "operations" — ready to accept delegated tasks.',
+    'Agent "research" — last run completed with 4 cited sources.',
+    'Agent "release-manager" — waiting for deployment approval.',
+  ],
   gmail: [
     'From sara@acme.com — "Refund request #4821": customer on the Pro plan asks for a refund, order 4821.',
     'From tom@beta.io — "Widget not loading on Safari": console shows a CORS error when the script loads.',

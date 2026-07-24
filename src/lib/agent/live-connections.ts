@@ -3,25 +3,30 @@ import { CONNECTION_IDS, CONNECTIONS, mockLookup } from './connections'
 import { argumentsForSchema } from './plan'
 import type { Employee, ToolSpec } from './types'
 
-export type LiveConnectionMode = 'mcp' | 'rest' | 'mock'
-type ConnectionStatus = 'untested' | 'live' | 'error' | 'mock'
+export type LiveConnectionMode = 'mcp' | 'rest' | 'webhook' | 'mock'
+export type ConnectionStatus = 'untested' | 'ready' | 'live' | 'error' | 'mock'
 
 export interface LiveConnectionConfig {
   connectionId: string
   mode: LiveConnectionMode
-  /** MCP server URL, or Zendesk base URL for REST mode. */
+  /** MCP server, REST base, or webhook endpoint URL. */
   serverUrl?: string
   /** Session-only credential; never written to persistent localStorage. */
   token?: string
   status: ConnectionStatus
   toolNames?: string[]
   toolSchemas?: Record<string, unknown>
+  /** Non-secret, plugin-specific settings safe to persist locally. */
+  options?: {
+    agentId?: string
+  }
   lastError?: string
 }
 
 export interface McpPreset {
   connectionId: string
-  mode: 'mcp' | 'rest' | 'aggregator'
+  mode: 'mcp' | 'rest' | 'webhook' | 'aggregator'
+  supportedModes?: ('mcp' | 'webhook')[]
   serverUrl?: string
   auth: 'bearer' | 'basic' | 'none'
   tokenLabel: string
@@ -29,6 +34,16 @@ export interface McpPreset {
 }
 
 export const MCP_PRESETS: Record<string, McpPreset> = {
+  n8n: {
+    connectionId: 'n8n', mode: 'mcp', supportedModes: ['mcp', 'webhook'],
+    auth: 'bearer', tokenLabel: 'n8n MCP access token or webhook bearer token',
+    note: 'Recommended: enable n8n’s instance-level MCP server. Webhook mode can instead run one published workflow.',
+  },
+  openclaw: {
+    connectionId: 'openclaw', mode: 'webhook',
+    auth: 'bearer', tokenLabel: 'OpenClaw hooks token',
+    note: 'Use the public HTTPS /hooks/agent endpoint. OpenMind sends deliver:false and can target an allowed agent ID.',
+  },
   github: {
     connectionId: 'github', mode: 'mcp', serverUrl: 'https://api.githubcopilot.com/mcp/',
     auth: 'bearer', tokenLabel: 'GitHub personal access token',
@@ -109,12 +124,19 @@ function normalizeConfig(value: unknown): LiveConnectionConfig | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Record<string, unknown>
   if (typeof raw.connectionId !== 'string' || !CONNECTION_IDS.includes(raw.connectionId)) return null
-  const mode: LiveConnectionMode = raw.mode === 'mcp' || raw.mode === 'rest' || raw.mode === 'mock' ? raw.mode : 'mock'
+  const mode: LiveConnectionMode =
+    raw.mode === 'mcp' || raw.mode === 'rest' || raw.mode === 'webhook' || raw.mode === 'mock' ? raw.mode : 'mock'
   const status: ConnectionStatus =
-    raw.status === 'untested' || raw.status === 'live' || raw.status === 'error' || raw.status === 'mock'
+    raw.status === 'untested' || raw.status === 'ready' || raw.status === 'live' || raw.status === 'error' || raw.status === 'mock'
       ? raw.status
       : 'untested'
   const token = sessionStore()?.getItem(`${CREDENTIAL_PREFIX}${raw.connectionId}`) ?? undefined
+  const rawOptions = raw.options && typeof raw.options === 'object'
+    ? raw.options as Record<string, unknown>
+    : undefined
+  const agentId = typeof rawOptions?.agentId === 'string'
+    ? rawOptions.agentId.trim().slice(0, 128)
+    : ''
   return {
     connectionId: raw.connectionId,
     mode,
@@ -122,6 +144,7 @@ function normalizeConfig(value: unknown): LiveConnectionConfig | null {
     ...(typeof raw.serverUrl === 'string' ? { serverUrl: raw.serverUrl } : {}),
     ...(Array.isArray(raw.toolNames) ? { toolNames: raw.toolNames.filter((name): name is string => typeof name === 'string') } : {}),
     ...(raw.toolSchemas && typeof raw.toolSchemas === 'object' ? { toolSchemas: raw.toolSchemas as Record<string, unknown> } : {}),
+    ...(agentId ? { options: { agentId } } : {}),
     ...(typeof raw.lastError === 'string' ? { lastError: raw.lastError } : {}),
     ...(token ? { token } : {}),
   }
@@ -256,9 +279,81 @@ export async function zendeskTool(
     : `≈${data.count.value} tickets in the queue (count refreshed ${data.count.refreshed_at ?? 'recently'}).`
 }
 
+export const WEBHOOK_TOOLS = {
+  n8n: 'run_workflow',
+  openclaw: 'delegate_task',
+} as const
+
+function webhookEndpoint(cfg: LiveConnectionConfig): URL {
+  const url = validateConnectionUrl(cfg.serverUrl ?? '')
+  if (cfg.connectionId === 'openclaw' && !/\/agent\/?$/.test(url.pathname)) {
+    throw new Error('OpenClaw URL must be its agent hook endpoint (normally /hooks/agent).')
+  }
+  return url
+}
+
+function webhookToolName(connectionId: string): string {
+  const name = WEBHOOK_TOOLS[connectionId as keyof typeof WEBHOOK_TOOLS]
+  if (!name) throw new Error(`Webhook mode is not supported for ${connectionId}.`)
+  return name
+}
+
+function webhookResult(body: string, status: number): string {
+  const trimmed = body.trim()
+  if (!trimmed) return `Request accepted (HTTP ${status}).`
+  try {
+    const parsed = JSON.parse(trimmed) as Record<string, unknown>
+    const candidate = parsed.output ?? parsed.result ?? parsed.message ?? parsed.response
+    if (typeof candidate === 'string') return candidate.slice(0, 4_000)
+    return JSON.stringify(candidate ?? parsed).slice(0, 4_000)
+  } catch {
+    return trimmed.slice(0, 4_000)
+  }
+}
+
+export async function webhookTool(
+  cfg: LiveConnectionConfig,
+  input: string,
+  args?: Record<string, unknown>,
+): Promise<string> {
+  const endpoint = webhookEndpoint(cfg)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  }
+  if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`
+  const payload = cfg.connectionId === 'openclaw'
+    ? {
+        message: input,
+        ...(cfg.options?.agentId ? { agentId: cfg.options.agentId } : {}),
+        name: 'OpenMind AI employee',
+        deliver: false,
+      }
+    : {
+        task: input,
+        arguments: args ?? {},
+        source: 'openmind-ai-employee',
+      }
+  const reply = await restFetch(endpoint.toString(), { method: 'POST', headers, payload }, 60_000)
+  if (!reply.ok) {
+    throw new Error(`${CONNECTIONS[cfg.connectionId]?.name ?? cfg.connectionId} HTTP ${reply.status} — ${reply.body.slice(0, 140)}`)
+  }
+  return webhookResult(reply.body, reply.status)
+}
+
 export async function probeConnection(cfg: LiveConnectionConfig): Promise<LiveConnectionConfig> {
   if (cfg.mode === 'mock') return { ...cfg, status: 'mock', lastError: undefined }
   try {
+    if (cfg.mode === 'webhook') {
+      webhookEndpoint(cfg)
+      const tool = webhookToolName(cfg.connectionId)
+      if (cfg.connectionId === 'openclaw' && !cfg.token) {
+        throw new Error('OpenClaw requires the hooks token configured on its gateway.')
+      }
+      // Testing a webhook would execute a workflow/agent. Validate and save it
+      // as READY; the first employee task provides the real execution check.
+      return { ...cfg, status: 'ready', toolNames: [tool], lastError: undefined }
+    }
     if (cfg.mode === 'rest') {
       if (cfg.connectionId !== 'zendesk') throw new Error('REST mode is currently supported only for Zendesk.')
       await zendeskGet(cfg, '/api/v2/users/me.json')
@@ -323,6 +418,29 @@ export function resolveConnectionTools(
         name: connection.name,
         desc: 'LIVE Zendesk support queue',
         run: async (input) => runStamped(id, () => zendeskTool(config, 'search_tickets', input)),
+      })
+      continue
+    }
+
+    if ((config?.status === 'ready' || config?.status === 'live') && config.mode === 'webhook') {
+      const name = webhookToolName(id)
+      const run = (input: string, args?: Record<string, unknown>) =>
+        runStamped(id, () => webhookTool(config, input, args))
+      output.push({
+        id: `${id}__${name}`,
+        name: `${connection.name}: ${name.replace(/_/g, ' ')}`,
+        desc: `LIVE ${connection.name} webhook "${name}"`,
+        inputSchema: {
+          type: 'object',
+          properties: { task: { type: 'string', description: 'Task to send to the connected workflow or agent' } },
+        },
+        run,
+      })
+      output.push({
+        id,
+        name: connection.name,
+        desc: `LIVE ${connection.name} via webhook`,
+        run,
       })
       continue
     }

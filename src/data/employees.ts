@@ -65,6 +65,7 @@ export const PRESET_EMPLOYEES: Employee[] = [
 ]
 
 const STORE_KEY = 'openmind-employees-v1'
+const CONNECTION_OVERRIDES_KEY = 'openmind-employee-connections-v1'
 
 export function loadCustomEmployees(): Employee[] {
   try {
@@ -80,6 +81,34 @@ export function loadCustomEmployees(): Employee[] {
 export function saveCustomEmployees(list: Employee[]) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(list))
+  } catch {
+    /* storage full or unavailable — non-fatal */
+  }
+}
+
+/** Per-preset attachment edits; custom employees keep connections on Employee. */
+export function loadEmployeeConnectionOverrides(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(CONNECTION_OVERRIDES_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter(([, value]) => Array.isArray(value))
+        .map(([id, value]) => [
+          id,
+          [...new Set((value as unknown[]).filter((item): item is string => typeof item === 'string'))],
+        ]),
+    )
+  } catch {
+    return {}
+  }
+}
+
+export function saveEmployeeConnectionOverrides(overrides: Record<string, string[]>): void {
+  try {
+    localStorage.setItem(CONNECTION_OVERRIDES_KEY, JSON.stringify(overrides))
   } catch {
     /* storage full or unavailable — non-fatal */
   }

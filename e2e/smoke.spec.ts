@@ -23,3 +23,11 @@ test('employees route renders the workforce surface', async ({ page }) => {
   await expect(page.getByRole('main')).toBeVisible()
   await expect(page.getByRole('heading', { name: /hire an ai workforce/i })).toBeVisible()
 })
+
+test('connection marketplace exposes n8n and OpenClaw plugins', async ({ page }) => {
+  await page.goto('/employees')
+  await page.getByRole('button', { name: /Connections\s+0 ready/i }).click()
+  await expect(page.getByText('Connection marketplace', { exact: true })).toBeVisible()
+  await expect(page.getByText('n8n', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('OpenClaw', { exact: true }).first()).toBeVisible()
+})

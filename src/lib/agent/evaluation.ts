@@ -70,6 +70,8 @@ export const AGENT_BENCHMARK_CASES: readonly AgentEvaluationCase[] = [
   { id: 'conn-hubspot', category: 'connection', input: 'Which HubSpot deals are in the pipeline?', expectedTools: ['hubspot'] },
   { id: 'conn-notion', category: 'connection', input: 'Find the launch checklist in Notion.', expectedTools: ['notion'] },
   { id: 'conn-drive', category: 'connection', input: 'Find the roadmap file in Google Drive.', expectedTools: ['gdrive'] },
+  { id: 'conn-n8n', category: 'connection', input: 'Run the n8n lead qualification workflow.', expectedTools: ['n8n'] },
+  { id: 'conn-openclaw', category: 'connection', input: 'Delegate this incident research to OpenClaw.', expectedTools: ['openclaw'] },
 
   { id: 'multi-summary-sentiment', category: 'multi-tool', input: 'Summarize this feedback and check sentiment: I love the speed but setup is frustrating.', expectedTools: ['summarize', 'sentiment'] },
   { id: 'multi-mail-calendar', category: 'multi-tool', input: 'Check my email and calendar for today.', expectedTools: ['gmail', 'gcal'] },

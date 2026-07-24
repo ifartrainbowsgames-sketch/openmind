@@ -370,6 +370,64 @@ describe('zendesk REST mode', () => {
   })
 })
 
+// ── (h) n8n + OpenClaw marketplace plugins ─────────────────────────────────
+
+describe('marketplace webhook plugins', () => {
+  it('runs an n8n workflow webhook with structured task arguments', async () => {
+    fetchMock.mockImplementation(async (url, init) => {
+      expect(url).toBe('https://n8n.example.test/webhook/openmind')
+      expect(init.method).toBe('POST')
+      expect(init.headers?.Authorization).toBe('Bearer n8n-secret')
+      expect(JSON.parse(init.body ?? '{}')).toEqual({
+        task: 'qualify this lead',
+        arguments: { leadId: 'lead-42' },
+        source: 'openmind-ai-employee',
+      })
+      return jsonRes({ output: 'lead qualified' })
+    })
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'n8n',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://n8n.example.test/webhook/openmind',
+      token: 'n8n-secret',
+      toolNames: ['run_workflow'],
+    }
+    const tool = agent.resolveConnectionTools(empWith(['n8n']), [cfg])
+      .find((candidate) => candidate.id === 'n8n__run_workflow')!
+    const out = await tool.run('qualify this lead', { leadId: 'lead-42' })
+    expect(out).toBe('[LIVE · n8n] lead qualified')
+  })
+
+  it('delegates to an allowed OpenClaw agent without channel delivery', async () => {
+    fetchMock.mockImplementation(async (url, init) => {
+      expect(url).toBe('https://claw.example.test/hooks/agent')
+      expect(init.headers?.Authorization).toBe('Bearer hooks-secret')
+      expect(JSON.parse(init.body ?? '{}')).toEqual({
+        message: 'research this incident',
+        agentId: 'operations',
+        name: 'OpenMind AI employee',
+        deliver: false,
+      })
+      return jsonRes({ runId: 'run-123', status: 'accepted' }, 202)
+    })
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+      toolNames: ['delegate_task'],
+    }
+    const out = await agent.resolveConnectionTools(empWith(['openclaw']), [cfg])
+      .find((candidate) => candidate.id === 'openclaw__delegate_task')!
+      .run('research this incident')
+    expect(out).toContain('[LIVE · openclaw]')
+    expect(out).toContain('run-123')
+  })
+})
+
 // ── (h) probeConnection status transitions ───────────────────────────────────
 
 describe('probeConnection', () => {
@@ -424,6 +482,41 @@ describe('probeConnection', () => {
     expect(out.status).toBe('live')
     expect(out.toolNames).toEqual([...agent.ZENDESK_TOOLS])
   })
+
+  it('validates webhook plugins without executing them', async () => {
+    const out = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+    })
+    expect(out.status).toBe('ready')
+    expect(out.toolNames).toEqual(['delegate_task'])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsafe OpenClaw webhook configuration', async () => {
+    const missingToken = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+    })
+    expect(missingToken.status).toBe('error')
+    expect(missingToken.lastError).toContain('hooks token')
+
+    const wrongPath = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/api/run',
+      token: 'secret',
+    })
+    expect(wrongPath.status).toBe('error')
+    expect(wrongPath.lastError).toContain('/hooks/agent')
+  })
 })
 
 // ── persistence ──────────────────────────────────────────────────────────────
@@ -456,10 +549,33 @@ describe('live connection persistence', () => {
     expect(agent.loadLiveConnections()[0].token).toBeUndefined()
   })
 
+  it('persists safe plugin options but keeps webhook tokens session-only', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+    })
+    const persisted = localStore.getItem(agent.LIVE_CONNECTIONS_KEY) ?? ''
+    expect(persisted).toContain('operations')
+    expect(persisted).not.toContain('hooks-secret')
+    expect(agent.loadLiveConnections()[0]).toMatchObject({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      options: { agentId: 'operations' },
+      token: 'hooks-secret',
+    })
+  })
+
   it('falls back to presets for server URLs', () => {
     expect(agent.MCP_PRESETS.github.serverUrl).toBe('https://api.githubcopilot.com/mcp/')
     expect(agent.MCP_PRESETS.zendesk.mode).toBe('rest')
     expect(agent.MCP_PRESETS.gmail.mode).toBe('aggregator')
+    expect(agent.MCP_PRESETS.n8n.supportedModes).toEqual(['mcp', 'webhook'])
+    expect(agent.MCP_PRESETS.openclaw.mode).toBe('webhook')
   })
 })
 

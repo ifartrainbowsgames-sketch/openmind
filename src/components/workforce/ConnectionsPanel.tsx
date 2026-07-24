@@ -1,10 +1,10 @@
-// Connections panel — upgrade any of the 11 app connections from MOCK to LIVE.
-// Every connection ships as a canned-data mock (honestly stamped); pasting real
-// MCP/REST credentials + a successful probe flips it to LIVE with the real
-// tool count. "Mock data until you connect — no fake integrations."
+// Connection marketplace — configure a plugin once, then attach it to employees.
+// Credentials remain session-only; public plugin metadata and non-secret config
+// are persisted separately.
 import { useState, type CSSProperties } from 'react'
 import {
-  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Link2, Loader2, Plug, Unplug,
+  AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Link2, Loader2,
+  Plug, Search, Sparkles, Unplug,
 } from 'lucide-react'
 import {
   CONNECTIONS, MCP_PRESETS, probeConnection, removeLiveConnection, upsertLiveConnection,
@@ -19,8 +19,10 @@ interface Props {
 
 interface FormState {
   open: boolean
+  mode: 'mcp' | 'webhook'
   url: string
   token: string
+  agentId: string
   subdomain: string
   email: string
   apiToken: string
@@ -28,24 +30,43 @@ interface FormState {
   formError?: string
 }
 
-const EMPTY_FORM: FormState = { open: false, url: '', token: '', subdomain: '', email: '', apiToken: '', probing: false }
+const EMPTY_FORM: FormState = {
+  open: false,
+  mode: 'mcp',
+  url: '',
+  token: '',
+  agentId: '',
+  subdomain: '',
+  email: '',
+  apiToken: '',
+  probing: false,
+}
 
-export function connStatus(configs: LiveConnectionConfig[], id: string): 'live' | 'error' | 'mock' {
+export type MarketplaceStatus = 'live' | 'ready' | 'error' | 'mock'
+
+export function connStatus(configs: LiveConnectionConfig[], id: string): MarketplaceStatus {
   const cfg = configs.find((c) => c.connectionId === id)
   if (!cfg) return 'mock'
   if (cfg.status === 'live') return 'live'
+  if (cfg.status === 'ready') return 'ready'
   if (cfg.status === 'error') return 'error'
   return 'mock'
 }
 
-export function StatusChip({ status }: { status: 'live' | 'error' | 'mock' }) {
+export function StatusChip({ status }: { status: MarketplaceStatus }) {
   const cls =
     status === 'live'
       ? 'border-emerald-700 bg-emerald-50 text-emerald-800'
+      : status === 'ready'
+      ? 'border-sky-700 bg-sky-50 text-sky-800'
       : status === 'error'
       ? 'border-red-600 bg-red-50 text-red-700'
       : 'border-amber-600 bg-amber-50 text-amber-800'
-  const dot = status === 'live' ? 'bg-emerald-600' : status === 'error' ? 'bg-red-500' : 'bg-amber-500'
+  const dot =
+    status === 'live' ? 'bg-emerald-600'
+    : status === 'ready' ? 'bg-sky-600'
+    : status === 'error' ? 'bg-red-500'
+    : 'bg-amber-500'
   return (
     <span className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono-spec text-[9px] uppercase tracking-[0.14em] ${cls}`}>
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot} ${status === 'live' ? 'pulse-dot' : ''}`} />
@@ -56,12 +77,16 @@ export function StatusChip({ status }: { status: 'live' | 'error' | 'mock' }) {
 
 export default function ConnectionsPanel({ configs, onChange }: Props) {
   const [forms, setForms] = useState<Record<string, FormState>>({})
+  const [query, setQuery] = useState('')
 
   const form = (id: string): FormState => forms[id] ?? EMPTY_FORM
   const patch = (id: string, p: Partial<FormState>) =>
     setForms((f) => ({ ...f, [id]: { ...EMPTY_FORM, ...f[id], ...p } }))
 
-  const liveCount = configs.filter((c) => c.status === 'live').length
+  const connectedCount = configs.filter((c) => c.status === 'live' || c.status === 'ready').length
+  const plugins = Object.values(CONNECTIONS)
+    .filter((conn) => `${conn.name} ${conn.desc} ${conn.category}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => Number(!!b.featured) - Number(!!a.featured) || a.name.localeCompare(b.name))
 
   const buildConfig = (id: string): LiveConnectionConfig | { error: string } => {
     const preset = MCP_PRESETS[id]
@@ -77,6 +102,25 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         serverUrl: `https://${sub}.zendesk.com`,
         token: `${f.email.trim()}/token:${f.apiToken.trim()}`,
         status: 'untested',
+      }
+    }
+    if (f.mode === 'webhook') {
+      const url = f.url.trim()
+      if (!url) {
+        return {
+          error: id === 'openclaw'
+            ? 'Paste the public OpenClaw endpoint ending in /hooks/agent.'
+            : 'Paste the production webhook URL from your n8n workflow.',
+        }
+      }
+      if (id === 'openclaw' && !f.token.trim()) return { error: 'OpenClaw requires its hooks token.' }
+      return {
+        connectionId: id,
+        mode: 'webhook',
+        serverUrl: url,
+        token: f.token.trim() || undefined,
+        status: 'untested',
+        ...(id === 'openclaw' && f.agentId.trim() ? { options: { agentId: f.agentId.trim() } } : {}),
       }
     }
     const url = f.url.trim() || preset.serverUrl || ''
@@ -114,40 +158,82 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
     <div className="border border-border/60 bg-card p-5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <span className="spec-label flex items-center gap-2">
-          <Link2 className="h-3.5 w-3.5" /> Connections — plug employees into real apps
+          <Link2 className="h-3.5 w-3.5" /> Connection marketplace
         </span>
         <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          {liveCount} live · {Object.keys(CONNECTIONS).length} total
+          {connectedCount} configured · {Object.keys(CONNECTIONS).length} plugins
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Mock data until you connect — no fake integrations. Test a connection and its employees
-        start reading real data, stamped <span className="text-emerald-700">[LIVE]</span> on every tool call.
-        Tokens stay only in this tab session and are removed when the tab session ends. A server-managed vault is still planned.
+        Configure plugins here, then attach them to an employee in the Studio. n8n can expose MCP tools or one
+        workflow webhook; OpenClaw accepts delegated tasks through <span className="text-foreground">/hooks/agent</span>.
+        Tokens stay only in this tab session. Webhooks are saved as READY without firing them; the first task is their execution check.
       </p>
 
+      <label className="mb-4 flex max-w-md items-center gap-2 border border-border/60 bg-background px-3">
+        <Search className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="sr-only">Search connection plugins</span>
+        <input
+          className="min-w-0 flex-1 bg-transparent py-2 font-mono-spec text-[11px] outline-none placeholder:text-muted-foreground/60"
+          placeholder="Search plugins, categories, or capabilities…"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+
       <div className="grid gap-3 md:grid-cols-2">
-        {Object.values(CONNECTIONS).map((conn, ci) => {
+        {plugins.map((conn, ci) => {
           const preset = MCP_PRESETS[conn.id]
           const cfg = configs.find((c) => c.connectionId === conn.id)
           const status = connStatus(configs, conn.id)
           const f = form(conn.id)
           return (
-            <div key={conn.id} className="dash-cascade border border-border/60 bg-card/60 p-3.5" style={{ '--dash-i': ci } as CSSProperties}>
+            <div
+              key={conn.id}
+              className={`dash-cascade border bg-card/60 p-3.5 ${conn.featured ? 'border-primary/70' : 'border-border/60'}`}
+              style={{ '--dash-i': ci } as CSSProperties}
+            >
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <span className="font-serif-display text-base font-semibold">{conn.name}</span>
                   <span className="ml-2 font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground/70">
                     {conn.category}
                   </span>
+                  {conn.badge && (
+                    <span className="ml-2 inline-flex items-center gap-1 border border-primary/50 px-1.5 py-0.5 font-mono-spec text-[8px] uppercase tracking-[0.12em] text-primary">
+                      <Sparkles className="h-2.5 w-2.5" /> {conn.badge}
+                    </span>
+                  )}
                 </div>
                 <StatusChip status={status} />
               </div>
               <p className="mt-1 font-mono-spec text-[10px] leading-relaxed text-muted-foreground">{conn.desc}</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {conn.transports.map((transport) => (
+                  <span key={transport} className="border border-border/50 px-1.5 py-0.5 font-mono-spec text-[8px] uppercase tracking-[0.12em] text-muted-foreground">
+                    {transport}
+                  </span>
+                ))}
+                {conn.docsUrl && (
+                  <a
+                    href={conn.docsUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-mono-spec text-[9px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-accent"
+                  >
+                    setup docs <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                )}
+              </div>
 
               {status === 'live' && (
                 <p className="mt-1.5 flex items-center gap-1.5 font-mono-spec text-[10px] text-emerald-700">
                   <CheckCircle2 className="h-3 w-3" /> {cfg?.toolNames?.length ?? 0} tools live
+                </p>
+              )}
+              {status === 'ready' && (
+                <p className="mt-1.5 flex items-center gap-1.5 font-mono-spec text-[10px] text-sky-700">
+                  <CheckCircle2 className="h-3 w-3" /> saved · executes on first employee task
                 </p>
               )}
               {status === 'error' && cfg?.lastError && (
@@ -162,16 +248,42 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                     open: !f.open,
                     // prefill from the saved config, else the preset's first-party URL
                     url: f.url || cfg?.serverUrl || preset?.serverUrl || '',
+                    mode:
+                      cfg?.mode === 'webhook' || cfg?.mode === 'mcp'
+                        ? cfg.mode
+                        : preset?.mode === 'webhook' ? 'webhook' : 'mcp',
+                    agentId: f.agentId || cfg?.options?.agentId || '',
                   })
                 }
                 className="mt-2 flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
               >
                 {f.open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                {status === 'mock' ? 'Set up live connection' : 'Edit credentials'}
+                {status === 'mock' ? 'Configure plugin' : 'Edit configuration'}
               </button>
 
               {f.open && preset && (
                 <div className="mt-2.5 space-y-2 border-t border-border/40 pt-2.5 animate-stamp">
+                  {preset.supportedModes && preset.supportedModes.length > 1 && (
+                    <div>
+                      <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                        Connection method
+                      </span>
+                      <div className="inline-grid grid-cols-2 border border-border/60">
+                        {preset.supportedModes.map((mode) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => patch(conn.id, { mode })}
+                            className={`px-3 py-1.5 font-mono-spec text-[9px] uppercase tracking-[0.13em] ${
+                              f.mode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-secondary'
+                            }`}
+                          >
+                            {mode === 'mcp' ? 'MCP server' : 'Workflow webhook'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {preset.mode === 'rest' ? (
                     <>
                       <label className="block">
@@ -188,6 +300,49 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                         <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Zendesk API token</span>
                         <input className={inputCls} type="password" placeholder="API token — session only" value={f.apiToken}
                           onChange={(e) => patch(conn.id, { apiToken: e.target.value })} />
+                      </label>
+                    </>
+                  ) : f.mode === 'webhook' ? (
+                    <>
+                      <label className="block">
+                        <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                          {conn.id === 'openclaw' ? 'OpenClaw /hooks/agent URL' : 'Production workflow webhook URL'}
+                        </span>
+                        <input
+                          className={inputCls}
+                          placeholder={
+                            conn.id === 'openclaw'
+                              ? 'https://claw.example.com/hooks/agent'
+                              : 'https://n8n.example.com/webhook/openmind'
+                          }
+                          value={f.url}
+                          onChange={(e) => patch(conn.id, { url: e.target.value })}
+                        />
+                      </label>
+                      {conn.id === 'openclaw' && (
+                        <label className="block">
+                          <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                            Agent ID (optional; must be allowed by the gateway)
+                          </span>
+                          <input
+                            className={inputCls}
+                            placeholder="operations"
+                            value={f.agentId}
+                            onChange={(e) => patch(conn.id, { agentId: e.target.value })}
+                          />
+                        </label>
+                      )}
+                      <label className="block">
+                        <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+                          {preset.tokenLabel}
+                        </span>
+                        <input
+                          className={inputCls}
+                          type="password"
+                          placeholder={conn.id === 'openclaw' ? 'Hooks token — session only' : 'Optional bearer token — session only'}
+                          value={f.token}
+                          onChange={(e) => patch(conn.id, { token: e.target.value })}
+                        />
                       </label>
                     </>
                   ) : (
@@ -220,7 +375,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                       className="inline-flex items-center gap-2 border border-primary bg-primary px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-primary-foreground transition-colors hover:border-accent hover:bg-accent disabled:opacity-40"
                     >
                       {f.probing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plug className="h-3 w-3" />}
-                      {f.probing ? 'Testing…' : 'Test connection'}
+                      {f.probing ? 'Checking…' : f.mode === 'webhook' ? 'Save webhook' : 'Test connection'}
                     </button>
                     {cfg && (
                       <button

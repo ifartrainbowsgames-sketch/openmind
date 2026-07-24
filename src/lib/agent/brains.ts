@@ -4,6 +4,8 @@ import type { AgentBrain, PlanStep } from './types'
 
 const ARITHMETIC = /[-\d(][\d\s+\-*/().%]*\d\)*/
 const CONNECTION_ROUTES: { pattern: RegExp; ids: string[]; unless?: RegExp }[] = [
+  { pattern: /\b(n8n|workflow|automation|automate)\b/i, ids: ['n8n'] },
+  { pattern: /\b(openclaw|delegate|sub-?agent)\b/i, ids: ['openclaw'] },
   { pattern: /\bgmail\b/i, ids: ['gmail'] },
   { pattern: /\boutlook\b/i, ids: ['outlook'] },
   { pattern: /\b(e-?mails?|inbox|mail)\b/i, ids: ['gmail', 'outlook'], unless: /\b(gmail|outlook)\b/i },
