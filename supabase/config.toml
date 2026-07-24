@@ -3,7 +3,13 @@ project_id = "openmind"
 [functions.mcp-proxy]
 verify_jwt = true
 
-# The marketing playground is public. The function applies origin, payload and
-# best-effort per-isolate rate limits; production should add an edge/WAF limit.
+# Public marketing and tenant widget gateway. Tenant requests require a
+# publishable widget key, enforce configured origins, and persist through the
+# service role; production should also add a distributed edge/WAF rate limit.
 [functions.openmind-chat]
+verify_jwt = false
+
+# Telegram authenticates this public webhook with
+# X-Telegram-Bot-Api-Secret-Token; the function verifies it explicitly.
+[functions.telegram-webhook]
 verify_jwt = false
