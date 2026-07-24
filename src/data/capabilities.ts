@@ -23,7 +23,7 @@ export const capabilities: Capability[] = [
     api: true,
     embed: true,
     icon: 'MessageSquare',
-    demoNote: 'Real ChatGPT via our secure gateway — zero keys on the page',
+    demoNote: 'Tries the secure gateway first and clearly labels the local fallback',
     features: ['Streaming replies', 'Custom knowledge', '32 languages'],
   },
 ]

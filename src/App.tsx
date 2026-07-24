@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router'
 import { Loader2 } from 'lucide-react'
 import { LenisProvider } from './components/fx'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // route-level code splitting — each page ships as its own chunk
 const Home = lazy(() => import('./pages/Home'))
@@ -19,16 +20,19 @@ function PageLoader() {
 
 export default function App() {
   return (
-    <LenisProvider>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/employees" element={<Employees />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </Suspense>
-    </LenisProvider>
+    <ErrorBoundary>
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+      <LenisProvider>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/employees" element={<Employees />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </LenisProvider>
+    </ErrorBoundary>
   )
 }

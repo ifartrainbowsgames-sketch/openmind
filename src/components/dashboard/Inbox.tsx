@@ -94,7 +94,12 @@ export default function Inbox() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-serif-display text-3xl font-semibold">Inbox</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-serif-display text-3xl font-semibold">Inbox</h2>
+            <span className="border border-amber-600 px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider text-amber-700">
+              interactive preview · sample conversations
+            </span>
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
             Every visitor conversation from your embedded widgets — AI answers first, you step in when it matters.
           </p>

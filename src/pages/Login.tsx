@@ -96,7 +96,7 @@ export default function Login() {
         </Link>
       </div>
 
-      <div className="flex flex-1 items-center justify-center px-6 py-16">
+      <main id="main-content" className="flex flex-1 items-center justify-center px-6 py-16">
         <div className="w-full max-w-md">
           <p className="spec-label mb-4 flex items-center gap-3">
             <span className="inline-block h-2 w-2 bg-accent" />
@@ -204,10 +204,10 @@ export default function Login() {
             </div>
 
             {error && (
-              <p className="mt-4 border border-accent/60 bg-accent/10 px-3 py-2 text-xs text-accent">{error}</p>
+              <p role="alert" aria-live="assertive" className="mt-4 border border-accent/60 bg-accent/10 px-3 py-2 text-xs text-accent">{error}</p>
             )}
             {notice && (
-              <p className="mt-4 border border-emerald-700/60 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{notice}</p>
+              <p role="status" aria-live="polite" className="mt-4 border border-emerald-700/60 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{notice}</p>
             )}
 
             <button
@@ -232,7 +232,7 @@ export default function Login() {
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

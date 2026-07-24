@@ -68,7 +68,12 @@ export default function PromptStudio() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="font-serif-display text-3xl font-semibold">Prompt Studio</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="font-serif-display text-3xl font-semibold">Prompt Studio</h2>
+          <span className="border border-amber-600 px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider text-amber-700">
+            local preview · canned test output
+          </span>
+        </div>
         <p className="mt-1 max-w-xl text-sm text-muted-foreground">
           The prompt is the product. Write it, guardrail it, test it against your attached data —
           then ship it to the widget with one save.
@@ -205,10 +210,10 @@ export default function PromptStudio() {
             }`}
           >
             <Save className="h-3.5 w-3.5" />
-            {saved ? '✓ Live on your widget' : 'Ship prompt to widget'}
+            {saved ? '✓ Saved in this preview' : 'Preview save'}
           </button>
           <p className="text-center font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            saves as v5 · previous versions restorable above
+            preview only · persistence and version restore are not connected
           </p>
         </div>
       </div>

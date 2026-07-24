@@ -62,7 +62,7 @@ export default function Home() {
     <div className="vt-page min-h-screen bg-background">
       <ScrollToTop />
       <Navbar />
-      <main ref={mainRef}>
+      <main id="main-content" ref={mainRef}>
         <Hero />
         <Playground />
         <Workforce />

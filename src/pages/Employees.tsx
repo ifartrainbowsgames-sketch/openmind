@@ -54,7 +54,7 @@ export default function Employees() {
         </div>
       </header>
 
-      <main ref={mainRef} className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
+      <main id="main-content" ref={mainRef} className="mx-auto max-w-5xl px-4 py-10 sm:px-6 sm:py-14">
         <div className="mb-8">
           <p className="emp-hero-stamp spec-label mb-4 flex items-center gap-3">
             <span className="inline-block h-2 w-2 bg-accent" /> The agent workforce

@@ -1,7 +1,5 @@
-import { useState } from 'react'
-import { providers } from '@/data/capabilities'
 import type { Source } from './types'
-import { Check, Plus, KeyRound } from 'lucide-react'
+import { KeyRound, Lock } from 'lucide-react'
 
 // ── Overview ─────────────────────────────────────────────────────────────────
 
@@ -26,7 +24,12 @@ export function Overview({ sources }: { sources: Source[] }) {
 
   return (
     <div className="space-y-6">
-      <h2 className="font-serif-display text-3xl font-semibold">Overview</h2>
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="font-serif-display text-3xl font-semibold">Overview</h2>
+        <span className="border border-amber-600 px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider text-amber-700">
+          preview · sample metrics
+        </span>
+      </div>
 
       <div className="grid grid-cols-2 border-l border-t border-primary lg:grid-cols-4">
         {stats.map(([k, v, note]) => (
@@ -81,75 +84,34 @@ export function Overview({ sources }: { sources: Source[] }) {
 
 // ── Providers & Keys ─────────────────────────────────────────────────────────
 
-interface Connected { name: string; masked: string; mode: 'browser' | 'vault' }
-
 export function ProvidersKeys() {
-  const [connected, setConnected] = useState<Connected[]>([
-    { name: 'OpenAI', masked: 'sk-…9f2a', mode: 'vault' },
-    { name: 'Ollama', masked: 'localhost:11434', mode: 'browser' },
-  ])
-  const [sel, setSel] = useState(providers[0].name)
-  const [key, setKey] = useState('')
-
-  const connect = () => {
-    if (!key.trim()) return
-    setConnected((c) => [...c, { name: sel, masked: key.slice(0, 3) + '…' + key.slice(-4), mode: 'vault' }])
-    setKey('')
-  }
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="font-serif-display text-3xl font-semibold">Providers & keys</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Keys are used only to authenticate with <em>your</em> provider. Vault keys are AES-256
-          encrypted; browser keys never touch our servers.
+          The encrypted provider vault is not connected in this build. Do not paste production keys here.
         </p>
       </div>
 
       <div className="border border-primary bg-card p-5">
-        <span className="spec-label mb-3 block">Connect a provider</span>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <select
-            className="border border-border/60 bg-background px-3 py-2.5 text-sm outline-none focus:border-accent rounded-none"
-            value={sel}
-            onChange={(e) => setSel(e.target.value)}
-          >
-            {providers.map((p) => <option key={p.name}>{p.name}</option>)}
-          </select>
-          <input
-            className="flex-1 border border-border/60 bg-background px-3 py-2.5 text-sm outline-none focus:border-accent rounded-none"
-            type="password"
-            placeholder="API key or endpoint URL"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-          <button
-            onClick={connect}
-            className="flex items-center justify-center gap-2 border border-primary bg-primary px-5 py-2.5 font-mono-spec text-xs uppercase tracking-wider text-primary-foreground hover:bg-accent hover:border-accent"
-          >
-            <Plus className="h-3.5 w-3.5" /> Connect
-          </button>
+        <span className="spec-label mb-3 block">Server-managed vault</span>
+        <div className="flex items-start gap-3 border border-amber-600/60 bg-amber-50 p-4 text-amber-900">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="text-sm">
+            Coming after the backend key-management service is deployed. AI Employee provider keys remain memory-only
+            for the current tab; connection credentials are session-only.
+          </p>
         </div>
       </div>
 
       <div className="border border-primary bg-card hard-shadow">
         <div className="border-b border-primary px-5 py-2.5">
-          <span className="spec-label">Connected</span>
+          <span className="spec-label">Connected providers</span>
         </div>
-        {connected.map((c) => (
-          <div key={c.name + c.masked} className="flex items-center gap-4 border-b border-border/40 px-5 py-3.5 last:border-b-0">
-            <KeyRound className="h-4 w-4 text-accent" />
-            <span className="font-medium">{c.name}</span>
-            <span className="font-mono-spec text-xs text-muted-foreground">{c.masked}</span>
-            <span className="ml-auto border border-border/60 px-2 py-0.5 font-mono-spec text-[10px] uppercase tracking-wider text-muted-foreground">
-              {c.mode}
-            </span>
-            <span className="flex items-center gap-1 font-mono-spec text-[10px] uppercase tracking-wider text-emerald-700">
-              <Check className="h-3 w-3" /> active
-            </span>
-          </div>
-        ))}
+        <div className="flex items-center gap-3 px-5 py-6 text-sm text-muted-foreground">
+          <KeyRound className="h-4 w-4" /> No server-managed provider keys connected.
+        </div>
       </div>
     </div>
   )

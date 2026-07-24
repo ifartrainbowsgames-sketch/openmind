@@ -42,6 +42,22 @@
     background: #ff4d00;
     color: #fff;
   }
+  .skip-link {
+    position: fixed;
+    left: 1rem;
+    top: 1rem;
+    z-index: 100;
+    transform: translateY(-200%);
+    border: 1px solid #17140f;
+    background: #faf8f5;
+    padding: 0.75rem 1rem;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+  }
 }
 
 @layer utilities {

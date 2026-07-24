@@ -4,20 +4,20 @@ const ROWS = [
   {
     icon: KeyRound,
     title: 'Browser-direct mode',
-    body: 'Keys live in the visitor\'s browser; requests go straight to the provider. We physically cannot see your key or your prompts.',
-    spec: 'default for embeds',
+    body: 'AI Employee provider keys stay in memory for the current tab and requests go directly to the selected provider.',
+    spec: 'available now',
   },
   {
     icon: Vault,
-    title: 'Vault mode',
-    body: 'Need server-side calls? Keys are encrypted with AES-256-GCM, scoped per workspace, and never logged. Rotation is one click.',
-    spec: 'aes-256-gcm',
+    title: 'Server-managed vault',
+    body: 'A workspace-scoped encrypted provider vault is planned, but is not connected in this build. The console will not ask you to paste a production key into a fake vault.',
+    spec: 'planned',
   },
   {
     icon: EyeOff,
-    title: 'No training, ever',
-    body: 'We store request metadata — latency, token counts, errors — never payloads. There is nothing to train on, and nothing to leak.',
-    spec: 'metadata only',
+    title: 'Authenticated proxy',
+    body: 'MCP traffic requires a user session, restricts browser origins, rejects private network targets and does not follow redirects.',
+    spec: 'available now',
   },
   {
     icon: FileCheck,
