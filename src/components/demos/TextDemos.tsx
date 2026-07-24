@@ -8,8 +8,8 @@ import { Send } from 'lucide-react'
 
 const CHAT_REPLIES = [
   "Great question. Because OpenMind sits between your app and the model provider, you can swap GPT for Claude or a local Llama by changing one config line — the widget, memory and analytics stay exactly the same.",
-  "Your API key is used only to authenticate with your provider. In browser-direct mode it never touches our servers; in vault mode it's encrypted with AES-256 and decryptable only by your workspace.",
-  "Setup is two lines: paste the script tag, add data-service=\"chatbot\". The widget inherits your site's fonts automatically, and theming is a handful of CSS variables.",
+  "AI Employee provider keys are memory-only in browser-direct mode today. A server-managed encrypted vault is planned but is not connected in this build.",
+  "The planned embed API is a two-line script tag. Today this repository ships the React widget prototype, not a published CDN package.",
   "Pricing is simple: you pay your provider for tokens at their list price — we add 0% markup — and a flat software fee for the widgets, gateway and analytics.",
 ]
 
@@ -63,7 +63,7 @@ export function ChatDemo() {
           liveLabel="via secure gateway"
           note={
             live === true
-              ? 'real ChatGPT answers — zero keys on this page'
+              ? 'provider-backed answers — zero keys on this page'
               : live === false
                 ? 'gateway unreachable — showing canned answers'
                 : 'asks our secure gateway first — zero keys on this page'
@@ -71,15 +71,15 @@ export function ChatDemo() {
         />
         {gatewayError && <p role="status" className="text-xs text-amber-700">{gatewayError} Showing a local canned response.</p>}
         <p className="text-xs leading-relaxed text-muted-foreground">
-          This demo talks to real ChatGPT through our server-side gateway. The API key lives in
-          a server vault — it is never sent to, stored in, or requested by your browser.
+          When configured, this demo talks to an OpenAI-compatible model through the server-side
+          Edge Function. Its provider key is an Edge Function secret and never reaches this page.
         </p>
         <p className="text-xs leading-relaxed text-muted-foreground">
           And you'll never see a key box on this page. Asking visitors to paste secret keys into
           a website is how keys get leaked — we don't do it, and neither should you.
         </p>
         <p className="border border-primary/15 bg-secondary/60 px-3 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          your keys → your vault · our demo → our gateway
+          your browser → public demo gateway · provider key → edge secret
         </p>
       </div>
       <div>

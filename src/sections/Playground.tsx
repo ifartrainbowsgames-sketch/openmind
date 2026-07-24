@@ -34,9 +34,8 @@ export default function Playground() {
             </h2>
           </div>
           <p className="max-w-sm text-sm leading-relaxed text-muted-foreground">
-            The chatbot below is runnable right now — it answers with real ChatGPT through our
-            secure gateway, and no key ever touches this page. That distinction is the whole
-            product, so we label it honestly.
+            The chatbot tries the configured server-side gateway first. If the function or provider
+            is unavailable, it switches to a visibly labeled local canned response.
           </p>
         </div>
 

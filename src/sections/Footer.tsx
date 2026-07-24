@@ -55,7 +55,7 @@ export default function Footer() {
             <em className="font-normal italic text-accent">someone else's stack.</em>
           </h2>
           <p className="mx-auto mt-6 max-w-lg text-white/60">
-            Free tier, no card, two lines of code. Your keys stay yours from the first request.
+            Early-access prototype, no card. Try the labeled demos and inspect the open-source implementation.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
             <Button

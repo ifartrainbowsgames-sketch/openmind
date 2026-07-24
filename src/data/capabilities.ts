@@ -18,7 +18,7 @@ export const capabilities: Capability[] = [
     index: '01',
     name: 'Chatbot',
     tagline: 'Support & sales agent',
-    description: 'Streaming chat widget trained on your docs. Drop into any site with two lines.',
+    description: 'Streaming chat prototype designed for provider-backed answers and future indexed sources.',
     providers: ['OpenAI', 'Anthropic', 'Mistral', 'Ollama'],
     api: true,
     embed: true,

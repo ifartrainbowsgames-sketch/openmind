@@ -34,7 +34,7 @@ export default function Navbar() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-1 font-mono-spec text-[10px] uppercase tracking-[0.18em]">
           <span>v2.0 — BYOK release</span>
           <span className="hidden sm:block">zero token markup · mit licensed</span>
-          <span className="text-accent">● all systems nominal</span>
+          <span className="text-accent">● early access prototype</span>
         </div>
       </div>
 

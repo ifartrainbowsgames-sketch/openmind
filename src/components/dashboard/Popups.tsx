@@ -34,7 +34,7 @@ const SEED: Popup[] = [
   {
     id: 'p3', name: 'Exit save', active: false, url: '*', delay: 0, scroll: 0,
     exitIntent: true, audience: 'returning', title: 'Before you go —',
-    body: 'Grab the self-host guide. One docker command, whole stack yours.', cta: 'Send it',
+    body: 'Join the roadmap discussion for the future packaged self-host stack.', cta: 'Show roadmap',
     shown: 410, ctr: 5.1, chats: 21,
   },
 ]
@@ -87,7 +87,12 @@ export default function Popups() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-serif-display text-3xl font-semibold">Engage — popup messages</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-serif-display text-3xl font-semibold">Engage — popup messages</h2>
+            <span className="border border-amber-600 px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider text-amber-700">
+              interactive preview · sample campaigns
+            </span>
+          </div>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
             Proactive messages your widget fires on your site, based on what the visitor is doing.
             Every popup opens a conversation — that's the funnel.

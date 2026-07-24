@@ -4,7 +4,7 @@ test('marketing site exposes the main navigation', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByRole('main')).toBeVisible()
   await expect(page.getByRole('link', { name: /openmind/i }).first()).toBeVisible()
-  await expect(page.getByRole('link', { name: /ai employees/i }).first()).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Employees', exact: true }).first()).toBeVisible()
 })
 
 test('login clearly identifies demo mode without Supabase env', async ({ page }) => {
@@ -21,5 +21,5 @@ test('unauthenticated dashboard redirects to login', async ({ page }) => {
 test('employees route renders the workforce surface', async ({ page }) => {
   await page.goto('/employees')
   await expect(page.getByRole('main')).toBeVisible()
-  await expect(page.getByText(/ai employees/i).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: /hire an ai workforce/i })).toBeVisible()
 })

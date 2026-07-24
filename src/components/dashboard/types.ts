@@ -23,7 +23,7 @@ export function formatBytes(b: number) {
 
 export const KEY_MODES = [
   { id: 'browser', name: 'Browser-direct', desc: 'visitor\'s key, zero servers' },
-  { id: 'vault', name: 'Vaulted', desc: 'encrypted server-side' },
+  { id: 'vault', name: 'Vaulted (planned)', desc: 'server-managed vault not connected' },
   { id: 'proxy', name: 'Gateway', desc: 'rate-limited + cached' },
 ] as const
 
@@ -39,6 +39,6 @@ export const CAP_SETTINGS: Record<string, CapSetting> = {
     models: ['gpt-4o', 'claude-3.5-sonnet', 'mistral-large', 'llama-3.1-70b'],
     widget: true,
     params: ['temperature', 'systemPrompt'],
-    dataHint: 'The chatbot answers strictly from these indexed sources — attach your help center, policies and product docs.',
+    dataHint: 'Stored sources become answerable only after the indexing worker is implemented and reports them as indexed.',
   },
 }

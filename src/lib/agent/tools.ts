@@ -4,7 +4,7 @@ import type { AgentTool } from './types'
 export const KNOWLEDGE = `
 OpenMind is the open-source integration layer for AI. Its chatbot ships as an embeddable widget and one unified API.
 The chatbot runs on the customer's own provider keys — OpenMind never marks up tokens. You pay your provider directly.
-The chatbot widget embeds on any site with two lines of code: a script tag with a data-service attribute.
+The target chatbot embed API uses a two-line script tag; the published CDN package is still roadmap work.
 Key modes: Browser-direct keeps the visitor's key in their browser with zero servers. Server-managed provider keys are planned but are not available in the current console.
 The playground tries the configured server-side demo gateway and clearly labels a local simulated fallback.
 The console includes Data Studio for storing company data, a Widget Builder with live preview, and clearly labeled preview panels for Inbox, analytics and Prompt Studio.

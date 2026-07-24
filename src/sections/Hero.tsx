@@ -99,11 +99,11 @@ function RequestLog() {
     <div className="hero-log bg-terminal hard-shadow relative border border-primary">
       <div className="flex items-center justify-between border-b border-white/15 px-4 py-2.5">
         <span className="font-mono-spec text-[11px] uppercase tracking-[0.2em] text-white/50">
-          live — gateway request log
+          simulated — gateway request log
         </span>
         <span className="flex items-center gap-1.5 font-mono-spec text-[11px] text-accent">
           <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-          streaming
+          animated sample
         </span>
       </div>
       <div className="flex h-64 flex-col justify-end overflow-hidden px-4 py-3 font-mono-spec text-[12px] leading-7">
@@ -205,9 +205,9 @@ export default function Hero() {
               </span>
             </h1>
             <p className="hero-sub mt-8 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              An embeddable AI chatbot — trained on your docs, answered by any model you choose —
-              as a two-line widget and one unified API. It runs on <strong className="text-foreground">your provider keys</strong>,
-              we never mark up a single token, and the whole stack is MIT-licensed.
+              An open-source prototype for model-agnostic chat and AI employees. The demo gateway,
+              browser-direct providers and authenticated MCP proxy are usable now; the published widget,
+              SDK and indexing pipeline remain roadmap work.
             </p>
             <div className="mt-10 flex flex-wrap items-center gap-4">
               <Magnetic className="hero-cta">
@@ -218,7 +218,7 @@ export default function Hero() {
                 >
                   <a href="#playground">
                     <FlaskConical className="mr-2 h-4 w-4" />
-                    Test it live
+                    Test the demo
                   </a>
                 </Button>
               </Magnetic>

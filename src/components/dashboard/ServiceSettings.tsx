@@ -78,23 +78,21 @@ export default function ServiceSettings({ cap, sources }: { cap: Capability; sou
                 {(['browser', 'vault'] as const).map((m) => (
                   <button
                     key={m}
-                    onClick={() => setKeyMode(m)}
+                    onClick={() => m === 'browser' && setKeyMode(m)}
+                    disabled={m === 'vault'}
                     className={`flex items-center justify-center gap-2 px-3 py-2.5 font-mono-spec text-[11px] uppercase tracking-wider transition-colors ${
                       keyMode === m ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'
                     }`}
                   >
                     <KeyRound className="h-3.5 w-3.5" />
-                    {m === 'browser' ? 'Browser-direct' : 'Encrypted vault'}
+                    {m === 'browser' ? 'Browser-direct' : 'Encrypted vault · planned'}
                   </button>
                 ))}
               </div>
-              {keyMode === 'vault' && (
-                <input className={`${inputCls} mt-3`} type="password" placeholder="Paste provider key — encrypted with AES-256" />
-              )}
               <p className="mt-2 text-xs text-muted-foreground">
                 {keyMode === 'browser'
                   ? 'Key stays in the visitor\'s browser. Requests go straight to the provider.'
-                  : 'Key is stored encrypted per workspace and used only by your gateway.'}
+                  : 'The server-managed vault is not connected in this build.'}
               </p>
             </div>
 
@@ -133,7 +131,7 @@ export default function ServiceSettings({ cap, sources }: { cap: Capability; sou
                     <span className={`h-2 w-2 rounded-full ${s.status === 'indexed' ? 'bg-emerald-600' : 'bg-amber-500'}`} />
                     <span className="truncate text-sm">{s.name}</span>
                     <span className="ml-auto font-mono-spec text-[10px] text-muted-foreground">
-                      {s.status === 'indexed' ? `${s.chunks} chunks` : 'indexing…'}
+                      {s.status === 'indexed' ? `${s.chunks} chunks` : s.status === 'indexing' ? 'indexing…' : 'stored · not indexed'}
                     </span>
                   </div>
                 ))

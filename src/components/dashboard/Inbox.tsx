@@ -50,7 +50,7 @@ const SEED: Convo[] = [
     started: '1h ago', status: 'resolved', unread: false,
     msgs: [
       { from: 'visitor', text: 'セルフホスト版の要件は？', t: '08:31' },
-      { from: 'ai', text: 'セルフホストには 4 GB RAM のマシン 1 台と Docker のみ必要です。docker compose 一つで起動できます。', t: '08:31' },
+      { from: 'ai', text: 'パッケージ化されたセルフホスト版は現在ロードマップ上にあり、まだ利用できません。', t: '08:31' },
     ],
   },
 ]

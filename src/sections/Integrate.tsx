@@ -7,7 +7,8 @@ const SNIPPETS = [
     label: 'API',
     icon: Plug,
     file: 'app.ts',
-    code: `import OpenMind from "@openmind/sdk";
+    code: `// Proposed API — @openmind/sdk is not published yet.
+import OpenMind from "@openmind/sdk";
 
 // Your key, your provider — we never touch tokens
 const om = new OpenMind({
@@ -25,7 +26,7 @@ const reply = await om.run("chatbot", {
     label: 'Embed',
     icon: LayoutPanelTop,
     file: 'index.html',
-    code: `<!-- Two lines. Inherits your site's fonts automatically. -->
+    code: `<!-- Proposed embed API — package/URL not published yet. -->
 <script
   src="https://unpkg.com/@openmind/widget"
   data-service="chatbot"
@@ -39,7 +40,8 @@ const reply = await om.run("chatbot", {
     label: 'Self-host',
     icon: Container,
     file: 'terminal',
-    code: `$ git clone github.com/openmind/stack && cd stack
+    code: `# Target self-host flow — docker stack is not published yet.
+$ git clone github.com/openmind/stack && cd stack
 
 $ cp .env.example .env   # add YOUR provider keys
 
@@ -69,11 +71,14 @@ export default function Integrate() {
             </h2>
           </div>
           <p className="max-w-md text-muted-foreground lg:ml-auto">
-            A typed SDK for your backend, a two-line embed for any website, or the entire stack on
-            your own hardware. Same chatbot, same config, your keys everywhere.
+            These are target integration designs, not published packages. The current repository
+            contains the React prototype and Supabase functions documented in its README.
           </p>
         </div>
 
+        <p className="mb-3 w-fit border border-amber-600 px-2 py-1 font-mono-spec text-[10px] uppercase tracking-wider text-amber-700">
+          roadmap API examples · not installable yet
+        </p>
         <Tabs defaultValue="api">
           <TabsList className="mb-0 grid w-full max-w-md grid-cols-3 rounded-none border border-primary bg-card p-0">
             {SNIPPETS.map((s) => (

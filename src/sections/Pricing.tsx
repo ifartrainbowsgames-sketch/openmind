@@ -14,7 +14,7 @@ interface Tier {
   cta: string
 }
 
-const FEATURES = ['Sites / widgets', 'Chatbot service', 'Analytics & logs', 'Server-side key vault', 'Team seats', 'Self-host license', 'Support']
+const FEATURES = ['Sites / widgets', 'Chatbot service', 'Analytics & logs', 'Server-side key vault (planned)', 'Team seats', 'Self-host license', 'Support']
 
 const TIERS: Tier[] = [
   {
@@ -23,15 +23,15 @@ const TIERS: Tier[] = [
   },
   {
     name: 'Pro', price: '$10', per: '/mo', blurb: 'For products with real users.', featured: true,
-    rows: ['5 sites', 'yes', '90 days', 'yes', '3', null, 'next-day'], cta: 'Start trial',
+    rows: ['5 sites', 'yes', '90 days', 'planned', '3', null, 'next-day'], cta: 'Join early access',
   },
   {
     name: 'Team', price: '$99', per: '/mo', blurb: 'For companies standardizing on BYOK.',
-    rows: ['unlimited', 'yes', '13 months', 'yes', '10', 'yes', 'same-day'], cta: 'Start trial',
+    rows: ['unlimited', 'yes', '13 months', 'planned', '10', 'yes', 'same-day'], cta: 'Join early access',
   },
   {
     name: 'Enterprise', price: 'Custom', per: '', blurb: 'Compliance, SSO, dedicated support.',
-    rows: ['unlimited', 'yes', 'unlimited', 'yes', 'unlimited', 'yes', 'dedicated'], cta: 'Talk to us',
+    rows: ['unlimited', 'yes', 'unlimited', 'planned', 'unlimited', 'yes', 'dedicated'], cta: 'Join early access',
   },
 ]
 
@@ -74,8 +74,8 @@ export default function Pricing() {
             <em className="font-normal italic text-accent">Not token pricing.</em>
           </h2>
           <p className="mt-6 max-w-2xl text-muted-foreground">
-            You pay your model provider directly at their list price — we add 0% markup, forever.
-            What you're buying here is the layer on top.
+            Roadmap pricing for when billing launches. No checkout is active today. Model usage is
+            billed directly by your provider with no OpenMind token markup.
           </p>
         </div>
 
