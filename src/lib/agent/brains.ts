@@ -37,7 +37,7 @@ export function simulatedBrain(): AgentBrain {
         if (hit && pattern.test(input) && !unless?.test(input)) push(hit, input)
       }
       if (/summar|tl;dr|shorten|condense|key points/i.test(input) && has('summarize')) push('summarize', input)
-      if (/sentiment|feeling|feels|opinion|feedback|happy|angry|upset|satisfied/i.test(input) && has('sentiment')) {
+      if (/sentiment|feeling|feels|opinion|feedback|happy|angry|upset|satisfied|tone|urgenc|critical|outage/i.test(input) && has('sentiment')) {
         push('sentiment', input)
       }
       if (steps.length === 0 && has('search_docs') &&
