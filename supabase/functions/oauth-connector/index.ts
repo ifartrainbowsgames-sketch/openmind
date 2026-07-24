@@ -129,7 +129,7 @@ async function authenticatedUser(req: Request): Promise<{ id: string } | null> {
   }
 }
 
-function callbackUrl(req: Request): string {
+function callbackUrl(): string {
   const configured = Deno.env.get('OAUTH_CONNECTOR_CALLBACK_URL')
   if (configured) return configured
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
@@ -186,7 +186,7 @@ async function start(req: Request): Promise<Response> {
 
   const authorize = new URL(provider.authorizeUrl)
   authorize.searchParams.set('client_id', clientId)
-  authorize.searchParams.set('redirect_uri', callbackUrl(req))
+  authorize.searchParams.set('redirect_uri', callbackUrl())
   authorize.searchParams.set('response_type', 'code')
   authorize.searchParams.set('scope', provider.scopes.join(' '))
   authorize.searchParams.set('state', state)
@@ -312,7 +312,7 @@ async function callback(req: Request): Promise<Response> {
       client_id: clientId,
       client_secret: clientSecret,
       code,
-      redirect_uri: callbackUrl(req),
+      redirect_uri: callbackUrl(),
       code_verifier: await decryptSecret(pending.code_verifier_ciphertext),
     }),
     signal: AbortSignal.timeout(15_000),
