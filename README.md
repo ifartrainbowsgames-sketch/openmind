@@ -120,6 +120,7 @@ CI runs all checks and Chromium smoke tests. Install the browser locally with `n
 - Never put provider service-role keys in `VITE_*` variables.
 - The MCP proxy permits only HTTPS port 443, resolves DNS before requests, blocks private/reserved addresses, and rejects redirects.
 - Public widget keys are identifiers, not secrets. Embedding-site origins are policy-checked, requests consume database-backed tenant/visitor quotas, and conversation resumption additionally requires an unguessable visitor token. Origin headers are not treated as authentication.
+- Widget API CORS is restricted to deployment-owned app origins. The iframe derives the customer origin from the browser referrer and fails closed when it is unavailable; add the widget host to `ALLOWED_ORIGINS` and do not embed it under a `no-referrer` policy.
 - Browser-direct provider keys remain visible to JavaScript for the current tab. Use only scoped keys until the server-managed vault exists.
 
 ## License

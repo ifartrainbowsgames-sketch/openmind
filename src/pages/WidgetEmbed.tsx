@@ -21,7 +21,6 @@ export default function WidgetEmbed() {
     referrerOrigin = parent.origin
     referrerPage = `${parent.pathname}${parent.search}`.slice(0, 500)
   } catch {
-    referrerOrigin = params.get('siteOrigin') ?? ''
     referrerPage = params.get('page') ?? ''
   }
   const fallbackConfig: WidgetConfig = {

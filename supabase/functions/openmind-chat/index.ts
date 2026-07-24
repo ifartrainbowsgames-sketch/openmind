@@ -55,9 +55,10 @@ function cors(req: Request, allowWidgetOrigin = false): Record<string, string> {
     'Access-Control-Allow-Headers': 'content-type, x-openmind-widget-key',
     Vary: 'Origin',
   }
-  if (origin && (allowedOrigins().has(origin) || allowWidgetOrigin)) {
+  if (origin && allowedOrigins().has(origin)) {
     headers['Access-Control-Allow-Origin'] = origin
   }
+  void allowWidgetOrigin
   return headers
 }
 
@@ -511,6 +512,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(req, 503, { error: 'chatbot configuration is unavailable' }, true)
     }
     if (!config) return json(req, 404, { error: 'unknown widget key' }, true)
+    const requestOrigin = req.headers.get('origin')
+    if (requestOrigin && !allowedOrigins().has(requestOrigin)) {
+      return json(req, 403, { error: 'widget app origin not allowed' })
+    }
     if (!siteOriginAllowed(body.siteOrigin, config)) {
       return json(req, 403, { error: 'embedding site origin not allowed' }, true)
     }
@@ -529,7 +534,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   } else {
     const origin = req.headers.get('origin')
-    if (origin && !allowedOrigins().has(origin)) return json(req, 403, { error: 'origin not allowed' })
+    if (!origin || !allowedOrigins().has(origin)) return json(req, 403, { error: 'origin not allowed' })
+    try {
+      const distributedAllowed = await consumeDistributedLimit(req, 'marketing', event)
+      if (!distributedAllowed) {
+        return json(req, 429, { error: 'marketing chat rate limit exceeded; retry in one minute' })
+      }
+    } catch {
+      return json(req, 503, { error: 'rate limit service unavailable' })
+    }
   }
 
   if (event === 'config') {

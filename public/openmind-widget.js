@@ -14,7 +14,6 @@
   var features = (script.dataset.features || '').split(',').filter(Boolean)
   var params = new URLSearchParams({
     key: key,
-    siteOrigin: window.location.origin,
     page: window.location.pathname + window.location.search,
     accent: script.dataset.accent || '#ff4d00',
     theme: script.dataset.theme || 'light',
@@ -32,6 +31,7 @@
   var frame = document.createElement('iframe')
   frame.src = origin + '/widget?' + params.toString()
   frame.title = script.dataset.agent || 'Customer support chat'
+  frame.referrerPolicy = 'origin-when-cross-origin'
   frame.setAttribute('allow', 'clipboard-write')
   frame.style.cssText = [
     'position:fixed', 'right:20px', 'bottom:84px', 'width:min(400px,calc(100vw - 24px))',
