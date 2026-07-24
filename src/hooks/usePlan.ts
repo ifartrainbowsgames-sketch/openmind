@@ -3,15 +3,14 @@ import { supabase } from '@/lib/supabase'
 
 export type Plan = 'free' | 'pro'
 
-export const PLAN_LIMITS: Record<Plan, { services: number; storageGB: number; analyticsDays: number }> = {
-  free: { services: 2, storageGB: 1, analyticsDays: 7 },
-  pro: { services: 99, storageGB: 5, analyticsDays: 90 },
+export const PLAN_LIMITS: Record<Plan, { services: number; storageGB: number; analyticsDays: number; seats: number }> = {
+  free: { services: 2, storageGB: 1, analyticsDays: 7, seats: 1 },
+  pro: { services: 99, storageGB: 5, analyticsDays: 90, seats: 3 },
 }
 
 /**
  * The user's plan + activated services, synced to public.profiles.
- * During early access the plan is freely switchable in the console —
- * once Stripe billing goes live, upgrades flow through checkout instead.
+ * Billing controls plan changes; the browser can only update enabled service ids.
  */
 export function usePlan(userId: string | undefined) {
   const [plan, setPlanState] = useState<Plan>('free')

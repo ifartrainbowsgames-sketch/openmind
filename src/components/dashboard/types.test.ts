@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { capabilities } from '@/data/capabilities'
-import { CAP_SETTINGS, formatBytes } from './types'
+import { formatBytes } from './types'
 
 describe('formatBytes', () => {
   it('formats bytes', () => expect(formatBytes(512)).toBe('512 B'))
@@ -26,25 +26,6 @@ describe('capabilities catalogue integrity', () => {
     for (const c of capabilities) {
       expect(c.providers.length, c.id).toBeGreaterThan(0)
       expect(c.features.length, c.id).toBeGreaterThan(0)
-    }
-  })
-})
-
-describe('CAP_SETTINGS ↔ capabilities contract', () => {
-  it('covers every capability exactly once', () => {
-    const ids = capabilities.map((c) => c.id).sort()
-    expect(Object.keys(CAP_SETTINGS).sort()).toEqual(ids)
-  })
-
-  it('every entry has at least one model', () => {
-    for (const [id, cfg] of Object.entries(CAP_SETTINGS)) {
-      expect(cfg.models.length, id).toBeGreaterThan(0)
-    }
-  })
-
-  it('widget flag matches the catalogue embed flag', () => {
-    for (const c of capabilities) {
-      expect(CAP_SETTINGS[c.id].widget, c.id).toBe(c.embed)
     }
   })
 })

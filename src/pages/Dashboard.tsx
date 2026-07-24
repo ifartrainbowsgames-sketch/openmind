@@ -1,25 +1,27 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { capabilities } from '@/data/capabilities'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlan } from '@/hooks/usePlan'
+import { useChatbotConfig } from '@/hooks/useChatbotConfig'
+import { useStaff } from '@/hooks/useStaff'
 import { supabase } from '@/lib/supabase'
 import type { Source } from '@/components/dashboard/types'
 import ParticleField from '@/components/dash-fx/ParticleField'
 import DataStudio from '@/components/dashboard/DataStudio'
-import ServiceSettings from '@/components/dashboard/ServiceSettings'
 import Inbox from '@/components/dashboard/Inbox'
 import Popups from '@/components/dashboard/Popups'
-import PromptStudio from '@/components/dashboard/PromptStudio'
 import WidgetBuilder from '@/components/dashboard/WidgetBuilder'
-import ServicesPanel from '@/components/dashboard/ServicesPanel'
 import AnalyticsPanel from '@/components/dashboard/AnalyticsPanel'
-import { Overview, ProvidersKeys } from '@/components/dashboard/Panels'
+import { ProvidersKeys } from '@/components/dashboard/Panels'
+import ChatbotHome from '@/components/dashboard/ChatbotHome'
+import ChatbotSettings from '@/components/dashboard/ChatbotSettings'
+import StaffSettings from '@/components/dashboard/StaffSettings'
+import DashboardNotifications from '@/components/dashboard/DashboardNotifications'
 import WorkforceStudio from '@/components/workforce/WorkforceStudio'
 import {
   LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
-  Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Zap, Loader2,
-  Boxes, BarChart3, Bot, Menu, X, AlertTriangle,
+  Inbox as InboxIcon, Megaphone, SlidersHorizontal, Paintbrush, LogOut, Zap, Loader2,
+  BarChart3, Bot, Menu, X, AlertTriangle, UserCog,
 } from 'lucide-react'
 
 const SEED_ROWS: Pick<Source, 'name' | 'type' | 'size' | 'attached'>[] = [
@@ -45,22 +47,32 @@ const rowToSource = (r: any): Source => ({
   content: r.content ?? undefined,
 })
 
-type View = 'overview' | 'data' | 'providers' | string
+type View =
+  | 'home'
+  | 'inbox'
+  | 'knowledge'
+  | 'behavior'
+  | 'appearance'
+  | 'staff'
+  | 'workforce'
+  | 'analytics'
+  | 'engage'
+  | 'providers'
 
-const NAV_TOP = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'services', label: 'Services', icon: Boxes },
-  { id: 'workforce', label: 'AI Employees', icon: Bot },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { id: 'data', label: 'Data Studio', icon: Database },
-  { id: 'widget', label: 'Widget Builder', icon: Paintbrush },
-  { id: 'providers', label: 'Providers & keys', icon: KeyRound },
+const NAV_CHATBOT: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Home', icon: LayoutDashboard },
+  { id: 'inbox', label: 'Conversations', icon: InboxIcon },
+  { id: 'knowledge', label: 'Knowledge', icon: Database },
+  { id: 'behavior', label: 'Behavior & routing', icon: SlidersHorizontal },
+  { id: 'appearance', label: 'Widget & embed', icon: Paintbrush },
+  { id: 'staff', label: 'Staff & availability', icon: UserCog },
 ]
 
-const NAV_OPS = [
-  { id: 'inbox', label: 'Inbox', icon: InboxIcon },
-  { id: 'popups', label: 'Engage · popups', icon: Megaphone },
-  { id: 'prompt', label: 'Prompt Studio', icon: PenLine },
+const NAV_ADVANCED: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'workforce', label: 'AI Employees', icon: Bot },
+  { id: 'analytics', label: 'Insights', icon: BarChart3 },
+  { id: 'engage', label: 'Visitor campaigns', icon: Megaphone },
+  { id: 'providers', label: 'Providers & keys', icon: KeyRound },
 ]
 
 const navBtnCls = (active: boolean) =>
@@ -69,30 +81,20 @@ const navBtnCls = (active: boolean) =>
   }`
 
 /** Nav sections — shared by the desktop sidebar and the mobile drawer. */
-function NavSections({ view, onPick }: { view: View; onPick: (id: string) => void }) {
+function NavSections({ view, onPick }: { view: View; onPick: (id: View) => void }) {
   return (
     <>
-      <div className="px-4 pb-2 spec-label">Workspace</div>
-      {NAV_TOP.map((n) => (
+      <div className="px-4 pb-2 spec-label">Customer chatbot</div>
+      {NAV_CHATBOT.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
         </button>
       ))}
 
-      <div className="px-4 pb-2 pt-5 spec-label">Ops previews</div>
-      {NAV_OPS.map((n) => (
+      <div className="px-4 pb-2 pt-5 spec-label">Advanced</div>
+      {NAV_ADVANCED.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
-        </button>
-      ))}
-
-      <div className="px-4 pb-2 pt-5 spec-label">Services</div>
-      {capabilities.map((c) => (
-        <button key={c.id} data-active={view === c.id} onClick={() => onPick(c.id)} className={navBtnCls(view === c.id)}>
-          <span className={`font-mono-spec text-[11px] ${view === c.id ? 'text-accent' : 'text-muted-foreground/60'}`}>
-            {c.index}
-          </span>
-          {c.name}
         </button>
       ))}
     </>
@@ -100,7 +102,7 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: string) => voi
 }
 
 export default function Dashboard() {
-  const [view, setView] = useState<View>('data')
+  const [view, setView] = useState<View>('home')
   const [sources, setSources] = useState<Source[]>([])
   const [billingNote, setBillingNote] = useState(false)
   const [workspaceError, setWorkspaceError] = useState<string | null>(null)
@@ -111,7 +113,9 @@ export default function Dashboard() {
   const navRef = useRef<HTMLElement>(null)
   const [indicator, setIndicator] = useState<{ top: number; height: number; on: boolean }>({ top: 0, height: 0, on: false })
   const { session, loading, signOut } = useAuth()
-  const { plan, services, toggleService, error: planError } = usePlan(session?.demo ? undefined : session?.user.id)
+  const { plan, error: planError, limits } = usePlan(session?.demo ? undefined : session?.user.id)
+  const chatbot = useChatbotConfig(session?.user.id, session?.demo ?? true)
+  const staff = useStaff(session?.user.id, session?.user.email, session?.demo ?? true)
   const navigate = useNavigate()
 
   const closeDrawer = () => {
@@ -119,7 +123,7 @@ export default function Dashboard() {
     if (drawerTimer.current) clearTimeout(drawerTimer.current)
     drawerTimer.current = setTimeout(() => setDrawer('closed'), 200)
   }
-  const pick = (id: string) => {
+  const pick = (id: View) => {
     setView(id)
     if (drawer === 'open') closeDrawer()
   }
@@ -253,18 +257,18 @@ export default function Dashboard() {
   }
   if (!session) return null
 
-  const cap = capabilities.find((c) => c.id === view)
   const viewLabel =
-    view === 'overview' ? 'Overview'
-    : view === 'services' ? 'Services'
+    view === 'home' ? 'Chatbot home'
+    : view === 'inbox' ? 'Conversations'
+    : view === 'knowledge' ? 'Knowledge'
+    : view === 'behavior' ? 'Behavior & routing'
+    : view === 'appearance' ? 'Widget & embed'
+    : view === 'staff' ? 'Staff & availability'
     : view === 'workforce' ? 'AI Employees'
-    : view === 'analytics' ? 'Analytics'
-    : view === 'data' ? 'Data Studio'
+    : view === 'analytics' ? 'Insights'
+    : view === 'engage' ? 'Visitor campaigns'
     : view === 'providers' ? 'Providers & keys'
-    : view === 'inbox' ? 'Inbox'
-    : view === 'popups' ? 'Engage · popups'
-    : view === 'prompt' ? 'Prompt Studio'
-    : cap?.name ?? ''
+    : ''
 
   return (
     <div className="min-h-screen bg-secondary/30 vt-page">
@@ -360,21 +364,27 @@ export default function Dashboard() {
         )}
 
         <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 md:px-8">
-          {(workspaceError || planError) && (
+          {(workspaceError || planError || chatbot.error || staff.error) && (
             <div role="alert" className="mb-5 flex items-start gap-2 border border-red-600 bg-red-50 px-4 py-3 text-sm text-red-700">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              {workspaceError || planError}
+              {workspaceError || planError || chatbot.error || staff.error}
             </div>
           )}
           {/* dash-fx: keyed pane — crossfade+rise whenever the view switches */}
           <div key={view} className="dash-view-enter">
-          {view === 'overview' && <Overview sources={sources} />}
-          {view === 'services' && (
-            <ServicesPanel plan={plan} services={services} toggleService={toggleService} onUpgrade={() => setBillingNote(true)} />
+          {view === 'home' && (
+            <ChatbotHome
+              config={chatbot.config}
+              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              sourceCount={sources.filter((source) => source.attached.includes('chat')).length}
+              staff={staff.members}
+              onAvailability={(enabled) => chatbot.update({ enabled }, true)}
+              onNavigate={(next) => setView(next as View)}
+            />
           )}
           {view === 'workforce' && <WorkforceStudio embedded />}
           {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={() => setBillingNote(true)} />}
-          {view === 'data' && (
+          {view === 'knowledge' && (
             <DataStudio
               sources={sources}
               plan={plan}
@@ -387,18 +397,47 @@ export default function Dashboard() {
             />
           )}
           {view === 'providers' && <ProvidersKeys />}
-          {view === 'widget' && <WidgetBuilder />}
-          {view === 'inbox' && <Inbox />}
-          {view === 'popups' && <Popups />}
-          {view === 'prompt' && <PromptStudio />}
-          {cap && view !== 'widget' && <ServiceSettings cap={cap} sources={sources} />}
+          {view === 'appearance' && (
+            <WidgetBuilder
+              config={chatbot.config}
+              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              saving={chatbot.saving}
+              saved={chatbot.saved}
+              onChange={chatbot.replace}
+              onSave={chatbot.save}
+            />
+          )}
+          {view === 'behavior' && (
+            <ChatbotSettings
+              config={chatbot.config}
+              sources={sources}
+              saving={chatbot.saving}
+              saved={chatbot.saved}
+              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              onChange={(patch) => chatbot.update(patch)}
+              onSave={chatbot.save}
+            />
+          )}
+          {view === 'staff' && (
+            <StaffSettings
+              members={staff.members}
+              seatLimit={session.demo ? 3 : limits.seats}
+              onAdd={staff.addMember}
+              onUpdate={staff.updateMember}
+              onRemove={staff.removeMember}
+            />
+          )}
+          {view === 'inbox' && <Inbox userId={session.user.id} demo={session.demo} />}
+          {view === 'engage' && <Popups />}
           </div>
         </main>
 
         <footer className="mx-auto flex max-w-6xl items-center gap-6 px-8 pb-8 font-mono-spec text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          <span className="flex items-center gap-1.5"><Users className="h-3 w-3" /> 1 seat</span>
+          <span className="flex items-center gap-1.5">
+            <Users className="h-3 w-3" /> {staff.members.length} / {session.demo ? 3 : limits.seats} seats
+          </span>
           <span className="flex items-center gap-1.5"><CreditCard className="h-3 w-3" /> tokens billed by your provider</span>
-          <span className="ml-auto">spec v2.0</span>
+          <span className="ml-auto">chatbot workspace</span>
         </footer>
         </div>
       </div>
@@ -434,6 +473,11 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      <DashboardNotifications
+        ownerId={session.user.id}
+        demo={session.demo}
+        onOpenInbox={() => setView('inbox')}
+      />
     </div>
   )
 }

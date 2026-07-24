@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { streamText } from '@/lib/demo'
-import { requestChat } from '@/lib/chat-gateway'
+import {
+  requestChat,
+  requestChatSession,
+  requestStaffCallback,
+  pollStaffReplies,
+  type GatewayMessage,
+  type ChatGatewayReply,
+} from '@/lib/chat-gateway'
 import { Phone, Video, ImagePlus, Sparkles, Send, PhoneOff, Bot } from 'lucide-react'
 
 export type WidgetPreset = 'openmind' | 'discord' | 'telegram' | 'instagram'
@@ -25,11 +32,11 @@ export const DEFAULT_WIDGET: WidgetConfig = {
   theme: 'light',
   radius: 'soft',
   agentName: 'Acme Assistant',
-  greeting: 'Hi! Ask me anything — or drop an image in.',
+  greeting: 'Hi! How can I help?',
   voice: true,
-  video: true,
-  images: true,
-  aiFix: true,
+  video: false,
+  images: false,
+  aiFix: false,
   preset: 'openmind',
   font: 'system',
 }
@@ -84,7 +91,7 @@ const FONT_STACKS: Record<WidgetFont, string | undefined> = {
   mono: "'IBM Plex Mono', ui-monospace, monospace",
 }
 
-interface Msg { from: 'visitor' | 'agent'; text?: string; img?: string }
+interface Msg { from: 'visitor' | 'agent' | 'staff'; text?: string; img?: string }
 
 const TYPOS: Record<string, string> = {
   teh: 'the', adn: 'and', dont: "don't", cant: "can't", wont: "won't", isnt: "isn't",
@@ -106,7 +113,7 @@ const REPLIES: [RegExp, string][] = [
   [/refund|return/i, 'Per your attached refund policy: returns are accepted within 30 days, no questions asked. Want me to start one?'],
   [/price|pricing|plan|cost/i, 'Pro is $10/mo for the chatbot on 5 sites — you pay your provider directly for tokens, we add 0% markup.'],
   [/image|picture|photo/i, 'Drop it right into this chat — I\'ll take a look and answer questions about what I see.'],
-  [/call|talk|phone|video/i, 'Use the call icons in my header — voice or video, a human (or me) picks up in seconds.'],
+  [/call|talk|phone|video/i, 'Use the phone icon to send a callback request to an available staff member.'],
 ]
 
 const FALLBACK = [
@@ -115,18 +122,35 @@ const FALLBACK = [
   'Noted! Every conversation here also lands in the Inbox — with visitor location, device and page journey.',
 ]
 
-export default function ChatWidget({ config, live = false }: { config: WidgetConfig; live?: boolean }) {
+export default function ChatWidget({
+  config,
+  live = false,
+  widgetKey,
+  siteOrigin,
+  page,
+}: {
+  config: WidgetConfig
+  live?: boolean
+  widgetKey?: string
+  siteOrigin?: string
+  page?: string
+}) {
   const [msgs, setMsgs] = useState<Msg[]>([{ from: 'agent', text: config.greeting }])
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [fixing, setFixing] = useState(false)
   const [call, setCall] = useState<'voice' | 'video' | null>(null)
   const [callSecs, setCallSecs] = useState(0)
+  const [callStatus, setCallStatus] = useState('')
+  const [conversationId, setConversationId] = useState<string>()
+  const [visitorToken, setVisitorToken] = useState<string>()
   const [dragOver, setDragOver] = useState(false)
   const [gatewayMode, setGatewayMode] = useState<'pending' | 'live' | 'fallback'>(live ? 'pending' : 'fallback')
   const fileRef = useRef<HTMLInputElement>(null)
   const replyIdx = useRef(0)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const seenStaffMessages = useRef(new Set<string>())
+  const staffCursor = useRef('')
 
   const dark = config.theme === 'dark'
   const radius = config.radius === 'sharp' ? 'rounded-none' : config.radius === 'soft' ? 'rounded-xl' : 'rounded-2xl'
@@ -158,6 +182,41 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
     return () => clearInterval(t)
   }, [call])
 
+  useEffect(() => {
+    if (!live || !widgetKey || !conversationId || !visitorToken) return
+    let active = true
+    const poll = async () => {
+      try {
+        const reply = await pollStaffReplies({
+          widgetKey,
+          conversationId,
+          visitorToken,
+          ...(siteOrigin ? { siteOrigin } : {}),
+          ...(staffCursor.current ? { staffAfter: staffCursor.current } : {}),
+        })
+        if (!active) return
+        const fresh = (reply.staffMessages ?? []).filter((message) => !seenStaffMessages.current.has(message.id))
+        fresh.forEach((message) => seenStaffMessages.current.add(message.id))
+        const latest = reply.staffMessages?.at(-1)?.createdAt
+        if (latest) staffCursor.current = latest
+        if (fresh.length) {
+          setMsgs((current) => [
+            ...current,
+            ...fresh.map((message) => ({ from: 'staff' as const, text: message.text })),
+          ])
+        }
+      } catch {
+        // Message sending still works; retry staff delivery on the next poll.
+      }
+    }
+    void poll()
+    const timer = setInterval(poll, 4_000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [live, widgetKey, conversationId, visitorToken, siteOrigin])
+
   const agentReply = async (userText: string, hadImage: boolean) => {
     setBusy(true)
     setMsgs((m) => [...m, { from: 'agent', text: '' }])
@@ -178,15 +237,28 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
             role: message.from === 'agent' ? 'assistant' : 'user',
             content: message.text!,
           }))
-        const text = await requestChat([
+        const gatewayMessages: GatewayMessage[] = [
           ...history.map((message) => ({
             role: message.role as 'user' | 'assistant',
             content: message.content ?? '',
           })),
           { role: 'user', content: userText },
-        ])
+        ]
+        const options = {
+          ...(widgetKey ? { widgetKey } : {}),
+          ...(conversationId ? { conversationId } : {}),
+          ...(visitorToken ? { visitorToken } : {}),
+          visitor: 'Website visitor',
+          page: page ?? (typeof window !== 'undefined' ? window.location.pathname : ''),
+          ...(siteOrigin ? { siteOrigin } : {}),
+        }
+        const reply: ChatGatewayReply = widgetKey
+          ? await requestChatSession(gatewayMessages, options)
+          : { text: await requestChat(gatewayMessages) }
+        if (reply.conversationId) setConversationId(reply.conversationId)
+        if (reply.visitorToken) setVisitorToken(reply.visitorToken)
         setGatewayMode('live')
-        await streamReply(text)
+        await streamReply(reply.text)
         setBusy(false)
         return
       } catch {
@@ -222,7 +294,32 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
     setFixing(false)
   }
 
-  const startCall = (kind: 'voice' | 'video') => { setCall(kind); setCallSecs(0) }
+  const startCall = async (kind: 'voice' | 'video') => {
+    setCall(kind)
+    setCallSecs(0)
+    if (!live || !widgetKey) {
+      setCallStatus('Preview only — publish the widget to send a real staff callback request.')
+      return
+    }
+    setCallStatus('Notifying an available staff member…')
+    try {
+      const reply = await requestStaffCallback({
+        widgetKey,
+        ...(conversationId ? { conversationId } : {}),
+        ...(visitorToken ? { visitorToken } : {}),
+        visitor: 'Website visitor',
+        page: page ?? (typeof window !== 'undefined' ? window.location.pathname : ''),
+        ...(siteOrigin ? { siteOrigin } : {}),
+      })
+      if (reply.conversationId) setConversationId(reply.conversationId)
+      if (reply.visitorToken) setVisitorToken(reply.visitorToken)
+      setCallStatus(reply.text)
+      setGatewayMode('live')
+    } catch {
+      setCallStatus('The callback request could not be sent. Please leave a text message instead.')
+      setGatewayMode('fallback')
+    }
+  }
   const mmss = `${String(Math.floor(callSecs / 60)).padStart(2, '0')}:${String(callSecs % 60).padStart(2, '0')}`
 
   return (
@@ -280,6 +377,11 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
                       : undefined
                 }
               >
+                {m.from === 'staff' && (
+                  <span className="mb-1 block text-[9px] font-semibold uppercase tracking-wider opacity-60">
+                    Human support
+                  </span>
+                )}
                 {m.text}
                 {busy && i === msgs.length - 1 && m.from === 'agent' && <span className="cursor-blink">▍</span>}
               </span>
@@ -343,19 +445,15 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
       {call && (
         <div className={`absolute inset-0 z-10 flex flex-col ${dark ? 'bg-[#17140f]' : 'bg-[#17140f]'} text-white`}>
           <div className="flex items-center justify-between px-4 py-3" style={{ background: accent }}>
-            <span className="text-sm font-semibold">{call === 'voice' ? 'Voice call' : 'Video call'} · {config.agentName}</span>
-            <span className="font-mono-spec text-xs">{mmss}</span>
+            <span className="text-sm font-semibold">{call === 'voice' ? 'Callback request' : 'Video callback request'} · {config.agentName}</span>
+            <span className="font-mono-spec text-xs">waiting {mmss}</span>
           </div>
           <div className="relative flex flex-1 items-center justify-center">
-            {call === 'video' ? (
-              <>
-                <div className="h-full w-full" style={{ background: `linear-gradient(135deg, ${accent}55, #17140f)` }} />
-                <span className="absolute flex h-20 w-20 items-center justify-center rounded-full text-white" style={{ background: accent }}>
-                  <Bot className="h-10 w-10" />
-                </span>
-                <div className="absolute bottom-3 right-3 h-20 w-14 rounded-md border border-white/30 bg-white/10" />
-              </>
-            ) : (
+            <div className="flex max-w-xs flex-col items-center gap-5 px-6 text-center">
+              <span className="flex h-20 w-20 items-center justify-center rounded-full text-white" style={{ background: accent }}>
+                {call === 'video' ? <Video className="h-9 w-9" /> : <Phone className="h-9 w-9" />}
+              </span>
+              <p className="text-sm leading-relaxed text-white/75">{callStatus}</p>
               <div className="flex items-end gap-1.5">
                 {Array.from({ length: 16 }).map((_, i) => (
                   <span key={i} className="w-1.5 rounded-full" style={{
@@ -365,17 +463,11 @@ export default function ChatWidget({ config, live = false }: { config: WidgetCon
                   }} />
                 ))}
               </div>
-            )}
+            </div>
           </div>
-          <div className="flex items-center justify-center gap-4 py-5">
-            <button className="rounded-full bg-white/10 p-3 hover:bg-white/20" aria-label="Mute">
-              <Phone className="h-5 w-5" />
-            </button>
-            <button onClick={() => setCall(null)} className="rounded-full bg-red-500 p-4 hover:bg-red-600" aria-label="End call">
+          <div className="flex items-center justify-center py-5">
+            <button onClick={() => setCall(null)} className="rounded-full bg-red-500 p-4 hover:bg-red-600" aria-label="Close callback request">
               <PhoneOff className="h-5 w-5" />
-            </button>
-            <button className="rounded-full bg-white/10 p-3 hover:bg-white/20" aria-label="More">
-              <Video className="h-5 w-5" />
             </button>
           </div>
         </div>

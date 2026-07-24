@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Send, Bot, UserCheck, CheckCircle2, Globe, Monitor, Clock } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 interface Msg { from: 'visitor' | 'ai' | 'me'; text: string; t: string }
 type Status = 'ai' | 'human' | 'resolved'
@@ -61,23 +62,86 @@ const STATUS_META: Record<Status, { label: string; cls: string }> = {
   resolved: { label: 'Resolved', cls: 'border-border/60 text-muted-foreground' },
 }
 
-export default function Inbox() {
-  const [convos, setConvos] = useState(SEED)
-  const [activeId, setActiveId] = useState('c1')
+export default function Inbox({ userId, demo }: { userId: string; demo: boolean }) {
+  const [convos, setConvos] = useState<Convo[]>(demo ? SEED : [])
+  const [activeId, setActiveId] = useState(demo ? 'c1' : '')
   const [draft, setDraft] = useState('')
-  const convo = convos.find((c) => c.id === activeId)!
+  const [loading, setLoading] = useState(!demo)
+  const [error, setError] = useState<string | null>(null)
+  const convo = convos.find((c) => c.id === activeId) ?? convos[0]
+
+  useEffect(() => {
+    if (demo) return
+    let live = true
+    const load = async () => {
+      const { data: rows, error: conversationError } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false })
+      if (!live) return
+      if (conversationError) {
+        setError(`Could not load conversations: ${conversationError.message}`)
+        setLoading(false)
+        return
+      }
+      const ids = (rows ?? []).map((row) => row.id)
+      const { data: messages, error: messageError } = ids.length
+        ? await supabase.from('messages').select('*').in('conversation_id', ids).order('created_at')
+        : { data: [], error: null }
+      if (!live) return
+      if (messageError) {
+        setError(`Could not load messages: ${messageError.message}`)
+        setLoading(false)
+        return
+      }
+      const next: Convo[] = (rows ?? []).map((row) => ({
+        id: row.id,
+        visitor: row.visitor ?? 'Website visitor',
+        loc: row.location ?? 'Unknown',
+        device: row.device ?? 'Web widget',
+        page: row.page ?? '/',
+        started: new Date(row.started_at).toLocaleString(),
+        status: row.status === 'human' || row.status === 'resolved' ? row.status : 'ai',
+        unread: Boolean(row.unread),
+        msgs: (messages ?? [])
+          .filter((message) => message.conversation_id === row.id)
+          .map((message) => ({
+            from: message.sender === 'visitor' ? 'visitor' as const : message.sender === 'ai' ? 'ai' as const : 'me' as const,
+            text: message.text,
+            t: new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          })),
+      }))
+      setConvos(next)
+      setActiveId((current) => next.some((item) => item.id === current) ? current : next[0]?.id ?? '')
+      setError(null)
+      setLoading(false)
+    }
+    void load()
+    const channel = supabase
+      .channel(`inbox:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${userId}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `user_id=eq.${userId}` }, load)
+      .subscribe()
+    return () => {
+      live = false
+      void supabase.removeChannel(channel)
+    }
+  }, [userId, demo])
 
   const select = (id: string) => {
     setActiveId(id)
     setConvos((cs) => cs.map((c) => (c.id === id ? { ...c, unread: false } : c)))
   }
 
-  const setStatus = (status: Status) =>
+  const setStatus = (status: Status) => {
     setConvos((cs) => cs.map((c) => (c.id === activeId ? { ...c, status } : c)))
+    if (!demo) void supabase.from('conversations').update({ status }).eq('id', activeId).eq('user_id', userId)
+  }
 
-  const send = () => {
+  const send = async () => {
     const t = draft.trim()
-    if (!t) return
+    if (!t || !convo) return
     setConvos((cs) =>
       cs.map((c) =>
         c.id === activeId
@@ -86,18 +150,50 @@ export default function Inbox() {
       ),
     )
     setDraft('')
+    if (!demo) {
+      const { error: sendError } = await supabase.from('messages').insert({
+        conversation_id: convo.id,
+        user_id: userId,
+        sender: 'user',
+        staff_user_id: userId,
+        text: t,
+      })
+      if (sendError) setError(`Could not send reply: ${sendError.message}`)
+      else await supabase.from('conversations').update({ status: 'human', unread: false }).eq('id', convo.id)
+    }
   }
 
   const unread = convos.filter((c) => c.unread).length
 
+  if (loading) {
+    return <div className="border border-border/60 bg-card p-8 text-sm text-muted-foreground">Loading conversations…</div>
+  }
+  if (!convo) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h2 className="font-serif-display text-3xl font-semibold">Conversations</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Published widget conversations will appear here in real time.</p>
+        </div>
+        {error && <div role="alert" className="border border-red-600 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        <div className="border border-dashed border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
+          No customer conversations yet.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
+      {error && <div role="alert" className="border border-red-600 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h2 className="font-serif-display text-3xl font-semibold">Inbox</h2>
-            <span className="border border-amber-600 px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider text-amber-700">
-              interactive preview · sample conversations
+            <h2 className="font-serif-display text-3xl font-semibold">Conversations</h2>
+            <span className={`border px-2 py-1 font-mono-spec text-[9px] uppercase tracking-wider ${
+              demo ? 'border-amber-600 text-amber-700' : 'border-emerald-700 text-emerald-700'
+            }`}>
+              {demo ? 'demo · sample conversations' : 'live · persisted widget conversations'}
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -128,7 +224,9 @@ export default function Inbox() {
                 <span className="text-sm font-medium">{c.visitor}</span>
                 <span className="ml-auto font-mono-spec text-[10px] text-muted-foreground">{c.started}</span>
               </div>
-              <span className="truncate text-xs text-muted-foreground">{c.msgs[c.msgs.length - 1].text}</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {c.msgs[c.msgs.length - 1]?.text ?? 'Waiting for the first message…'}
+              </span>
               <div className="mt-0.5 flex items-center gap-2">
                 <span className={`border px-1.5 py-0.5 font-mono-spec text-[9px] uppercase tracking-wider ${STATUS_META[c.status].cls}`}>
                   {STATUS_META[c.status].label}

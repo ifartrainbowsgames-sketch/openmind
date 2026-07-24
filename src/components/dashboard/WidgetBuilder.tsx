@@ -1,19 +1,11 @@
 import { useState } from 'react'
 import ChatWidget, { DEFAULT_WIDGET, type WidgetConfig } from '@/components/widget/ChatWidget'
-import { Check, Copy, Phone, Video, ImagePlus, Sparkles, MessageSquare } from 'lucide-react'
+import { Check, Copy, Phone, Video, MessageSquare } from 'lucide-react'
+import { withWidgetConfig, type ChatbotConfig } from '@/lib/chatbot-config'
 
 const ACCENTS = ['#ff4d00', '#17140f', '#0e7490', '#7c3aed', '#15803d', '#b91c1c']
 const inputCls =
   'w-full border border-border/60 bg-background px-3 py-2.5 text-sm outline-none focus:border-accent rounded-none'
-
-/** Shared brand config the widget understands. */
-interface SharedCfg {
-  accent: string
-  theme: 'light' | 'dark'
-  radius: 'sharp' | 'soft' | 'round'
-}
-
-const DEFAULT_SHARED: SharedCfg = { accent: '#ff4d00', theme: 'light', radius: 'soft' }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -43,20 +35,33 @@ function Seg<T extends string>({ options, value, onChange }: { options: readonly
 }
 
 const FEATURE_TOGGLES = [
-  { key: 'voice' as const, icon: Phone, label: 'Voice calls', note: 'visitors call you from the chat' },
-  { key: 'video' as const, icon: Video, label: 'Video calls', note: 'face-to-face support in the widget' },
-  { key: 'images' as const, icon: ImagePlus, label: 'Image drop', note: 'drag photos into the conversation' },
-  { key: 'aiFix' as const, icon: Sparkles, label: 'Fix with AI', note: 'one-click sentence rewriting for visitors' },
+  { key: 'voice' as const, icon: Phone, label: 'Callback requests', note: 'notify staff who accept call requests' },
+  { key: 'video' as const, icon: Video, label: 'Video callback requests', note: 'routing only until a video provider is connected' },
 ]
 
-export default function WidgetBuilder() {
-  const [shared, setShared] = useState<SharedCfg>(DEFAULT_SHARED)
-  const [chatCfg, setChatCfg] = useState<WidgetConfig>(DEFAULT_WIDGET)
+export default function WidgetBuilder({
+  config,
+  published,
+  saving,
+  saved,
+  onChange,
+  onSave,
+}: {
+  config: ChatbotConfig
+  published: boolean
+  saving: boolean
+  saved: boolean
+  onChange: (config: ChatbotConfig) => void
+  onSave: () => Promise<boolean>
+}) {
   const [copied, setCopied] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const chatCfg = config.widget ?? DEFAULT_WIDGET
+  const shared = { accent: chatCfg.accent, theme: chatCfg.theme, radius: chatCfg.radius }
 
   const setChat = <K extends keyof WidgetConfig>(k: K, v: WidgetConfig[K]) =>
-    setChatCfg((c) => ({ ...c, [k]: v }))
+    onChange(withWidgetConfig(config, { ...chatCfg, [k]: v }))
+  const setBrand = (patch: Partial<Pick<WidgetConfig, 'accent' | 'theme' | 'radius'>>) =>
+    onChange(withWidgetConfig(config, { ...chatCfg, ...patch }))
 
   // sync chatbot's brand with the shared brand settings
   const chatPreview: WidgetConfig = { ...chatCfg, accent: shared.accent, theme: shared.theme, radius: shared.radius }
@@ -65,10 +70,15 @@ export default function WidgetBuilder() {
     .filter(Boolean)
     .join(',')
 
-  const attr = (k: string, v: string | boolean) => `  data-${k}="${v}"\n`
+  const attrValue = (value: string | boolean) =>
+    String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  const attr = (k: string, v: string | boolean) => `  data-${k}="${attrValue(v)}"\n`
+  const widgetScriptUrl =
+    typeof window === 'undefined' ? 'https://your-openmind-domain/openmind-widget.js' : `${window.location.origin}/openmind-widget.js`
   const snippet = (() => {
     const attrs =
-      attr('service', 'chatbot') +
+      attr('service', 'chat') +
+      attr('key', config.publicKey || 'publish-to-create-key') +
       attr('accent', shared.accent) +
       attr('theme', shared.theme) +
       attr('radius', shared.radius) +
@@ -77,7 +87,7 @@ export default function WidgetBuilder() {
       attr('preset', chatCfg.preset ?? 'openmind') +
       attr('font', chatCfg.font ?? 'system') +
       attr('features', features)
-    return `<script\n  src="https://unpkg.com/@openmind/widget"\n${attrs}  async>\n</script>`
+    return `<script\n  src="${widgetScriptUrl}"\n${attrs}  async>\n</script>`
   })()
 
   return (
@@ -85,12 +95,12 @@ export default function WidgetBuilder() {
       <div>
         <h2 className="font-serif-display text-3xl font-semibold">Widget Builder</h2>
         <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-          Design the chatbot your visitors get — brand it, tune its behavior, ship the snippet.
+          Design the chatbot your visitors get, publish one shared configuration, and copy its workspace-bound snippet.
         </p>
       </div>
 
       <p className="text-xs text-muted-foreground">
-        <strong className="text-foreground">Chatbot:</strong> the full chat window — talk, call, drop images.
+        <strong className="text-foreground">Chatbot:</strong> customer messages and staff callback requests.
       </p>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_440px]">
@@ -103,7 +113,7 @@ export default function WidgetBuilder() {
                 {ACCENTS.map((a) => (
                   <button
                     key={a}
-                    onClick={() => setShared((s) => ({ ...s, accent: a }))}
+                    onClick={() => setBrand({ accent: a })}
                     className={`h-9 w-9 border-2 ${shared.accent === a ? 'border-primary' : 'border-transparent'}`}
                     style={{ background: a }}
                     aria-label={a}
@@ -113,10 +123,10 @@ export default function WidgetBuilder() {
             </Row>
             <div className="grid gap-4 sm:grid-cols-2">
               <Row label="Theme">
-                <Seg options={['light', 'dark'] as const} value={shared.theme} onChange={(v) => setShared((s) => ({ ...s, theme: v }))} />
+                <Seg options={['light', 'dark'] as const} value={shared.theme} onChange={(theme) => setBrand({ theme })} />
               </Row>
               <Row label="Corners">
-                <Seg options={['sharp', 'soft', 'round'] as const} value={shared.radius} onChange={(v) => setShared((s) => ({ ...s, radius: v }))} />
+                <Seg options={['sharp', 'soft', 'round'] as const} value={shared.radius} onChange={(radius) => setBrand({ radius })} />
               </Row>
             </div>
           </div>
@@ -194,10 +204,16 @@ export default function WidgetBuilder() {
 
           <div className="border border-primary bg-card hard-shadow">
             <div className="flex items-center justify-between border-b border-primary px-4 py-2.5">
-              <span className="spec-label">Embed snippet — updates live</span>
+              <span className="spec-label">Embed snippet — bound to this chatbot</span>
               <button
-                onClick={() => { navigator.clipboard?.writeText(snippet); setCopied(true); setTimeout(() => setCopied(false), 1400) }}
-                className="flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-wider text-muted-foreground hover:text-accent"
+                onClick={() => {
+                  if (!published) return
+                  navigator.clipboard?.writeText(snippet)
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1400)
+                }}
+                disabled={!published}
+                className="flex items-center gap-1.5 font-mono-spec text-[10px] uppercase tracking-wider text-muted-foreground hover:text-accent disabled:opacity-40"
               >
                 {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? 'copied' : 'copy'}
@@ -209,14 +225,19 @@ export default function WidgetBuilder() {
           </div>
 
           <button
-            onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 1600) }}
+            onClick={() => void onSave()}
+            disabled={saving}
             className={`w-full border px-6 py-3.5 font-mono-spec text-xs uppercase tracking-[0.16em] transition-colors ${
               saved
                 ? 'border-emerald-700 bg-emerald-700 text-white'
                 : 'border-primary bg-primary text-primary-foreground hard-shadow-sm hover:bg-accent hover:border-accent'
             }`}
           >
-            {saved ? '✓ Published to your site' : 'Publish chatbot widget'}
+            {saving
+              ? 'Publishing…'
+              : saved
+              ? published ? '✓ Chatbot configuration published' : '✓ Saved locally — connect Supabase to publish'
+              : published ? 'Save & publish widget' : 'Save widget settings locally'}
           </button>
         </div>
 
@@ -230,11 +251,11 @@ export default function WidgetBuilder() {
           </div>
           <div className="bg-ruled flex-1 p-4" style={{ minHeight: 560 }}>
             <div className="mx-auto h-[560px] max-w-[400px]">
-              <ChatWidget config={chatPreview} />
+              <ChatWidget config={chatPreview} live={published} widgetKey={published ? config.publicKey : undefined} />
             </div>
           </div>
           <div className="border-t border-border/50 px-4 py-2.5 text-center font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            the full chat window — talk, call, drop images
+            messages are live after publish · call buttons send staff callback requests
           </div>
         </div>
       </div>
