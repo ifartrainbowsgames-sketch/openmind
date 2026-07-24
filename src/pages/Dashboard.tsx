@@ -146,7 +146,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!session) return
     if (session.demo) {
-      setSources(SEED_ROWS.map((source, index) => ({
+      const demoSources: Source[] = SEED_ROWS.map((source, index) => ({
         ...source,
         id: `demo-source-${index}`,
         chunks: 0,
@@ -154,7 +154,8 @@ export default function Dashboard() {
         progress: 0,
         addedAt: 'sample',
         sizeBytes: 0,
-      })))
+      }))
+      void Promise.resolve(demoSources).then(setSources)
       return
     }
     const uid = session.user.id
