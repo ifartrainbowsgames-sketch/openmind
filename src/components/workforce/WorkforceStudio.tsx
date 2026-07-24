@@ -484,7 +484,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
           </div>
           {mode === 'live' && (
             <div className="flex flex-wrap items-center gap-2">
-              <select className={`${inputCls} w-auto`} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+              <select aria-label="AI provider" className={`${inputCls} w-auto`} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
                 {LIVE_PROVIDERS.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} · {p.model}</option>
                 ))}
@@ -493,6 +493,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                 <input
                   className={`${inputCls} w-64`}
                   type="password"
+                  aria-label="Provider API key"
                   placeholder="Provider API key — stays in memory only"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
@@ -686,8 +687,14 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                   key={e.id}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={selectedId === e.id}
                   onClick={() => select(e.id)}
-                  onKeyDown={(ev) => { if (ev.key === 'Enter') select(e.id) }}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                      ev.preventDefault()
+                      select(e.id)
+                    }
+                  }}
                   style={{ '--dash-i': i } as CSSProperties}
                   className={`dash-cascade group relative cursor-pointer overflow-hidden border p-4 pl-5 text-left transition-colors ${
                     selectedId === e.id ? 'border-primary bg-card hard-shadow-sm' : 'border-border/60 bg-card/60 hover:bg-card'
@@ -707,6 +714,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                         onClick={(ev) => { ev.stopPropagation(); fire(e.id) }}
                         className="p-1 text-muted-foreground/50 hover:text-accent"
                         title="Fire this employee"
+                        aria-label={`Remove ${e.name} from the roster`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

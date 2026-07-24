@@ -123,7 +123,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
         Mock data until you connect — no fake integrations. Test a connection and its employees
         start reading real data, stamped <span className="text-emerald-700">[LIVE]</span> on every tool call.
-        Tokens stay in this browser (localStorage) — the same BYOK tradeoff as provider keys.
+        Tokens stay only in this tab session and are removed when the tab session ends. A server-managed vault is still planned.
       </p>
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -186,7 +186,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                       </label>
                       <label className="block">
                         <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Zendesk API token</span>
-                        <input className={inputCls} type="password" placeholder="API token — stays in this browser" value={f.apiToken}
+                        <input className={inputCls} type="password" placeholder="API token — session only" value={f.apiToken}
                           onChange={(e) => patch(conn.id, { apiToken: e.target.value })} />
                       </label>
                     </>
@@ -202,7 +202,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
                       </label>
                       <label className="block">
                         <span className="mb-1 block font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{preset.tokenLabel}</span>
-                        <input className={inputCls} type="password" placeholder="Token / key — stays in this browser" value={f.token}
+                        <input className={inputCls} type="password" placeholder="Token / key — session only" value={f.token}
                           onChange={(e) => patch(conn.id, { token: e.target.value })} />
                       </label>
                     </>
