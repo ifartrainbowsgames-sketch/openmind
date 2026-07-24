@@ -45,14 +45,14 @@ test('chatbot dashboard connects availability and staff settings', async ({ page
   await page.getByLabel('Password').fill('testing123')
   await page.getByRole('button', { name: 'Create account' }).click()
 
-  await expect(page.getByRole('heading', { name: 'Chatbot home' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Chatbot home', level: 2 })).toBeVisible()
   const availability = page.getByRole('switch', { name: 'Customer chatbot availability' })
   await expect(availability).toHaveAttribute('aria-checked', 'true')
   await availability.click()
   await expect(availability).toHaveAttribute('aria-checked', 'false')
 
   await page.getByRole('button', { name: 'Staff & availability' }).click()
-  await expect(page.getByRole('heading', { name: 'Staff & availability' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Staff & availability', level: 2 })).toBeVisible()
   await page.getByLabel('Staff name').fill('Alex')
   await page.getByLabel('Staff email').fill('alex@example.com')
   await page.getByRole('button', { name: 'Add staff' }).click()
