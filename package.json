@@ -10,6 +10,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:agents": "vitest run src/lib/agent/evaluation.test.ts",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },

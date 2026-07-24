@@ -70,11 +70,14 @@ The public chat function has payload/origin checks and a best-effort per-isolate
 npm run lint
 npm run typecheck
 npm test
+npm run test:agents
 npm run build
 npm run test:e2e
 ```
 
 CI runs all checks and Chromium smoke tests. Install the browser locally with `npx playwright install chromium`.
+
+`npm run test:agents` executes the curated AI employee benchmark. It covers more than 30 knowledge, analysis, code, connection, multi-tool and direct-answer tasks, and scores tool selection, execution, answer content and graph traces separately.
 
 ## Security notes
 
