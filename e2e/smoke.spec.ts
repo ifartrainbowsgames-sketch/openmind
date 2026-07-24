@@ -36,6 +36,8 @@ test('connection marketplace exposes n8n and OpenClaw plugins', async ({ page })
   await expect(page.getByText('Connection marketplace', { exact: true })).toBeVisible()
   await expect(page.getByText('n8n', { exact: true }).first()).toBeVisible()
   await expect(page.getByText('OpenClaw', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Install', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Advanced manual setup' })).toBeVisible()
 })
 
 test('chatbot dashboard connects availability and staff settings', async ({ page }) => {
