@@ -429,7 +429,7 @@ export default function WidgetBuilder({
               </button>
               <button
                 onClick={() => void onPublish()}
-                disabled={saving || publishing || contrastWarnings.length > 0}
+                disabled={saving || publishing}
                 className="inline-flex items-center justify-center gap-2 border border-primary bg-primary px-4 py-3 text-sm font-medium text-primary-foreground hover:bg-accent disabled:opacity-40"
               >
                 <Rocket className="h-4 w-4" /> {publishing ? 'Publishing…' : `Publish${config.appearanceVersion ? ` v${config.appearanceVersion + 1}` : ''}`}
