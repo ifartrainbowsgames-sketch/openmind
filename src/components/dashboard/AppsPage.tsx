@@ -9,12 +9,11 @@ import {
 import { loadOAuthConnections, mergeConnectionConfigs } from '@/lib/oauth-connections'
 
 export default function AppsPage() {
-  const [configs, setConfigs] = useState<LiveConnectionConfig[]>([])
+  const [configs, setConfigs] = useState<LiveConnectionConfig[]>(loadLiveConnections)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     const local = loadLiveConnections()
-    setConfigs(local)
     void loadOAuthConnections()
       .then(async (installed) => {
         const merged = mergeConnectionConfigs(local, installed)

@@ -92,13 +92,15 @@ function colorsFromAppearance(appearance: Record<string, unknown>, preset: Widge
   const stored = asRecord(appearance.colors)
   const base = { ...WIDGET_PRESETS[preset].colors }
   const accent = typeof appearance.accent === 'string' ? appearance.accent : base.accent
-  if (!Object.keys(stored).length && preset === 'openmind') {
-    Object.assign(base, {
-      accent,
-      headerBackground: accent,
-      visitorBubble: accent,
-      launcherBackground: accent,
-    })
+  if (!Object.keys(stored).length) {
+    base.accent = accent
+    if (preset === 'openmind') {
+      Object.assign(base, {
+        headerBackground: accent,
+        visitorBubble: accent,
+        launcherBackground: accent,
+      })
+    }
   }
   for (const key of Object.keys(base) as (keyof WidgetColors)[]) {
     if (typeof stored[key] === 'string') base[key] = stored[key] as string

@@ -41,7 +41,7 @@ describe('chatbot configuration', () => {
         video: false,
         images: false,
         colors: {
-          accent: '#4f9fdd',
+          accent: '#123456',
           headerBackground: '#3b82a0',
         },
       },
