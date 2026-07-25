@@ -108,6 +108,8 @@ const ACCENT_POOL = ['#ff4d00', '#0e7490', '#7c3aed', '#15803d', '#17140f', '#b9
 
 // prompt-mentioned extras get unioned into every hire's connections
 const CONNECTION_HINTS: { re: RegExp; id: string }[] = [
+  { re: /\bn8n\b/i, id: 'n8n' },
+  { re: /\bopenclaw\b/i, id: 'openclaw' },
   { re: /\b(gmail|e-?mails?|inbox)\b/i, id: 'gmail' },
   { re: /\boutlook\b/i, id: 'outlook' },
   { re: /\b(calendar|gcal|meetings?)\b/i, id: 'gcal' },

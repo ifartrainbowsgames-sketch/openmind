@@ -68,4 +68,15 @@ describe('runEmployee with connections', () => {
     const r = await runEmployee(simulatedBrain(), noConns, 'What is on my calendar?')
     expect(r.toolCalls.map((c) => c.tool)).not.toContain('gcal')
   })
+
+  it('routes automation and delegation tasks only through attached plugins', async () => {
+    const automationEmployee = emp({ connections: ['n8n', 'openclaw'] })
+    const n8nRun = await runEmployee(simulatedBrain(), automationEmployee, 'Run the n8n lead workflow')
+    expect(n8nRun.toolCalls.map((c) => c.tool)).toContain('n8n')
+    const delegated = await runEmployee(simulatedBrain(), automationEmployee, 'Delegate this research to OpenClaw')
+    expect(delegated.toolCalls.map((c) => c.tool)).toContain('openclaw')
+
+    const noPlugins = await runEmployee(simulatedBrain(), emp({ connections: [] }), 'Run the n8n workflow')
+    expect(noPlugins.toolCalls.map((c) => c.tool)).not.toContain('n8n')
+  })
 })

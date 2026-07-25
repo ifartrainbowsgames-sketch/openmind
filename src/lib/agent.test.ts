@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   calc,
+  argsFromSchema,
+  argumentsForSchema,
   parsePlan,
+  parsePlannerOutput,
+  parseStructuredPlan,
   runEmployee,
   simulatedBrain,
   TOOL_REGISTRY,
+  TOOL_IDS,
   type Employee,
   type TraceLine,
 } from './agent'
@@ -58,9 +63,74 @@ describe('parsePlan', () => {
   it('returns empty for NONE', () => {
     expect(parsePlan('NONE', ['calculator'])).toEqual([])
   })
+
+  it('accepts real MCP ids and preserves their canonical casing', () => {
+    expect(parsePlan(
+      'TOOL: github__search-issues | open bugs\nTOOL: GitHub__Get_Issue_2 | 42',
+      ['github__search-issues', 'GitHub__Get_Issue_2'],
+    )).toEqual([
+      { tool: 'github__search-issues', input: 'open bugs' },
+      { tool: 'GitHub__Get_Issue_2', input: '42' },
+    ])
+  })
+})
+
+describe('MCP argument mapping', () => {
+  it('uses required and common string fields from advertised schemas', () => {
+    expect(argsFromSchema({ properties: { q: { type: 'string' } }, required: ['q'] }, 'refund')).toEqual({ q: 'refund' })
+    expect(argsFromSchema({ properties: { limit: { type: 'number' } } }, 'refund')).toEqual({})
+    expect(argsFromSchema(undefined, 'refund')).toEqual({ query: 'refund' })
+  })
+
+  it('parses structured plans with canonical tool ids and typed arguments', () => {
+    const output = JSON.stringify({
+      steps: [{
+        tool: 'github__search-issues',
+        input: 'Find open bugs',
+        arguments: { query: 'is:issue is:open label:bug', limit: 10 },
+      }],
+    })
+    expect(parseStructuredPlan(output, ['GitHub__Search-Issues'])).toEqual([{
+      tool: 'GitHub__Search-Issues',
+      input: 'Find open bugs',
+      args: { query: 'is:issue is:open label:bug', limit: 10 },
+    }])
+  })
+
+  it('accepts fenced JSON and falls back to legacy plans', () => {
+    expect(parsePlannerOutput(
+      '```json\n{"steps":[{"tool":"calculator","input":"2+2"}]}\n```',
+      ['calculator'],
+    )).toEqual([{ tool: 'calculator', input: '2+2' }])
+    expect(parsePlannerOutput('TOOL: calculator | 2+2', ['calculator']))
+      .toEqual([{ tool: 'calculator', input: '2+2' }])
+  })
+
+  it('validates complete multi-field arguments against tool schemas', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        limit: { type: 'integer' },
+        state: { type: 'string' },
+      },
+      required: ['query', 'limit'],
+    }
+    expect(argumentsForSchema(schema, {
+      query: 'bugs',
+      limit: 5,
+      state: 'open',
+      unknown: 'drop me',
+    }, 'fallback')).toEqual({ query: 'bugs', limit: 5, state: 'open' })
+    expect(() => argumentsForSchema(schema, { query: 'bugs', limit: 'five' }, 'fallback'))
+      .toThrow(/limit/)
+  })
 })
 
 describe('tool registry', () => {
+  it('includes code review in the exported tool id list', () => {
+    expect(TOOL_IDS).toContain('code_review')
+  })
   it('search_docs finds OpenMind facts', () => {
     expect(TOOL_REGISTRY.search_docs.run('How much is the Pro plan?')).toMatch(/\$?10|ten dollars/i)
   })

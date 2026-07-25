@@ -4,9 +4,9 @@ import { defineConfig } from "vite"
 import { inspectAttr } from 'kimi-plugin-inspect-react'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   base: './',
-  plugins: [inspectAttr(), react()],
+  plugins: command === 'serve' ? [inspectAttr(), react()] : [react()],
   server: {
     port: 3000,
   },
@@ -22,9 +22,9 @@ export default defineConfig({
           react: ['react', 'react-dom', 'react-router'],
           supabase: ['@supabase/supabase-js'],
           charts: ['recharts'],
-          motion: ['framer-motion', 'gsap'],
+          motion: ['gsap'],
         },
       },
     },
   },
-});
+}))

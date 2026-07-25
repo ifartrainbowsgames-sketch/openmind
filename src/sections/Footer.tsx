@@ -13,21 +13,11 @@ const cols: { title: string; links: FooterLink[] }[] = [
   {
     title: 'Product',
     links: [
-      { label: 'Playground', href: '#playground' },
       { label: 'Chatbot', href: '#capabilities' },
-      { label: 'Providers', href: '#providers' },
+      { label: 'Automations', href: '#employees' },
       { label: 'Security', href: '#security' },
       { label: 'Pricing', href: '#pricing' },
-    ],
-  },
-  {
-    title: 'Developers',
-    links: [
-      { label: 'Docs', href: '#integrate' },
-      { label: 'API reference', href: '#integrate' },
-      { label: 'Embed widgets', href: '#integrate' },
-      { label: 'Self-hosting', href: '#opensource' },
-      { label: 'Console', href: '/dashboard' },
+      { label: 'Workspace', href: '/dashboard' },
     ],
   },
   {
@@ -48,14 +38,14 @@ export default function Footer() {
       {/* CTA */}
       <div className="border-b border-white/15">
         <div className="mx-auto max-w-7xl px-6 py-20 text-center">
-          <p className="spec-label mb-6 !text-white/50">Fig. 10 — begin</p>
+          <p className="spec-label mb-6 !text-white/50">Start building</p>
           <h2 className="font-serif-display mx-auto max-w-3xl text-5xl font-semibold leading-[1.02] tracking-tight md:text-7xl">
-            Stop renting
+            Give every customer
             <br />
-            <em className="font-normal italic text-accent">someone else's stack.</em>
+            <em className="font-normal italic text-accent">a helpful first answer.</em>
           </h2>
           <p className="mx-auto mt-6 max-w-lg text-white/60">
-            Free tier, no card, two lines of code. Your keys stay yours from the first request.
+            Create your workspace, design the chatbot, and invite your team. No card required.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-4">
             <Button
@@ -82,14 +72,13 @@ export default function Footer() {
       </div>
 
       {/* link columns */}
-      <div className="mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="mx-auto grid max-w-7xl gap-10 px-6 py-14 md:grid-cols-[1.6fr_1fr_1fr]">
         <div>
           <span className="font-serif-display text-2xl font-bold">
             OpenMind<span className="text-accent">.</span>
           </span>
           <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/55">
-            The open-source integration layer for AI. One chatbot, every provider, zero
-            token markup.
+            Customer support chat, team handoff, and practical automations in one workspace.
           </p>
         </div>
         {cols.map((c) => (
@@ -126,7 +115,7 @@ export default function Footer() {
       <div className="border-t border-white/15">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-6 py-5 font-mono-spec text-[11px] uppercase tracking-[0.16em] text-white/40 md:flex-row">
           <span>© 2026 OpenMind — MIT licensed</span>
-          <span>set in fraunces & plex mono · no cookies, no trackers</span>
+          <span>Open source · no advertising trackers</span>
         </div>
       </div>
     </footer>

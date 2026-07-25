@@ -1,6 +1,5 @@
 // Hand-rolled SVG mind map: company → employees → their tools & connections.
-// Connection chips carry the LIVE/MOCK/ERROR honesty tint from the configured
-// live connections (emerald = real data flowing, amber = canned mock, red = error).
+// Connection chips carry the LIVE/READY/MOCK/ERROR honesty tint.
 import { CONNECTIONS, toolName, type Employee, type LiveConnectionConfig } from '@/lib/agent'
 import { Bot, Building2, Link2, Wrench } from 'lucide-react'
 import type { CSSProperties } from 'react'
@@ -13,23 +12,26 @@ interface Props {
   configs?: LiveConnectionConfig[]
 }
 
-type ConnTint = 'live' | 'error' | 'mock'
+type ConnTint = 'live' | 'ready' | 'error' | 'mock'
 
 function tintOf(configs: LiveConnectionConfig[] | undefined, id: string): ConnTint {
   const cfg = configs?.find((c) => c.connectionId === id)
   if (!cfg) return 'mock'
   if (cfg.status === 'live') return 'live'
+  if (cfg.status === 'ready') return 'ready'
   if (cfg.status === 'error') return 'error'
   return 'mock'
 }
 
 const CHIP_FILL: Record<ConnTint, string> = {
   live: 'fill-emerald-700',
+  ready: 'fill-sky-700',
   error: 'fill-red-600',
   mock: 'fill-primary',
 }
 const CHIP_EDGE: Record<ConnTint, string> = {
   live: 'stroke-emerald-700/80',
+  ready: 'stroke-sky-700/80',
   error: 'stroke-red-600/70',
   mock: 'stroke-accent/60',
 }
@@ -122,7 +124,7 @@ export default function WorkforceMap({ employees, selectedId, onSelect, configs 
                         tint ? 'text-primary-foreground' : 'text-muted-foreground'
                       }`}>
                         {tint ? <Link2 className={`h-2.5 w-2.5 shrink-0 ${tint === 'mock' ? 'text-amber-400' : 'text-white/80'}`} /> : <Wrench className="h-2.5 w-2.5 shrink-0" />}
-                        <span className="truncate">{label}{tint === 'live' ? ' · live' : ''}</span>
+                        <span className="truncate">{label}{tint === 'live' || tint === 'ready' ? ` · ${tint}` : ''}</span>
                       </div>
                     </foreignObject>
                   </g>
@@ -137,6 +139,7 @@ export default function WorkforceMap({ employees, selectedId, onSelect, configs 
           <div className="flex items-center justify-end gap-4 font-mono-spec text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
             <span className="flex items-center gap-1"><Wrench className="h-2.5 w-2.5" /> tool</span>
             <span className="flex items-center gap-1"><Link2 className="h-2.5 w-2.5 text-accent" /> mock</span>
+            <span className="flex items-center gap-1"><Link2 className="h-2.5 w-2.5 text-sky-700" /> ready</span>
             <span className="flex items-center gap-1"><Link2 className="h-2.5 w-2.5 text-emerald-700" /> live</span>
           </div>
         </foreignObject>

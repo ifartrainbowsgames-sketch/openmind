@@ -39,7 +39,7 @@ const TOP_PAGES = [
   { page: '/changelog', views: 212, clicks: 44, chats: 9, time: '0:52' },
 ]
 
-const LIVE_EVENTS = [
+const SAMPLE_EVENTS = [
   'visitor from Berlin opened /pricing',
   'chat started on /docs/getting-started',
   'visitor from Austin clicked "Start free"',
@@ -66,7 +66,7 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
     [series],
   )
   const conv = ((totals.chats / Math.max(1, totals.visitors)) * 100).toFixed(1)
-  const liveNow = 3 + (new Date().getMinutes() % 5)
+  const sampleActiveNow = 3 + (new Date().getMinutes() % 5)
 
   const KPIS = [
     { icon: Eye, label: `Visitors · ${days}d`, value: totals.visitors.toLocaleString(), delta: 12, countTo: totals.visitors },
@@ -89,7 +89,7 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
         </div>
         <span className="flex items-center gap-2 border border-primary bg-card px-3 py-1.5 font-mono-spec text-[11px] uppercase tracking-[0.14em]">
           <span className="pulse-dot h-2 w-2 rounded-full bg-emerald-600" />
-          {liveNow} on your site now
+          sample · {sampleActiveNow} active visitors
         </span>
       </div>
 
@@ -160,11 +160,11 @@ export default function AnalyticsPanel({ plan, onUpgrade }: { plan: Plan; onUpgr
         {/* live feed */}
         <div className="dash-feed-in border border-primary bg-card">
           <div className="flex items-center justify-between border-b border-primary px-5 py-2.5">
-            <span className="spec-label">Live — who comes in, who goes out</span>
-            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" />
+            <span className="spec-label">Sample event feed</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           </div>
           <div className="bg-terminal">
-            {LIVE_EVENTS.map((e, i) => (
+            {SAMPLE_EVENTS.map((e, i) => (
               <div key={e} className="dash-cascade flex items-center gap-3 border-b border-white/10 px-4 py-2.5 font-mono-spec text-[11px] text-white/75 last:border-b-0"
                 style={{ '--dash-i': i } as CSSProperties}>
                 <span className="text-white/30">{String(i + 1).padStart(2, '0')}</span>

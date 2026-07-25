@@ -2,11 +2,8 @@ import { useRef } from 'react'
 import Navbar from '@/sections/Navbar'
 import FloatingWidget from '@/components/widget/FloatingWidget'
 import Hero from '@/sections/Hero'
-import Playground from '@/sections/Playground'
 import Workforce from '@/sections/Workforce'
 import Capabilities from '@/sections/Capabilities'
-import Providers from '@/sections/Providers'
-import Integrate from '@/sections/Integrate'
 import Security from '@/sections/Security'
 import OpenSource from '@/sections/OpenSource'
 import Pricing from '@/sections/Pricing'
@@ -62,13 +59,10 @@ export default function Home() {
     <div className="vt-page min-h-screen bg-background">
       <ScrollToTop />
       <Navbar />
-      <main ref={mainRef}>
+      <main id="main-content" ref={mainRef}>
         <Hero />
-        <Playground />
-        <Workforce />
         <Capabilities />
-        <Providers />
-        <Integrate />
+        <Workforce />
         <Security />
         <OpenSource />
         <Pricing />

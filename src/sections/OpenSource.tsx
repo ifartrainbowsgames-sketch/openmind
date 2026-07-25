@@ -25,8 +25,8 @@ export default function OpenSource() {
             </h2>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
               Every line of OpenMind is public. Audit the key handling, read the adapter layer,
-              run the whole thing on a Raspberry Pi if that's your idea of fun. What you pay for
-              is hosting, updates and support — never access to your own infrastructure.
+              inspect what exists and track what remains on the roadmap. Hosted billing and a packaged
+              self-host stack are not available yet.
             </p>
             <div className="mt-8 flex flex-wrap gap-4">
               <Button

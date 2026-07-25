@@ -4,12 +4,11 @@ import {
   ArrowLeft, Apple, Github, Loader2, Lock, Mail,
 } from 'lucide-react'
 import {
-  authMode, getOAuthAvailability, getSession, OAUTH_PROVIDERS, resetPassword,
+  getOAuthAvailability, getSession, OAUTH_PROVIDERS, resetPassword,
   signInEmail, signInOAuth, signUpEmail,
   type OAuthAvailability, type OAuthProvider,
 } from '@/lib/auth'
 import { getRemember, setRemember } from '@/lib/supabase'
-import { ModeStamp } from '@/components/demos/shared'
 
 const inputCls =
   'w-full border border-primary bg-card px-3 py-3 text-sm outline-none placeholder:text-muted-foreground/60 focus:border-accent rounded-none'
@@ -96,19 +95,19 @@ export default function Login() {
         </Link>
       </div>
 
-      <div className="flex flex-1 items-center justify-center px-6 py-16">
+      <main id="main-content" className="flex flex-1 items-center justify-center px-6 py-16">
         <div className="w-full max-w-md">
           <p className="spec-label mb-4 flex items-center gap-3">
             <span className="inline-block h-2 w-2 bg-accent" />
-            Console access
+            Your workspace
           </p>
           <h1 className="font-serif-display text-5xl font-semibold tracking-tight">
             {mode === 'signin' ? 'Sign in.' : 'Create account.'}
           </h1>
           <p className="mt-3 text-sm text-muted-foreground">
             {mode === 'signin'
-              ? 'Your workspace, sources, conversations and keys — all behind your account.'
-              : 'Free tier, no card. Your keys stay yours from the first request.'}
+              ? 'Continue managing your chatbot and customer conversations.'
+              : 'Start free. No card required.'}
           </p>
 
           <div className="mt-8 border border-primary bg-card p-6 hard-shadow">
@@ -135,7 +134,7 @@ export default function Login() {
                     key={p.id}
                     onClick={() => !off && oauth(p.id)}
                     disabled={busy || off}
-                    title={off ? `${p.name} isn't enabled on the Supabase project yet — Authentication → Providers` : undefined}
+                    title={off ? `${p.name} sign-in is not available yet` : undefined}
                     className={`flex items-center justify-center gap-2 border px-3 py-2.5 text-sm transition-colors ${
                       off
                         ? 'cursor-not-allowed border-border/40 opacity-40'
@@ -144,17 +143,11 @@ export default function Login() {
                   >
                     {PROVIDER_ICON[p.id]()}
                     <span className="font-mono-spec text-[11px] uppercase tracking-wider">{p.name}</span>
-                    {off && <span className="font-mono-spec text-[8px] uppercase tracking-wider text-muted-foreground">setup</span>}
+                    {off && <span className="font-mono-spec text-[8px] uppercase tracking-wider text-muted-foreground">unavailable</span>}
                   </button>
                 )
               })}
             </div>
-            {oauthAvail && Object.values(oauthAvail).some((v) => !v) && (
-              <p className="mt-2 font-mono-spec text-[10px] leading-relaxed text-muted-foreground">
-                Greyed providers aren't enabled on the Supabase project yet — flip them on under
-                Authentication → Providers with each app's OAuth credentials.
-              </p>
-            )}
 
             <div className="my-5 flex items-center gap-3">
               <span className="h-px flex-1 bg-border" />
@@ -204,10 +197,10 @@ export default function Login() {
             </div>
 
             {error && (
-              <p className="mt-4 border border-accent/60 bg-accent/10 px-3 py-2 text-xs text-accent">{error}</p>
+              <p role="alert" aria-live="assertive" className="mt-4 border border-accent/60 bg-accent/10 px-3 py-2 text-xs text-accent">{error}</p>
             )}
             {notice && (
-              <p className="mt-4 border border-emerald-700/60 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{notice}</p>
+              <p role="status" aria-live="polite" className="mt-4 border border-emerald-700/60 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{notice}</p>
             )}
 
             <button
@@ -216,23 +209,12 @@ export default function Login() {
               className="mt-5 flex w-full items-center justify-center gap-2 border border-primary bg-primary px-6 py-3.5 font-mono-spec text-xs uppercase tracking-[0.16em] text-primary-foreground hard-shadow-sm transition-colors hover:bg-accent hover:border-accent disabled:opacity-50"
             >
               {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {mode === 'signin' ? 'Sign in to console' : 'Create account'}
+              {mode === 'signin' ? 'Sign in' : 'Create account'}
             </button>
 
-            <div className="mt-4 flex justify-center">
-              <ModeStamp
-                mode={authMode === 'live' ? 'live' : 'simulated'}
-                note={
-                  authMode === 'live'
-                    ? 'supabase auth · RLS on every table'
-                    : 'demo mode — accounts live in this browser until Supabase env vars are set'
-                }
-                liveLabel="supabase auth"
-              />
-            </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

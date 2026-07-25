@@ -14,24 +14,24 @@ interface Tier {
   cta: string
 }
 
-const FEATURES = ['Sites / widgets', 'Chatbot service', 'Analytics & logs', 'Server-side key vault', 'Team seats', 'Self-host license', 'Support']
+const FEATURES = ['Websites', 'Customer chatbot', 'Conversation history', 'Published versions', 'Team seats', 'Support']
 
 const TIERS: Tier[] = [
   {
     name: 'Free', price: '$0', per: '/forever', blurb: 'For side projects and evaluation.',
-    rows: ['1 site', 'yes', '7 days', null, '1', null, 'community'], cta: 'Start free',
+    rows: ['1 site', 'yes', '7 days', '3', '1', 'community'], cta: 'Start free',
   },
   {
     name: 'Pro', price: '$10', per: '/mo', blurb: 'For products with real users.', featured: true,
-    rows: ['5 sites', 'yes', '90 days', 'yes', '3', null, 'next-day'], cta: 'Start trial',
+    rows: ['5 sites', 'yes', '90 days', '25', '3', 'next-day'], cta: 'Join early access',
   },
   {
-    name: 'Team', price: '$99', per: '/mo', blurb: 'For companies standardizing on BYOK.',
-    rows: ['unlimited', 'yes', '13 months', 'yes', '10', 'yes', 'same-day'], cta: 'Start trial',
+    name: 'Team', price: '$99', per: '/mo', blurb: 'For growing customer-support teams.',
+    rows: ['unlimited', 'yes', '13 months', 'unlimited', '10', 'same-day'], cta: 'Join early access',
   },
   {
     name: 'Enterprise', price: 'Custom', per: '', blurb: 'Compliance, SSO, dedicated support.',
-    rows: ['unlimited', 'yes', 'unlimited', 'yes', 'unlimited', 'yes', 'dedicated'], cta: 'Talk to us',
+    rows: ['unlimited', 'yes', 'unlimited', 'unlimited', 'unlimited', 'dedicated'], cta: 'Join early access',
   },
 ]
 
@@ -69,13 +69,12 @@ export default function Pricing() {
             Fig. 09 — price sheet
           </p>
           <h2 className="font-serif-display text-5xl font-semibold tracking-tight md:text-6xl">
-            Software pricing.
+            Simple plans.
             <br />
-            <em className="font-normal italic text-accent">Not token pricing.</em>
+            <em className="font-normal italic text-accent">Start free.</em>
           </h2>
           <p className="mt-6 max-w-2xl text-muted-foreground">
-            You pay your model provider directly at their list price — we add 0% markup, forever.
-            What you're buying here is the layer on top.
+            Billing is not active yet. You can create a workspace and test the product without a card.
           </p>
         </div>
 
@@ -142,7 +141,7 @@ export default function Pricing() {
         </div>
 
         <p className="mt-4 font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          * model usage billed by your provider at list price · token markup: 0% · cancel anytime
+          * pricing shown for the planned billing launch · no checkout is active today
         </p>
       </div>
     </section>

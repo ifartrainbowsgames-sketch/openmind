@@ -1,28 +1,28 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { capabilities } from '@/data/capabilities'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlan } from '@/hooks/usePlan'
+import { useChatbotConfig } from '@/hooks/useChatbotConfig'
+import { useStaff } from '@/hooks/useStaff'
 import { supabase } from '@/lib/supabase'
 import type { Source } from '@/components/dashboard/types'
 import ParticleField from '@/components/dash-fx/ParticleField'
 import DataStudio from '@/components/dashboard/DataStudio'
-import ServiceSettings from '@/components/dashboard/ServiceSettings'
 import Inbox from '@/components/dashboard/Inbox'
-import Popups from '@/components/dashboard/Popups'
-import PromptStudio from '@/components/dashboard/PromptStudio'
 import WidgetBuilder from '@/components/dashboard/WidgetBuilder'
-import ServicesPanel from '@/components/dashboard/ServicesPanel'
-import AnalyticsPanel from '@/components/dashboard/AnalyticsPanel'
-import { Overview, ProvidersKeys } from '@/components/dashboard/Panels'
+import ChatbotHome from '@/components/dashboard/ChatbotHome'
+import ChatbotSettings from '@/components/dashboard/ChatbotSettings'
+import StaffSettings from '@/components/dashboard/StaffSettings'
+import AppsPage from '@/components/dashboard/AppsPage'
+import DashboardNotifications from '@/components/dashboard/DashboardNotifications'
 import WorkforceStudio from '@/components/workforce/WorkforceStudio'
 import {
-  LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
-  Inbox as InboxIcon, Megaphone, PenLine, Paintbrush, LogOut, Zap, Loader2,
-  Boxes, BarChart3, Bot, Menu, X,
+  LayoutDashboard, Database, ArrowLeft, Users,
+  Inbox as InboxIcon, SlidersHorizontal, Paintbrush, LogOut, Zap, Loader2,
+  Bot, Menu, X, AlertTriangle, UserCog, Puzzle, ChevronDown, ChevronRight,
 } from 'lucide-react'
 
-const SEED_ROWS = [
+const SEED_ROWS: Pick<Source, 'name' | 'type' | 'size' | 'attached'>[] = [
   { name: 'refund-policy.pdf', type: 'file', size: '1.2 MB', attached: ['chat'] },
   { name: 'https://docs.acme.com', type: 'url', size: '—', attached: ['chat'] },
   { name: 'FAQ (pasted)', type: 'text', size: '3.9 KB', attached: ['chat'] },
@@ -35,31 +35,49 @@ const rowToSource = (r: any): Source => ({
   type: r.type,
   size: r.size ?? '—',
   chunks: r.chunks ?? 0,
-  status: r.status === 'indexed' ? 'indexed' : 'indexing',
-  progress: r.status === 'indexed' ? 100 : 40,
+  status: ['stored', 'indexing', 'indexed', 'error'].includes(r.status) ? r.status : 'stored',
+  progress: r.status === 'indexed' ? 100 : 0,
   attached: r.attached ?? [],
   addedAt: r.created_at ? new Date(r.created_at).toLocaleDateString() : 'just now',
   sizeBytes: r.size_bytes ?? 0,
   filePath: r.file_path ?? undefined,
+  sourceUrl: r.source_url ?? undefined,
+  content: r.content ?? undefined,
 })
 
-type View = 'overview' | 'data' | 'providers' | string
+type View =
+  | 'home'
+  | 'inbox'
+  | 'knowledge'
+  | 'chatbot'
+  | 'team'
+  | 'apps'
+  | 'settings'
+  | 'automations'
 
-const NAV_TOP = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'services', label: 'Services', icon: Boxes },
-  { id: 'workforce', label: 'AI Employees', icon: Bot },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-  { id: 'data', label: 'Data Studio', icon: Database },
-  { id: 'widget', label: 'Widget Builder', icon: Paintbrush },
-  { id: 'providers', label: 'Providers & keys', icon: KeyRound },
+const NAV_PRIMARY: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Home', icon: LayoutDashboard },
+  { id: 'inbox', label: 'Conversations', icon: InboxIcon },
+  { id: 'chatbot', label: 'Chatbot', icon: Paintbrush },
+  { id: 'knowledge', label: 'Knowledge', icon: Database },
+  { id: 'team', label: 'Team', icon: UserCog },
+  { id: 'apps', label: 'Apps', icon: Puzzle },
+  { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
 ]
 
-const NAV_OPS = [
-  { id: 'inbox', label: 'Inbox', icon: InboxIcon },
-  { id: 'popups', label: 'Engage · popups', icon: Megaphone },
-  { id: 'prompt', label: 'Prompt Studio', icon: PenLine },
+const NAV_ADVANCED: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'automations', label: 'Automations', icon: Bot },
 ]
+
+function initialView(): View {
+  if (typeof window === 'undefined') return 'home'
+  const params = new URLSearchParams(window.location.search)
+  const requested = params.get('view')
+  if (requested === 'workforce') return params.get('connections') === '1' ? 'apps' : 'automations'
+  return NAV_PRIMARY.some((item) => item.id === requested) || requested === 'automations'
+    ? requested as View
+    : 'home'
+}
 
 const navBtnCls = (active: boolean) =>
   `flex w-full items-center gap-3 px-4 py-2.5 text-left font-mono-spec text-[12px] uppercase tracking-[0.12em] transition-colors ${
@@ -67,30 +85,27 @@ const navBtnCls = (active: boolean) =>
   }`
 
 /** Nav sections — shared by the desktop sidebar and the mobile drawer. */
-function NavSections({ view, onPick }: { view: View; onPick: (id: string) => void }) {
+function NavSections({ view, onPick }: { view: View; onPick: (id: View) => void }) {
+  const [advancedOpen, setAdvancedOpen] = useState(view === 'automations')
   return (
     <>
       <div className="px-4 pb-2 spec-label">Workspace</div>
-      {NAV_TOP.map((n) => (
+      {NAV_PRIMARY.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
         </button>
       ))}
 
-      <div className="px-4 pb-2 pt-5 spec-label">Live ops</div>
-      {NAV_OPS.map((n) => (
+      <button
+        onClick={() => setAdvancedOpen((open) => !open)}
+        className="mt-4 flex w-full items-center gap-2 px-4 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground"
+      >
+        {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Advanced
+      </button>
+      {advancedOpen && NAV_ADVANCED.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
-        </button>
-      ))}
-
-      <div className="px-4 pb-2 pt-5 spec-label">Services</div>
-      {capabilities.map((c) => (
-        <button key={c.id} data-active={view === c.id} onClick={() => onPick(c.id)} className={navBtnCls(view === c.id)}>
-          <span className={`font-mono-spec text-[11px] ${view === c.id ? 'text-accent' : 'text-muted-foreground/60'}`}>
-            {c.index}
-          </span>
-          {c.name}
         </button>
       ))}
     </>
@@ -98,9 +113,10 @@ function NavSections({ view, onPick }: { view: View; onPick: (id: string) => voi
 }
 
 export default function Dashboard() {
-  const [view, setView] = useState<View>('data')
+  const [view, setView] = useState<View>(initialView)
   const [sources, setSources] = useState<Source[]>([])
   const [billingNote, setBillingNote] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null)
   // dash-fx: mobile drawer — 'closing' plays the exit slide before unmount
   const [drawer, setDrawer] = useState<'closed' | 'open' | 'closing'>('closed')
   const drawerTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -108,7 +124,9 @@ export default function Dashboard() {
   const navRef = useRef<HTMLElement>(null)
   const [indicator, setIndicator] = useState<{ top: number; height: number; on: boolean }>({ top: 0, height: 0, on: false })
   const { session, loading, signOut } = useAuth()
-  const { plan, setPlan, services, toggleService } = usePlan(session?.user.id)
+  const { plan, error: planError, limits } = usePlan(session?.demo ? undefined : session?.user.id)
+  const chatbot = useChatbotConfig(session?.user.id, session?.demo ?? true)
+  const staff = useStaff(session?.user.id, session?.user.email, session?.demo ?? true)
   const navigate = useNavigate()
 
   const closeDrawer = () => {
@@ -116,7 +134,7 @@ export default function Dashboard() {
     if (drawerTimer.current) clearTimeout(drawerTimer.current)
     drawerTimer.current = setTimeout(() => setDrawer('closed'), 200)
   }
-  const pick = (id: string) => {
+  const pick = (id: View) => {
     setView(id)
     if (drawer === 'open') closeDrawer()
   }
@@ -139,48 +157,49 @@ export default function Dashboard() {
     if (!loading && !session) navigate('/login')
   }, [loading, session, navigate])
 
-  // load sources from Supabase; seed demo data on first login
+  // Load persisted sources. Demo auth gets clearly marked local sample rows.
   useEffect(() => {
     if (!session) return
+    if (session.demo) {
+      const demoSources: Source[] = SEED_ROWS.map((source, index) => ({
+        ...source,
+        id: `demo-source-${index}`,
+        chunks: 0,
+        status: 'stored',
+        progress: 0,
+        addedAt: 'sample',
+        sizeBytes: 0,
+      }))
+      void Promise.resolve(demoSources).then(setSources)
+      return
+    }
     const uid = session.user.id
-    supabase.from('sources').select('*').order('created_at', { ascending: false })
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setSources(data.map(rowToSource))
-        } else if (data) {
-          supabase.from('sources')
-            .insert(SEED_ROWS.map((s) => ({ ...s, user_id: uid, status: 'indexed', chunks: 40 })))
-            .select()
-            .then(({ data: seeded }) => { if (seeded) setSources(seeded.map(rowToSource)) })
+    supabase.from('sources').select('*').eq('user_id', uid).order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          setWorkspaceError(`Could not load sources: ${error.message}`)
+          return
         }
+        setSources((data ?? []).map(rowToSource))
       })
   }, [session])
 
-  // simulate indexing finishing, and persist the flip
-  useEffect(() => {
-    const t = setInterval(() => {
-      setSources((ss) =>
-        ss.map((s) => {
-          if (s.status !== 'indexing') return s
-          const p = Math.min(100, s.progress + 8)
-          const done = p >= 100
-          if (done) {
-            supabase.from('sources').update({ status: 'indexed', chunks: 40 + Math.floor(Math.random() * 20) }).eq('id', s.id).then()
-          }
-          return {
-            ...s,
-            progress: p,
-            status: done ? 'indexed' : 'indexing',
-            chunks: done ? s.chunks || 42 : s.chunks,
-          }
-        }),
-      )
-    }, 700)
-    return () => clearInterval(t)
-  }, [])
-
   const addSources = (items: Omit<Source, 'id' | 'addedAt' | 'status' | 'progress' | 'chunks'>[]) => {
     if (!session) return
+    if (session.demo) {
+      setSources((current) => [
+        ...items.map((source, index) => ({
+          ...source,
+          id: `demo-${Date.now()}-${index}`,
+          addedAt: 'just now',
+          status: 'stored' as const,
+          progress: 0,
+          chunks: 0,
+        })),
+        ...current,
+      ])
+      return
+    }
     supabase
       .from('sources')
       .insert(
@@ -191,12 +210,21 @@ export default function Dashboard() {
           attached: s.attached,
           size_bytes: s.sizeBytes ?? 0,
           file_path: s.filePath ?? null,
+          source_url: s.sourceUrl ?? null,
+          content: s.content ?? null,
           user_id: session.user.id,
-          status: 'indexing',
+          status: 'stored',
         })),
       )
       .select()
-      .then(({ data }) => {
+      .then(async ({ data, error }) => {
+        if (error) {
+          setWorkspaceError(`Could not save source: ${error.message}`)
+          const uploaded = items.map((item) => item.filePath).filter((path): path is string => Boolean(path))
+          if (uploaded.length) await supabase.storage.from('sources').remove(uploaded)
+          return
+        }
+        setWorkspaceError(null)
         if (data) setSources((ss) => [...data.map(rowToSource), ...ss])
       })
   }
@@ -204,8 +232,15 @@ export default function Dashboard() {
   const removeSource = (id: string) => {
     const victim = sources.find((s) => s.id === id)
     setSources((ss) => ss.filter((s) => s.id !== id))
-    supabase.from('sources').delete().eq('id', id).then()
-    if (victim?.filePath) supabase.storage.from('sources').remove([victim.filePath]).then()
+    if (session?.demo) return
+    void supabase.from('sources').delete().eq('id', id).then(async ({ error }) => {
+      if (error) {
+        if (victim) setSources((current) => [victim, ...current])
+        setWorkspaceError(`Could not remove source: ${error.message}`)
+        return
+      }
+      if (victim?.filePath) await supabase.storage.from('sources').remove([victim.filePath])
+    })
   }
 
   const toggleAttach = (id: string, cap: string) => {
@@ -215,7 +250,13 @@ export default function Dashboard() {
       ? target.attached.filter((c) => c !== cap)
       : [...target.attached, cap]
     setSources((ss) => ss.map((s) => (s.id === id ? { ...s, attached: next } : s)))
-    supabase.from('sources').update({ attached: next }).eq('id', id).then()
+    if (session?.demo) return
+    void supabase.from('sources').update({ attached: next }).eq('id', id).then(({ error }) => {
+      if (error) {
+        setSources((current) => current.map((source) => source.id === id ? target : source))
+        setWorkspaceError(`Could not update source: ${error.message}`)
+      }
+    })
   }
 
   if (loading) {
@@ -227,18 +268,16 @@ export default function Dashboard() {
   }
   if (!session) return null
 
-  const cap = capabilities.find((c) => c.id === view)
   const viewLabel =
-    view === 'overview' ? 'Overview'
-    : view === 'services' ? 'Services'
-    : view === 'workforce' ? 'AI Employees'
-    : view === 'analytics' ? 'Analytics'
-    : view === 'data' ? 'Data Studio'
-    : view === 'providers' ? 'Providers & keys'
-    : view === 'inbox' ? 'Inbox'
-    : view === 'popups' ? 'Engage · popups'
-    : view === 'prompt' ? 'Prompt Studio'
-    : cap?.name ?? ''
+    view === 'home' ? 'Home'
+    : view === 'inbox' ? 'Conversations'
+    : view === 'chatbot' ? 'Chatbot'
+    : view === 'knowledge' ? 'Knowledge'
+    : view === 'team' ? 'Team'
+    : view === 'apps' ? 'Apps'
+    : view === 'settings' ? 'Settings'
+    : view === 'automations' ? 'Automations'
+    : ''
 
   return (
     <div className="min-h-screen bg-secondary/30 vt-page">
@@ -248,7 +287,7 @@ export default function Dashboard() {
           <Link to="/" className="flex items-center gap-2 border-b border-primary px-4 py-3.5 hover:bg-secondary">
             <ArrowLeft className="h-4 w-4 text-muted-foreground" />
             <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span></span>
-            <span className="spec-label">console</span>
+            <span className="spec-label">workspace</span>
           </Link>
           <nav ref={navRef} data-lenis-prevent className="relative flex-1 overflow-y-auto py-3">
             {/* dash-fx: sliding active indicator */}
@@ -288,12 +327,12 @@ export default function Dashboard() {
               <button
                 onClick={() => setDrawer('open')}
                 className="dash-press -ml-1 border border-border/60 p-2 text-muted-foreground hover:text-foreground md:hidden"
-                aria-label="Open console navigation"
+                aria-label="Open workspace navigation"
               >
                 <Menu className="h-4 w-4" />
               </button>
               <div>
-                <div className="spec-label">Console / {viewLabel}</div>
+                <div className="spec-label">Workspace / {viewLabel}</div>
                 <h1 key={view} className="dash-feed-in font-serif-display text-2xl font-semibold">{viewLabel}</h1>
               </div>
             </div>
@@ -309,13 +348,9 @@ export default function Dashboard() {
                   <Zap className="h-3 w-3" /> Upgrade to Pro
                 </button>
               ) : (
-                <button
-                  onClick={() => setPlan('free')}
-                  className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent"
-                  title="Early access — switch back anytime"
-                >
-                  early access · switch to free
-                </button>
+                <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-emerald-700">
+                  billing managed
+                </span>
               )}
             </div>
           </header>
@@ -325,14 +360,8 @@ export default function Dashboard() {
             <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
               <Zap className="h-4 w-4 text-accent" />
               <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-                Pro will be $10/mo when billing launches — during early access it's free to activate.
+                Pro adds more team seats, storage, and published chatbot versions. Billing is not available yet.
               </p>
-              <button
-                onClick={() => { setPlan('pro'); setBillingNote(false) }}
-                className="border border-accent bg-accent px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white hover:bg-accent/85"
-              >
-                Activate Pro free
-              </button>
               <button
                 onClick={() => setBillingNote(false)}
                 className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50 hover:text-accent"
@@ -343,39 +372,82 @@ export default function Dashboard() {
           </div>
         )}
 
-        <main className="mx-auto max-w-6xl px-4 py-8 md:px-8">
+        <main id="main-content" className="mx-auto max-w-6xl px-4 py-8 md:px-8">
+          {(workspaceError || planError || chatbot.error || staff.error) && (
+            <div role="alert" className="mb-5 flex items-start gap-2 border border-red-600 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              {workspaceError || planError || chatbot.error || staff.error}
+            </div>
+          )}
           {/* dash-fx: keyed pane — crossfade+rise whenever the view switches */}
           <div key={view} className="dash-view-enter">
-          {view === 'overview' && <Overview sources={sources} />}
-          {view === 'services' && (
-            <ServicesPanel plan={plan} services={services} toggleService={toggleService} onUpgrade={() => setBillingNote(true)} />
+          {view === 'home' && (
+            <ChatbotHome
+              config={chatbot.config}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
+              sourceCount={sources.filter((source) => source.attached.includes('chat')).length}
+              staff={staff.members}
+              onAvailability={(enabled) => chatbot.update({ enabled }, true)}
+              onNavigate={(next) => setView(next as View)}
+            />
           )}
-          {view === 'workforce' && <WorkforceStudio embedded />}
-          {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={() => setBillingNote(true)} />}
-          {view === 'data' && (
+          {view === 'automations' && <WorkforceStudio embedded />}
+          {view === 'knowledge' && (
             <DataStudio
               sources={sources}
               plan={plan}
               userId={session?.user.id}
+              demo={session.demo}
               onUpgrade={() => setBillingNote(true)}
               addSources={addSources}
               removeSource={removeSource}
               toggleAttach={toggleAttach}
             />
           )}
-          {view === 'providers' && <ProvidersKeys />}
-          {view === 'widget' && <WidgetBuilder />}
-          {view === 'inbox' && <Inbox />}
-          {view === 'popups' && <Popups />}
-          {view === 'prompt' && <PromptStudio />}
-          {cap && view !== 'widget' && <ServiceSettings cap={cap} sources={sources} />}
+          {view === 'chatbot' && (
+            <WidgetBuilder
+              config={chatbot.config}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
+              saving={chatbot.saving}
+              publishing={chatbot.publishing}
+              saved={chatbot.saved}
+              versions={chatbot.versions}
+              onChange={chatbot.replace}
+              onSave={chatbot.save}
+              onPublish={chatbot.publish}
+              onRestore={chatbot.restoreVersion}
+            />
+          )}
+          {view === 'settings' && (
+            <ChatbotSettings
+              config={chatbot.config}
+              sources={sources}
+              saving={chatbot.saving}
+              saved={chatbot.saved}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
+              onChange={(patch) => chatbot.update(patch)}
+              onSave={chatbot.save}
+            />
+          )}
+          {view === 'team' && (
+            <StaffSettings
+              members={staff.members}
+              seatLimit={session.demo ? 3 : limits.seats}
+              onAdd={staff.addMember}
+              onUpdate={staff.updateMember}
+              onRemove={staff.removeMember}
+            />
+          )}
+          {view === 'apps' && <AppsPage />}
+          {view === 'inbox' && <Inbox userId={session.user.id} demo={session.demo} />}
           </div>
         </main>
 
         <footer className="mx-auto flex max-w-6xl items-center gap-6 px-8 pb-8 font-mono-spec text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          <span className="flex items-center gap-1.5"><Users className="h-3 w-3" /> 1 seat</span>
-          <span className="flex items-center gap-1.5"><CreditCard className="h-3 w-3" /> tokens billed by your provider</span>
-          <span className="ml-auto">spec v2.0</span>
+          <span className="flex items-center gap-1.5">
+            <Users className="h-3 w-3" /> {staff.members.length} / {session.demo ? 3 : limits.seats} seats
+          </span>
+          <span className="ml-auto">OpenMind workspace</span>
         </footer>
         </div>
       </div>
@@ -390,7 +462,7 @@ export default function Dashboard() {
           />
           <div className={`dash-drawer absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-primary bg-card ${drawer === 'closing' ? 'dash-closing' : ''}`}>
             <div className="flex items-center justify-between border-b border-primary px-4 py-3.5">
-              <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span> <span className="spec-label">console</span></span>
+              <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span> <span className="spec-label">workspace</span></span>
               <button onClick={closeDrawer} className="dash-press p-1.5 text-muted-foreground hover:text-foreground" aria-label="Close navigation">
                 <X className="h-4 w-4" />
               </button>
@@ -411,6 +483,11 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      <DashboardNotifications
+        ownerId={session.user.id}
+        demo={session.demo}
+        onOpenInbox={() => setView('inbox')}
+      />
     </div>
   )
 }
