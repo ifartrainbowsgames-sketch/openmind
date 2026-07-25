@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, MessageCircle, PhoneCall, Plus, Send, Trash2, Users } from 'lucide-react'
+import { MessageCircle, Plus, Send, Trash2, Users } from 'lucide-react'
 import AvailabilitySwitch from './AvailabilitySwitch'
 import type { StaffMember } from '@/lib/staff'
 
@@ -117,21 +117,22 @@ function StaffCard({
           />
           <SettingRow
             title="Accept call requests"
-            note="Receive callback requests; audio requires a telephony provider"
+            note="Receive customer callback requests"
             checked={member.acceptCalls}
             onChange={(acceptCalls) => patch({ acceptCalls })}
             disabled={!member.available}
           />
           <SettingRow
             title="Dashboard popups"
-            note="Show the workspace owner a live console notification"
+            note="Show a popup in this workspace"
             checked={member.notifyDashboard}
             onChange={(notifyDashboard) => patch({ notifyDashboard })}
           />
         </div>
 
-        <div>
-          <span className="spec-label mb-2 block">Notification channels</span>
+        <details className="border border-border/50 p-3">
+          <summary className="cursor-pointer list-none spec-label">Alerts</summary>
+          <div className="mt-3">
           <label className="mb-2 block">
             <span className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <Send className="h-3 w-3" /> Telegram chat ID
@@ -152,14 +153,10 @@ function StaffCard({
             >
               <Send className="h-3 w-3" /> Connect automatically in Telegram
             </a>
-          ) : (
-            <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
-              Set VITE_TELEGRAM_BOT_USERNAME to show the one-click Telegram connection link.
-            </p>
-          )}
+          ) : null}
           <SettingRow
             title="Telegram alerts"
-            note="Uses the platform bot configured on the server"
+            note="Send new customer alerts"
             checked={member.notifyTelegram}
             onChange={(notifyTelegram) => patch({ notifyTelegram, telegramChatId: telegramChatId.trim() })}
             disabled={!telegramChatId.trim()}
@@ -177,7 +174,7 @@ function StaffCard({
           </label>
           <SettingRow
             title="WhatsApp alerts"
-            note="Requires an approved Meta notification template"
+            note="Send new customer alerts"
             checked={member.notifyWhatsapp}
             onChange={(notifyWhatsapp) => patch({ notifyWhatsapp, whatsappPhone: whatsappPhone.trim() })}
             disabled={!whatsappPhone.trim()}
@@ -188,7 +185,8 @@ function StaffCard({
           >
             {saved ? '✓ Notification targets saved' : 'Save notification targets'}
           </button>
-        </div>
+          </div>
+        </details>
       </div>
     </div>
   )
@@ -214,10 +212,9 @@ export default function StaffSettings({ members, seatLimit, onAdd, onUpdate, onR
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-serif-display text-3xl font-semibold">Staff & availability</h2>
+          <h2 className="font-serif-display text-3xl font-semibold">Team</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Route customer texts and callback requests to people who are available, then notify them in the dashboard,
-            Telegram, or WhatsApp.
+            Choose who can receive conversations and callback requests.
           </p>
         </div>
         <span className="flex items-center gap-2 border border-border/60 px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -226,7 +223,7 @@ export default function StaffSettings({ members, seatLimit, onAdd, onUpdate, onR
       </div>
 
       <div className="border border-primary bg-card p-5">
-        <span className="spec-label mb-3 block">Add company staff</span>
+        <span className="spec-label mb-3 block">Add team member</span>
         <div className="grid gap-3 sm:grid-cols-[1fr_1.3fr_auto]">
           <input
             className="border border-border/60 bg-background px-3 py-2.5 text-sm outline-none focus:border-accent"
@@ -248,7 +245,7 @@ export default function StaffSettings({ members, seatLimit, onAdd, onUpdate, onR
             disabled={atLimit || adding || !name.trim() || !email.trim()}
             className="flex items-center justify-center gap-2 border border-primary bg-primary px-4 py-2.5 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-primary-foreground hover:bg-accent disabled:opacity-40"
           >
-            <Plus className="h-3.5 w-3.5" /> {adding ? 'Adding…' : 'Add staff'}
+            <Plus className="h-3.5 w-3.5" /> {adding ? 'Adding…' : 'Add person'}
           </button>
         </div>
         {atLimit && (
@@ -262,23 +259,6 @@ export default function StaffSettings({ members, seatLimit, onAdd, onUpdate, onR
         ))}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="border border-border/60 bg-card p-4">
-          <Bell className="mb-2 h-4 w-4 text-accent" />
-          <div className="text-sm font-medium">Dashboard</div>
-          <p className="mt-1 text-xs text-muted-foreground">Real-time popups reach the signed-in workspace owner; staff login invitations are not active yet.</p>
-        </div>
-        <div className="border border-border/60 bg-card p-4">
-          <Send className="mb-2 h-4 w-4 text-accent" />
-          <div className="text-sm font-medium">Telegram</div>
-          <p className="mt-1 text-xs text-muted-foreground">Requires the server-only TELEGRAM_BOT_TOKEN secret.</p>
-        </div>
-        <div className="border border-border/60 bg-card p-4">
-          <PhoneCall className="mb-2 h-4 w-4 text-accent" />
-          <div className="text-sm font-medium">WhatsApp</div>
-          <p className="mt-1 text-xs text-muted-foreground">Requires Meta Cloud API credentials and an approved template.</p>
-        </div>
-      </div>
     </div>
   )
 }

@@ -10,7 +10,7 @@ export default function FloatingWidget() {
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
       {open && (
         <div className="h-[540px] w-[min(380px,calc(100vw-40px))]">
-          <ChatWidget live config={{ ...DEFAULT_WIDGET, agentName: 'OpenMind Demo' }} />
+          <ChatWidget live config={{ ...DEFAULT_WIDGET, agentName: 'OpenMind Support' }} />
         </div>
       )}
       <button

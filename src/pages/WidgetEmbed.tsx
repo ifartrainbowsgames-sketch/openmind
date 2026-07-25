@@ -6,6 +6,7 @@ import ChatWidget, {
   type WidgetPreset,
 } from '@/components/widget/ChatWidget'
 import { requestPublishedWidgetConfig } from '@/lib/chat-gateway'
+import { chatbotConfigFromRow } from '@/lib/chatbot-config'
 
 const allowed = <T extends string>(value: string | null, values: readonly T[], fallback: T): T =>
   value && values.includes(value as T) ? value as T : fallback
@@ -38,8 +39,8 @@ export default function WidgetEmbed() {
     font: allowed<WidgetFont>(params.get('font'), ['system', 'serif', 'mono'], 'system'),
     voice: params.get('voice') !== 'false',
     video: params.get('video') === 'true',
-    images: params.get('images') !== 'false',
-    aiFix: params.get('aiFix') !== 'false',
+    images: params.get('images') === 'true',
+    aiFix: params.get('aiFix') === 'true',
   }
   const [config, setConfig] = useState(fallbackConfig)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -55,28 +56,19 @@ export default function WidgetEmbed() {
         if (!published) throw new Error('missing widget config')
         const appearance = published.appearance
         const features = published.features
-        setConfig((current) => ({
-          ...current,
-          accent: typeof appearance.accent === 'string' ? appearance.accent : current.accent,
-          theme: allowed(appearance.theme as string | null, ['light', 'dark'] as const, current.theme),
-          radius: allowed(appearance.radius as string | null, ['sharp', 'soft', 'round'] as const, current.radius),
-          preset: allowed<WidgetPreset>(
-            appearance.preset as string | null,
-            ['openmind', 'discord', 'telegram', 'instagram'],
-            current.preset ?? 'openmind',
-          ),
-          font: allowed<WidgetFont>(
-            appearance.font as string | null,
-            ['system', 'serif', 'mono'],
-            current.font ?? 'system',
-          ),
-          agentName: published.agentName || published.employeeName || current.agentName,
-          greeting: published.greeting || current.greeting,
-          voice: features.voice === true,
-          video: features.video === true,
-          images: features.images === true,
-          aiFix: features.aiFix === true,
-        }))
+        const mapped = chatbotConfigFromRow({
+          appearance,
+          features,
+          agent_name: published.agentName || published.employeeName,
+          greeting: published.greeting,
+        }).widget
+        setConfig(mapped)
+        window.parent.postMessage({
+          type: 'openmind:widget-config',
+          colors: mapped.colors,
+          launcher: mapped.launcher,
+          panel: mapped.panel,
+        }, '*')
         setStatus('ready')
       })
       .catch(() => setStatus('error'))

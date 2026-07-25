@@ -77,8 +77,7 @@ function fallbackOrigin(): string {
 function appRedirect(origin: string, provider: string, status: 'connected' | 'error', reason?: string): Response {
   const safeOrigin = allowedOrigins().has(origin) ? origin : fallbackOrigin()
   const url = new URL('/dashboard', safeOrigin)
-  url.searchParams.set('view', 'workforce')
-  url.searchParams.set('connections', '1')
+  url.searchParams.set('view', 'apps')
   url.searchParams.set('oauth', provider)
   url.searchParams.set('oauthStatus', status)
   if (reason) url.searchParams.set('reason', reason.slice(0, 80))

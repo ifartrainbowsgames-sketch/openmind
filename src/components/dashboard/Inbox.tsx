@@ -23,8 +23,8 @@ const SEED: Convo[] = [
     started: '2m ago', status: 'ai', unread: true,
     msgs: [
       { from: 'visitor', text: 'Hey — does the Pro plan include the chatbot widget?', t: '09:41' },
-      { from: 'ai', text: 'Yes! The chatbot is included on every plan — Pro runs it on up to 5 sites. You pay your provider directly for tokens — we add 0% markup.', t: '09:41' },
-      { from: 'visitor', text: 'Nice. Can I bring my own OpenAI key?', t: '09:42' },
+      { from: 'ai', text: 'Yes! The chatbot is included on every plan — Pro runs it on up to 5 sites.', t: '09:41' },
+      { from: 'visitor', text: 'Nice. Can my team take over a conversation?', t: '09:42' },
     ],
   },
   {
@@ -33,7 +33,7 @@ const SEED: Convo[] = [
     msgs: [
       { from: 'visitor', text: 'The widget isn\'t loading on my Webflow site, I pasted the script in the head.', t: '09:30' },
       { from: 'ai', text: 'I can help with that. This is often a caching issue — could you try a hard refresh? Escalating to a human if it persists.', t: '09:31' },
-      { from: 'me', text: 'Hi! Alex here. Can you share the site URL? I\'ll take a look at the console errors.', t: '09:33' },
+      { from: 'me', text: 'Hi! Alex here. Can you share the page where this happened? I’ll take a look.', t: '09:33' },
       { from: 'visitor', text: 'Sure — acme-store.webflow.io', t: '09:35' },
     ],
   },
@@ -57,7 +57,7 @@ const SEED: Convo[] = [
 ]
 
 const STATUS_META: Record<Status, { label: string; cls: string }> = {
-  ai: { label: 'AI handling', cls: 'border-emerald-600/50 text-emerald-700' },
+  ai: { label: 'Assistant', cls: 'border-emerald-600/50 text-emerald-700' },
   human: { label: 'You', cls: 'border-accent/60 text-accent' },
   resolved: { label: 'Resolved', cls: 'border-border/60 text-muted-foreground' },
 }
@@ -197,11 +197,11 @@ export default function Inbox({ userId, demo }: { userId: string; demo: boolean 
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Every visitor conversation from your embedded widgets — AI answers first, you step in when it matters.
+            Every customer conversation in one place. The assistant answers first, and your team can step in.
           </p>
         </div>
         <span className="font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          {unread} unread · {convos.filter((c) => c.status === 'ai').length} handled by AI
+          {unread} unread · {convos.filter((c) => c.status === 'ai').length} with assistant
         </span>
       </div>
 
@@ -252,7 +252,7 @@ export default function Inbox({ userId, demo }: { userId: string; demo: boolean 
               )}
               {convo.status === 'human' && (
                 <button onClick={() => setStatus('ai')} className="flex items-center gap-1.5 border border-primary px-3 py-1.5 font-mono-spec text-[10px] uppercase tracking-wider hover:bg-primary hover:text-primary-foreground">
-                  <Bot className="h-3 w-3" /> Hand back to AI
+                  <Bot className="h-3 w-3" /> Hand back to assistant
                 </button>
               )}
               {convo.status !== 'resolved' && (
@@ -278,7 +278,7 @@ export default function Inbox({ userId, demo }: { userId: string; demo: boolean 
                   {m.from !== 'visitor' && (
                     <span className="mb-0.5 flex items-center gap-1 font-mono-spec text-[9px] uppercase tracking-wider opacity-70">
                       {m.from === 'ai' ? <Bot className="h-2.5 w-2.5" /> : <UserCheck className="h-2.5 w-2.5" />}
-                      {m.from === 'ai' ? 'AI agent' : 'you'}
+                      {m.from === 'ai' ? 'Assistant' : 'You'}
                     </span>
                   )}
                   {m.text}

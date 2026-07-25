@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react'
 import type { Source } from './types'
 import { formatBytes } from './types'
-import { capabilities } from '@/data/capabilities'
 import { supabase } from '@/lib/supabase'
 import { PLAN_LIMITS, type Plan } from '@/hooks/usePlan'
 import {
@@ -9,7 +8,6 @@ import {
   Database, FileSpreadsheet, Braces, Lock,
 } from 'lucide-react'
 
-const CONNECTORS = ['Notion', 'Google Drive', 'Confluence', 'GitHub', 'Zendesk', 'Shopify']
 const FILE_KINDS: Record<string, string> = {
   pdf: 'PDF', docx: 'DOCX', txt: 'TXT', md: 'MD', csv: 'CSV', json: 'JSON', mp3: 'AUDIO', wav: 'AUDIO', png: 'IMAGE', jpg: 'IMAGE',
 }
@@ -28,11 +26,9 @@ interface Props {
   toggleAttach: (id: string, cap: string) => void
 }
 
-export default function DataStudio({ sources, plan, userId, demo = false, onUpgrade, addSources, removeSource, toggleAttach }: Props) {
+export default function DataStudio({ sources, plan, userId, demo = false, onUpgrade, addSources, removeSource }: Props) {
   const [dragging, setDragging] = useState(false)
-  const [url, setUrl] = useState('')
   const [text, setText] = useState('')
-  const [attachSel, setAttachSel] = useState<string[]>(['chat'])
   const [uploads, setUploads] = useState<UploadItem[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -61,7 +57,7 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
         name: f.name,
         type: 'file',
         size: formatBytes(f.size),
-        attached: attachSel,
+        attached: ['chat'],
         sizeBytes: f.size,
       }])
       setUpload(f.name, { progress: 100 })
@@ -81,7 +77,7 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
       name: f.name,
       type: 'file' as const,
       size: formatBytes(f.size),
-      attached: attachSel,
+      attached: ['chat'],
       sizeBytes: f.size,
       filePath: path,
     }])
@@ -94,22 +90,18 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
     ;[...files].forEach(uploadOne)
   }
 
-  const toggleSel = (id: string) =>
-    setAttachSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
-
   return (
     <div className="space-y-8">
       {/* intro */}
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <h2 className="font-serif-display text-3xl font-semibold">Data Studio</h2>
+          <h2 className="font-serif-display text-3xl font-semibold">Knowledge</h2>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            Sources are stored in your private workspace. Automatic crawling, chunking and embedding
-            require the indexing worker and are not active in this build.
+            Add the information your chatbot should use when answering customers.
           </p>
         </div>
         <span className="font-mono-spec text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          {sources.length} sources · {sources.filter((s) => s.status === 'indexed').length} indexed
+          {sources.length} sources
         </span>
       </div>
 
@@ -175,28 +167,8 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
         </div>
       )}
 
-      {/* attach selector */}
-      <div className="border border-primary bg-card p-4">
-        <span className="spec-label mb-2 block">New sources feed the chatbot</span>
-        <div className="flex flex-wrap gap-2">
-          {capabilities.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => toggleSel(c.id)}
-              className={`border px-3 py-1.5 font-mono-spec text-[11px] uppercase tracking-wider transition-colors ${
-                attachSel.includes(c.id)
-                  ? 'border-accent bg-accent text-white'
-                  : 'border-border/60 text-muted-foreground hover:border-primary'
-              }`}
-            >
-              {c.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* intake row */}
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-2">
         {/* dropzone */}
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -212,7 +184,7 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
             {dragging ? 'Drop to upload' : 'Drag files or click'}
           </div>
           <p className="text-xs text-muted-foreground">
-            PDF · DOCX · TXT · MD · CSV · JSON — uploaded to your private bucket
+            PDF · DOCX · TXT · MD · CSV · JSON
           </p>
           <input
             ref={fileRef}
@@ -221,27 +193,6 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
             className="hidden"
             onChange={(e) => { onFiles(e.target.files); e.target.value = '' }}
           />
-        </div>
-
-        {/* url */}
-        <div className="border border-primary bg-card p-4">
-          <span className="spec-label mb-2 flex items-center gap-2"><Globe className="h-3.5 w-3.5" /> Crawl a website</span>
-          <div className="flex gap-2">
-            <input
-              aria-label="Website URL"
-              className="flex-1 border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-accent rounded-none"
-              placeholder="https://docs.acme.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-            />
-            <button
-              onClick={() => { if (url.trim()) { addSources([{ name: url.trim(), type: 'url', size: '—', attached: attachSel, sourceUrl: url.trim() }]); setUrl('') } }}
-              className="border border-primary bg-primary px-4 font-mono-spec text-xs uppercase tracking-wider text-primary-foreground hover:bg-accent hover:border-accent"
-            >
-              Add
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-muted-foreground">Stores the URL now; scheduled crawling is coming later.</p>
         </div>
 
         {/* paste text */}
@@ -255,40 +206,24 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
             onChange={(e) => setText(e.target.value)}
           />
           <button
-            onClick={() => { if (text.trim()) { addSources([{ name: `Pasted text (${text.trim().split(/\s+/).length} words)`, type: 'text', size: formatBytes(text.length), attached: attachSel, content: text.trim() }]); setText('') } }}
+            onClick={() => { if (text.trim()) { addSources([{ name: `Pasted text (${text.trim().split(/\s+/).length} words)`, type: 'text', size: formatBytes(text.length), attached: ['chat'], content: text.trim() }]); setText('') } }}
             className="mt-2 border border-primary bg-primary px-4 py-2 font-mono-spec text-xs uppercase tracking-wider text-primary-foreground hover:bg-accent hover:border-accent"
           >
             Add source
           </button>
         </div>
 
-        {/* connectors */}
-        <div className="border border-border/60 bg-card p-4 lg:col-span-2">
-          <span className="spec-label mb-3 block">Or connect an app</span>
-          <div className="flex flex-wrap gap-2">
-            {CONNECTORS.map((c) => (
-              <span
-                key={c}
-                className="flex items-center gap-2 border border-border/60 px-3 py-2 font-mono-spec text-[11px] uppercase tracking-wider text-muted-foreground"
-              >
-                <Database className="h-3.5 w-3.5" /> {c}
-                <span className="border border-amber-500/50 px-1 text-[9px] text-amber-600">soon</span>
-              </span>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* sources table */}
       <div className="border border-primary bg-card hard-shadow">
         <div className="flex items-center justify-between border-b border-primary px-5 py-2.5">
-          <span className="spec-label">Workspace sources</span>
-          <span className="font-mono-spec text-[10px] text-muted-foreground">private storage · indexing worker pending</span>
+          <span className="spec-label">Knowledge sources</span>
         </div>
         {sources.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <FileText className="mx-auto mb-3 h-6 w-6 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">No data yet — add a source to store it in this workspace.</p>
+            <p className="text-sm text-muted-foreground">Add your first source above.</p>
           </div>
         ) : (
           sources.map((s) => (
@@ -313,13 +248,7 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
                   }`}
                 >
                   {s.status === 'indexed' ? <Check className="h-3 w-3" /> : s.status === 'indexing' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Database className="h-3 w-3" />}
-                  {s.status === 'indexed'
-                    ? `indexed · ${s.chunks} chunks`
-                    : s.status === 'indexing'
-                      ? `indexing ${s.progress}%`
-                      : s.status === 'error'
-                        ? 'indexing error'
-                        : 'stored · not indexed'}
+                  {s.status === 'error' ? 'Needs attention' : 'Added'}
                 </span>
                 <button onClick={() => removeSource(s.id)} className="text-muted-foreground hover:text-accent" aria-label="Remove">
                   <Trash2 className="h-4 w-4" />
@@ -332,23 +261,6 @@ export default function DataStudio({ sources, plan, userId, demo = false, onUpgr
                 </div>
               )}
 
-              {/* attached capabilities */}
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <span className="spec-label mr-1">feeds →</span>
-                {capabilities.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleAttach(s.id, c.id)}
-                    className={`border px-2 py-0.5 font-mono-spec text-[10px] uppercase tracking-wider transition-colors ${
-                      s.attached.includes(c.id)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border/50 text-muted-foreground/60 hover:border-primary hover:text-foreground'
-                    }`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
             </div>
           ))
         )}

@@ -9,19 +9,17 @@ import type { Source } from '@/components/dashboard/types'
 import ParticleField from '@/components/dash-fx/ParticleField'
 import DataStudio from '@/components/dashboard/DataStudio'
 import Inbox from '@/components/dashboard/Inbox'
-import Popups from '@/components/dashboard/Popups'
 import WidgetBuilder from '@/components/dashboard/WidgetBuilder'
-import AnalyticsPanel from '@/components/dashboard/AnalyticsPanel'
-import { ProvidersKeys } from '@/components/dashboard/Panels'
 import ChatbotHome from '@/components/dashboard/ChatbotHome'
 import ChatbotSettings from '@/components/dashboard/ChatbotSettings'
 import StaffSettings from '@/components/dashboard/StaffSettings'
+import AppsPage from '@/components/dashboard/AppsPage'
 import DashboardNotifications from '@/components/dashboard/DashboardNotifications'
 import WorkforceStudio from '@/components/workforce/WorkforceStudio'
 import {
-  LayoutDashboard, Database, KeyRound, ArrowLeft, Users, CreditCard,
-  Inbox as InboxIcon, Megaphone, SlidersHorizontal, Paintbrush, LogOut, Zap, Loader2,
-  BarChart3, Bot, Menu, X, AlertTriangle, UserCog,
+  LayoutDashboard, Database, ArrowLeft, Users,
+  Inbox as InboxIcon, SlidersHorizontal, Paintbrush, LogOut, Zap, Loader2,
+  Bot, Menu, X, AlertTriangle, UserCog, Puzzle, ChevronDown, ChevronRight,
 } from 'lucide-react'
 
 const SEED_ROWS: Pick<Source, 'name' | 'type' | 'size' | 'attached'>[] = [
@@ -51,34 +49,34 @@ type View =
   | 'home'
   | 'inbox'
   | 'knowledge'
-  | 'behavior'
-  | 'appearance'
-  | 'staff'
-  | 'workforce'
-  | 'analytics'
-  | 'engage'
-  | 'providers'
+  | 'chatbot'
+  | 'team'
+  | 'apps'
+  | 'settings'
+  | 'automations'
 
-const NAV_CHATBOT: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
+const NAV_PRIMARY: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'home', label: 'Home', icon: LayoutDashboard },
   { id: 'inbox', label: 'Conversations', icon: InboxIcon },
+  { id: 'chatbot', label: 'Chatbot', icon: Paintbrush },
   { id: 'knowledge', label: 'Knowledge', icon: Database },
-  { id: 'behavior', label: 'Behavior & routing', icon: SlidersHorizontal },
-  { id: 'appearance', label: 'Widget & embed', icon: Paintbrush },
-  { id: 'staff', label: 'Staff & availability', icon: UserCog },
+  { id: 'team', label: 'Team', icon: UserCog },
+  { id: 'apps', label: 'Apps', icon: Puzzle },
+  { id: 'settings', label: 'Settings', icon: SlidersHorizontal },
 ]
 
 const NAV_ADVANCED: { id: View; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'workforce', label: 'AI Employees', icon: Bot },
-  { id: 'analytics', label: 'Insights', icon: BarChart3 },
-  { id: 'engage', label: 'Visitor campaigns', icon: Megaphone },
-  { id: 'providers', label: 'Providers & keys', icon: KeyRound },
+  { id: 'automations', label: 'Automations', icon: Bot },
 ]
 
 function initialView(): View {
   if (typeof window === 'undefined') return 'home'
-  const requested = new URLSearchParams(window.location.search).get('view')
-  return requested === 'workforce' ? 'workforce' : 'home'
+  const params = new URLSearchParams(window.location.search)
+  const requested = params.get('view')
+  if (requested === 'workforce') return params.get('connections') === '1' ? 'apps' : 'automations'
+  return NAV_PRIMARY.some((item) => item.id === requested) || requested === 'automations'
+    ? requested as View
+    : 'home'
 }
 
 const navBtnCls = (active: boolean) =>
@@ -88,17 +86,24 @@ const navBtnCls = (active: boolean) =>
 
 /** Nav sections — shared by the desktop sidebar and the mobile drawer. */
 function NavSections({ view, onPick }: { view: View; onPick: (id: View) => void }) {
+  const [advancedOpen, setAdvancedOpen] = useState(view === 'automations')
   return (
     <>
-      <div className="px-4 pb-2 spec-label">Customer chatbot</div>
-      {NAV_CHATBOT.map((n) => (
+      <div className="px-4 pb-2 spec-label">Workspace</div>
+      {NAV_PRIMARY.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
         </button>
       ))}
 
-      <div className="px-4 pb-2 pt-5 spec-label">Advanced</div>
-      {NAV_ADVANCED.map((n) => (
+      <button
+        onClick={() => setAdvancedOpen((open) => !open)}
+        className="mt-4 flex w-full items-center gap-2 px-4 py-2 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground"
+      >
+        {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        Advanced
+      </button>
+      {advancedOpen && NAV_ADVANCED.map((n) => (
         <button key={n.id} data-active={view === n.id} onClick={() => onPick(n.id)} className={navBtnCls(view === n.id)}>
           <n.icon className={`h-4 w-4 ${view === n.id ? 'text-accent' : ''}`} /> {n.label}
         </button>
@@ -264,16 +269,14 @@ export default function Dashboard() {
   if (!session) return null
 
   const viewLabel =
-    view === 'home' ? 'Chatbot home'
+    view === 'home' ? 'Home'
     : view === 'inbox' ? 'Conversations'
+    : view === 'chatbot' ? 'Chatbot'
     : view === 'knowledge' ? 'Knowledge'
-    : view === 'behavior' ? 'Behavior & routing'
-    : view === 'appearance' ? 'Widget & embed'
-    : view === 'staff' ? 'Staff & availability'
-    : view === 'workforce' ? 'AI Employees'
-    : view === 'analytics' ? 'Insights'
-    : view === 'engage' ? 'Visitor campaigns'
-    : view === 'providers' ? 'Providers & keys'
+    : view === 'team' ? 'Team'
+    : view === 'apps' ? 'Apps'
+    : view === 'settings' ? 'Settings'
+    : view === 'automations' ? 'Automations'
     : ''
 
   return (
@@ -284,7 +287,7 @@ export default function Dashboard() {
           <Link to="/" className="flex items-center gap-2 border-b border-primary px-4 py-3.5 hover:bg-secondary">
             <ArrowLeft className="h-4 w-4 text-muted-foreground" />
             <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span></span>
-            <span className="spec-label">console</span>
+            <span className="spec-label">workspace</span>
           </Link>
           <nav ref={navRef} data-lenis-prevent className="relative flex-1 overflow-y-auto py-3">
             {/* dash-fx: sliding active indicator */}
@@ -324,12 +327,12 @@ export default function Dashboard() {
               <button
                 onClick={() => setDrawer('open')}
                 className="dash-press -ml-1 border border-border/60 p-2 text-muted-foreground hover:text-foreground md:hidden"
-                aria-label="Open console navigation"
+                aria-label="Open workspace navigation"
               >
                 <Menu className="h-4 w-4" />
               </button>
               <div>
-                <div className="spec-label">Console / {viewLabel}</div>
+                <div className="spec-label">Workspace / {viewLabel}</div>
                 <h1 key={view} className="dash-feed-in font-serif-display text-2xl font-semibold">{viewLabel}</h1>
               </div>
             </div>
@@ -357,7 +360,7 @@ export default function Dashboard() {
             <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3">
               <Zap className="h-4 w-4 text-accent" />
               <p className="flex-1 font-mono-spec text-[11px] uppercase tracking-[0.12em] text-white/85">
-                Pro will be $10/mo when billing launches. Plan changes are server-controlled so they cannot be forged in the browser.
+                Pro adds more team seats, storage, and published chatbot versions. Billing is not available yet.
               </p>
               <button
                 onClick={() => setBillingNote(false)}
@@ -381,15 +384,14 @@ export default function Dashboard() {
           {view === 'home' && (
             <ChatbotHome
               config={chatbot.config}
-              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
               sourceCount={sources.filter((source) => source.attached.includes('chat')).length}
               staff={staff.members}
               onAvailability={(enabled) => chatbot.update({ enabled }, true)}
               onNavigate={(next) => setView(next as View)}
             />
           )}
-          {view === 'workforce' && <WorkforceStudio embedded />}
-          {view === 'analytics' && <AnalyticsPanel plan={plan} onUpgrade={() => setBillingNote(true)} />}
+          {view === 'automations' && <WorkforceStudio embedded />}
           {view === 'knowledge' && (
             <DataStudio
               sources={sources}
@@ -402,29 +404,32 @@ export default function Dashboard() {
               toggleAttach={toggleAttach}
             />
           )}
-          {view === 'providers' && <ProvidersKeys />}
-          {view === 'appearance' && (
+          {view === 'chatbot' && (
             <WidgetBuilder
               config={chatbot.config}
-              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
               saving={chatbot.saving}
+              publishing={chatbot.publishing}
               saved={chatbot.saved}
+              versions={chatbot.versions}
               onChange={chatbot.replace}
               onSave={chatbot.save}
+              onPublish={chatbot.publish}
+              onRestore={chatbot.restoreVersion}
             />
           )}
-          {view === 'behavior' && (
+          {view === 'settings' && (
             <ChatbotSettings
               config={chatbot.config}
               sources={sources}
               saving={chatbot.saving}
               saved={chatbot.saved}
-              published={!session.demo && Boolean(chatbot.config.publicKey)}
+              published={!session.demo && Boolean(chatbot.config.publicKey) && chatbot.config.appearanceVersion > 0}
               onChange={(patch) => chatbot.update(patch)}
               onSave={chatbot.save}
             />
           )}
-          {view === 'staff' && (
+          {view === 'team' && (
             <StaffSettings
               members={staff.members}
               seatLimit={session.demo ? 3 : limits.seats}
@@ -433,8 +438,8 @@ export default function Dashboard() {
               onRemove={staff.removeMember}
             />
           )}
+          {view === 'apps' && <AppsPage />}
           {view === 'inbox' && <Inbox userId={session.user.id} demo={session.demo} />}
-          {view === 'engage' && <Popups />}
           </div>
         </main>
 
@@ -442,8 +447,7 @@ export default function Dashboard() {
           <span className="flex items-center gap-1.5">
             <Users className="h-3 w-3" /> {staff.members.length} / {session.demo ? 3 : limits.seats} seats
           </span>
-          <span className="flex items-center gap-1.5"><CreditCard className="h-3 w-3" /> tokens billed by your provider</span>
-          <span className="ml-auto">chatbot workspace</span>
+          <span className="ml-auto">OpenMind workspace</span>
         </footer>
         </div>
       </div>
@@ -458,7 +462,7 @@ export default function Dashboard() {
           />
           <div className={`dash-drawer absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col border-r border-primary bg-card ${drawer === 'closing' ? 'dash-closing' : ''}`}>
             <div className="flex items-center justify-between border-b border-primary px-4 py-3.5">
-              <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span> <span className="spec-label">console</span></span>
+              <span className="font-serif-display text-xl font-bold">OpenMind<span className="text-accent">.</span> <span className="spec-label">workspace</span></span>
               <button onClick={closeDrawer} className="dash-press p-1.5 text-muted-foreground hover:text-foreground" aria-label="Close navigation">
                 <X className="h-4 w-4" />
               </button>

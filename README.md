@@ -1,18 +1,18 @@
 # OpenMind
 
-OpenMind is an open-source React console for BYOK chat experiences and LangGraph-based AI employees. It includes a marketing site, a clearly labeled live/simulated playground, Supabase authentication and storage, and an MCP/REST/webhook plugin marketplace.
+OpenMind is an open-source customer-chat workspace. It combines a customizable website chatbot, team handoff, knowledge, notifications, and optional business automations.
 
 ## Current status
 
 - The public chat demo calls the `openmind-chat` Edge Function when configured and visibly falls back to canned local responses.
 - Published customer widgets use a workspace key, persist conversations, and run with the selected AI employee prompt.
-- The chatbot dashboard has connected availability, behavior, widget, staff-routing, and conversation settings.
+- The customer workspace is organized around Home, Conversations, Chatbot, Knowledge, Team, Apps, and Settings. Technical automation tools are kept in a collapsed Advanced section.
+- The chatbot designer supports editable color tokens, typography, spacing, corner radii, launcher placement, responsive previews, drafts, publishing, version history, and draft rollback.
 - Available staff routing surfaces owner-dashboard popups and can deliver individual Telegram or WhatsApp alerts when the required server credentials are configured.
 - AI Employees can run with a deterministic local brain or a browser-direct OpenAI-compatible provider.
 - Marketplace plugins can be attached per employee. n8n supports MCP or workflow webhooks; OpenClaw supports secure `/hooks/agent` delegation.
 - Live connection traffic uses an authenticated Supabase proxy. Connection tokens are session-only and are not persisted to `localStorage`.
-- Data Studio stores files, URLs and pasted text. Automatic crawling, chunking and embedding are not implemented yet.
-- Inbox, analytics and Prompt Studio are explicitly labeled interactive previews.
+- Knowledge stores files and pasted text. Automatic file extraction, crawling, chunking, and embedding are not implemented yet.
 - Billing is not live. Pro is planned at $10/month; plan fields are server-controlled.
 - A server-managed provider-key vault is planned and is not represented as implemented.
 
@@ -44,7 +44,7 @@ The reproducible schema and RLS policies live in `supabase/migrations/`. They cr
 - `profiles` with a client-readable, billing-controlled plan
 - `subscriptions` for the future Stripe webhook
 - tenant-isolated `sources`, `conversations`, and `messages`
-- persisted `chatbot_configs`, staff availability/routing records, and dashboard notifications
+- persisted `chatbot_configs`, immutable published design versions, staff availability/routing records, and dashboard notifications
 - a private, per-user `sources` storage bucket
 
 Apply migrations and deploy functions with the Supabase CLI:
@@ -83,7 +83,7 @@ The public chat function has payload/origin checks and a best-effort per-isolate
 
 ### Customer chat and staff routing
 
-The dashboard issues a publishable widget key and produces a working `openmind-widget.js` embed snippet. A widget request resolves that key server-side, loads the selected AI employee prompt, persists the thread, and routes message or callback alerts to an available staff member.
+The designer saves visual edits as a draft. Publishing atomically copies that draft to the public widget configuration and records an immutable version. The install snippet only needs a workspace widget key; the loader receives published launcher and panel settings from the iframe at runtime. A widget request resolves the key server-side, loads the selected reply instructions, persists the thread, and routes message or callback alerts to an available staff member.
 
 - Dashboard alerts use Supabase Realtime.
 - Telegram uses the official Bot API `sendMessage` method and a staff member's chat ID.
@@ -98,9 +98,9 @@ Set `VITE_TELEGRAM_BOT_USERNAME` to the bot's public username, then register
 
 ## Connection marketplace
 
-Configure plugins in **Dashboard → Workforce → Connections**, then attach only the required plugins to each employee in the Studio.
+Configure customer-facing connections in **Workspace → Apps**. Advanced automations can attach only the required apps to each assistant.
 
-- GitHub: click **Install**, approve access on GitHub, and return to the Connections page. OAuth state and PKCE are single-use; access tokens are encrypted server-side and injected only by the authenticated proxy.
+- GitHub: click **Install**, approve access on GitHub, and return to Apps. OAuth state and PKCE are single-use; access tokens are encrypted server-side and injected only by the authenticated proxy.
 - n8n: use its instance-level MCP server for discoverable tools, or a production workflow webhook for a single automation.
 - OpenClaw: enable gateway hooks and provide the HTTPS endpoint ending in `/hooks/agent`, its hooks token, and optionally an allowed agent ID.
 - Webhook setup is marked `READY` without firing it. Its first employee task is the real execution check.

@@ -1,258 +1,89 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
+import { ArrowRight, MessageSquare, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ArrowRight, FlaskConical } from 'lucide-react'
-import { gsap, useGsap, prefersReduced } from '@/lib/anim'
+import { gsap, useGsap } from '@/lib/anim'
 import Magnetic from '@/components/anim/Magnetic'
 import HeroLattice from '@/components/site-fx/HeroLattice'
-
-interface LogLine {
-  id: number
-  method: string
-  path: string
-  route: string
-  ms: number
-  ok: boolean
-}
-
-const ROUTES = [
-  { path: '/v1/chat', route: '→ anthropic/claude-4' },
-  { path: '/v1/chat', route: '→ ollama/llama3.3' },
-  { path: '/v1/chat', route: '→ mistral/large-3' },
-  { path: '/v1/chat', route: '→ groq/llama-3.3-70b' },
-  { path: '/v1/chat', route: '→ openai/gpt-5' },
-  { path: '/v1/chat', route: '→ vllm/self-hosted' },
-  { path: '/v1/chat', route: '→ cohere/command-a' },
-  { path: '/v1/chat', route: '→ google/gemini-3' },
-  { path: '/v1/chat', route: '→ openrouter/auto' },
-  { path: '/v1/chat', route: '→ azure/gpt-5' },
-]
-
-let logSeq = 0
-function randomLog(): LogLine {
-  const r = ROUTES[Math.floor(Math.random() * ROUTES.length)]
-  return {
-    id: ++logSeq,
-    method: 'POST',
-    path: r.path,
-    route: r.route,
-    ms: 18 + Math.floor(Math.random() * 180),
-    ok: Math.random() > 0.03,
-  }
-}
-
-/** Latency figure that counts up from zero when the line lands. */
-function Ms({ value }: { value: number }) {
-  const ref = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el || prefersReduced()) return
-    const obj = { n: 0 }
-    const tw = gsap.to(obj, {
-      n: value,
-      duration: 0.55,
-      ease: 'power1.out',
-      onUpdate: () => {
-        el.textContent = `${Math.round(obj.n)}ms`
-      },
-    })
-    return () => {
-      tw.kill()
-    }
-  }, [value])
-  return (
-    <span ref={ref} className="ml-auto text-white/40">
-      {value}ms
-    </span>
-  )
-}
-
-/** One log line — slides up into the feed when it mounts. */
-function LogRow({ l }: { l: LogLine }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el || prefersReduced()) return
-    gsap.from(el, { y: 16, opacity: 0, duration: 0.4, ease: 'power2.out' })
-  }, [])
-  return (
-    <div ref={ref} className="flex items-center gap-3 whitespace-nowrap">
-      <span className="text-white/35">{l.method}</span>
-      <span className="text-white/85">{l.path}</span>
-      <span className="hidden text-white/50 sm:inline">{l.route}</span>
-      <Ms value={l.ms} />
-      <span className={l.ok ? 'text-emerald-400' : 'text-accent'}>{l.ok ? '✓' : '✗'}</span>
-    </div>
-  )
-}
-
-function RequestLog() {
-  const [lines, setLines] = useState<LogLine[]>(() => Array.from({ length: 6 }, randomLog))
-
-  useEffect(() => {
-    const t = setInterval(() => {
-      setLines((prev) => [...prev.slice(-13), randomLog()])
-    }, 900)
-    return () => clearInterval(t)
-  }, [])
-
-  return (
-    <div className="hero-log bg-terminal hard-shadow relative border border-primary">
-      <div className="flex items-center justify-between border-b border-white/15 px-4 py-2.5">
-        <span className="font-mono-spec text-[11px] uppercase tracking-[0.2em] text-white/50">
-          simulated — gateway request log
-        </span>
-        <span className="flex items-center gap-1.5 font-mono-spec text-[11px] text-accent">
-          <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-accent" />
-          animated sample
-        </span>
-      </div>
-      <div className="flex h-64 flex-col justify-end overflow-hidden px-4 py-3 font-mono-spec text-[12px] leading-7">
-        {lines.map((l) => (
-          <LogRow key={l.id} l={l} />
-        ))}
-        <div className="text-accent">
-          ▍<span className="cursor-blink">▊</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-const SPECS = [
-  ['SERVICE', 'CHATBOT'],
-  ['PROVIDERS', '12+'],
-  ['TOKEN MARKUP', '0%'],
-  ['LICENSE', 'MIT'],
-]
-
-/** Spec-strip figure — counts up if it starts with digits. */
-function SpecValue({ v }: { v: string }) {
-  const ref = useRef<HTMLSpanElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el || prefersReduced()) return
-    const m = v.match(/^(\d+)(.*)$/)
-    if (!m) return
-    const obj = { n: 0 }
-    const tw = gsap.to(obj, {
-      n: parseInt(m[1], 10),
-      duration: 1.1,
-      delay: 0.9,
-      ease: 'power2.out',
-      onUpdate: () => {
-        el.textContent = Math.round(obj.n) + m[2]
-      },
-    })
-    return () => {
-      tw.kill()
-    }
-  }, [v])
-  return (
-    <span ref={ref} className="font-serif-display text-3xl font-semibold">
-      {v}
-    </span>
-  )
-}
 
 export default function Hero() {
   const ref = useRef<HTMLElement>(null)
 
   useGsap(ref, () => {
-    const tl = gsap.timeline({ defaults: { ease: 'power4.out' } })
-    // rubber stamp — two hard frames, like ink hitting paper
-    tl.from('.hero-stamp', {
-      scale: 1.6,
-      rotation: -5,
-      opacity: 0,
-      duration: 0.3,
-      ease: 'steps(3)',
-      transformOrigin: 'left center',
-    })
-    // print-press line reveal
-    tl.from(
-      '.hero-line',
-      { yPercent: 115, duration: 0.85, stagger: 0.14 },
-      0.25,
-    )
-    tl.from('.hero-sub', { y: 24, opacity: 0, duration: 0.6 }, 0.9)
-    tl.from('.hero-cta', { y: 20, opacity: 0, duration: 0.5, stagger: 0.1 }, 1.05)
-    tl.from('.hero-log', { x: 48, opacity: 0, duration: 0.8 }, 0.7)
-    tl.from('.hero-spec', { y: 14, opacity: 0, duration: 0.4, stagger: 0.08 }, 1.2)
+    const timeline = gsap.timeline({ defaults: { ease: 'power4.out' } })
+    timeline.from('.hero-line', { yPercent: 110, duration: 0.8, stagger: 0.12 })
+    timeline.from('.hero-sub', { y: 20, opacity: 0, duration: 0.5 }, 0.55)
+    timeline.from('.hero-cta', { y: 16, opacity: 0, duration: 0.45, stagger: 0.08 }, 0.7)
+    timeline.from('.hero-preview', { x: 40, opacity: 0, duration: 0.7 }, 0.5)
   })
 
   return (
-    <section id="top" ref={ref} className="bg-ruled relative overflow-hidden border-b border-border pt-40 pb-0">
-      {/* lazy three.js lattice — sits behind all hero content, inert to input */}
-      <HeroLattice className="hero-lattice pointer-events-none absolute inset-0" />
+    <section id="top" ref={ref} className="bg-ruled relative overflow-hidden border-b border-border pb-0 pt-32">
+      <HeroLattice className="pointer-events-none absolute inset-0" />
       <div className="relative mx-auto max-w-7xl px-6">
-        <div className="grid items-end gap-12 pb-16 lg:grid-cols-[1.15fr_1fr]">
+        <div className="grid items-center gap-12 pb-16 lg:grid-cols-[1.05fr_0.95fr]">
           <div>
-            <p className="hero-stamp spec-label mb-6 flex items-center gap-3">
+            <p className="spec-label mb-6 flex items-center gap-3">
               <span className="inline-block h-2 w-2 bg-accent" />
-              Fig. 01 — the integration layer for AI
+              Customer support that is always ready
             </p>
-            <h1 className="font-serif-display text-[13vw] font-semibold leading-[0.95] tracking-tight sm:text-7xl lg:text-[5.6rem]">
-              <span className="block overflow-hidden pb-1">
-                <span className="hero-line block">Your models.</span>
-              </span>
-              <span className="block overflow-hidden pb-1">
-                <span className="hero-line block">Your keys.</span>
-              </span>
+            <h1 className="font-serif-display text-[13vw] font-semibold leading-[0.95] tracking-tight sm:text-7xl lg:text-[5.4rem]">
+              <span className="block overflow-hidden pb-1"><span className="hero-line block">A better chatbot</span></span>
               <span className="block overflow-hidden pb-2">
-                <span className="hero-line block">
-                  <em className="font-normal italic text-accent">One open stack.</em>
-                </span>
+                <span className="hero-line block"><em className="font-normal italic text-accent">for your business.</em></span>
               </span>
             </h1>
-            <p className="hero-sub mt-8 max-w-xl text-lg leading-relaxed text-muted-foreground">
-              An open-source prototype for model-agnostic chat and AI employees. The demo gateway,
-              browser-direct providers and authenticated MCP proxy are usable now; the published widget,
-              SDK and indexing pipeline remain roadmap work.
+            <p className="hero-sub mt-7 max-w-xl text-lg leading-relaxed text-muted-foreground">
+              Answer customers from your own knowledge, hand conversations to your team, and make the widget match your brand.
             </p>
-            <div className="mt-10 flex flex-wrap items-center gap-4">
+            <div className="mt-9 flex flex-wrap items-center gap-4">
               <Magnetic className="hero-cta">
-                <Button
-                  size="lg"
-                  className="h-13 rounded-none border border-primary bg-primary px-8 py-6 font-mono-spec text-sm uppercase tracking-[0.14em] hard-shadow hover:bg-accent hover:border-accent"
-                  asChild
-                >
-                  <a href="#playground">
-                    <FlaskConical className="mr-2 h-4 w-4" />
-                    Test the demo
-                  </a>
+                <Button size="lg" className="rounded-none border border-primary bg-primary px-8 font-mono-spec text-sm uppercase tracking-[0.14em] hard-shadow hover:border-accent hover:bg-accent" asChild>
+                  <a href="/dashboard">Build your chatbot <ArrowRight className="ml-2 h-4 w-4" /></a>
                 </Button>
               </Magnetic>
               <Magnetic className="hero-cta">
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="h-13 rounded-none border-primary px-8 py-6 font-mono-spec text-sm uppercase tracking-[0.14em] hard-shadow-sm hover:bg-secondary"
-                  asChild
-                >
-                  <a href="#integrate">
-                    Read the docs <ArrowRight className="ml-2 h-4 w-4" />
-                  </a>
+                <Button size="lg" variant="outline" className="rounded-none border-primary px-8 font-mono-spec text-sm uppercase tracking-[0.14em]" asChild>
+                  <a href="#capabilities">See how it works</a>
                 </Button>
               </Magnetic>
             </div>
           </div>
 
-          <RequestLog />
+          <div className="hero-preview border border-primary bg-card p-4 hard-shadow">
+            <div className="flex items-center gap-3 border-b border-border/60 pb-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white">
+                <MessageSquare className="h-5 w-5" />
+              </span>
+              <div>
+                <div className="text-sm font-semibold">Acme Support</div>
+                <div className="text-xs text-emerald-700">Available now</div>
+              </div>
+            </div>
+            <div className="space-y-4 bg-secondary/35 p-4">
+              <div className="max-w-[82%] rounded-xl border border-border/60 bg-white px-4 py-3 text-sm">
+                Can I return an order that arrived yesterday?
+              </div>
+              <div className="ml-auto max-w-[82%] rounded-xl bg-accent px-4 py-3 text-sm text-white">
+                Yes. Your order is covered by our 30-day return policy. Would you like me to start the return?
+              </div>
+              <div className="flex items-center gap-2 border border-border/60 bg-card px-3 py-2 text-xs text-muted-foreground">
+                <Users className="h-4 w-4 text-accent" /> A team member can join this conversation at any time.
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* spec strip */}
       <div className="relative border-t border-border bg-card">
-        <div className="mx-auto grid max-w-7xl grid-cols-2 md:grid-cols-4">
-          {SPECS.map(([k, v], i) => (
-            <div
-              key={k}
-              className={`hero-spec flex items-baseline justify-between gap-3 px-6 py-5 ${
-                i < SPECS.length - 1 ? 'border-r border-border/50' : ''
-              }`}
-            >
-              <span className="spec-label">{k}</span>
-              <SpecValue v={v} />
+        <div className="mx-auto grid max-w-7xl sm:grid-cols-3">
+          {[
+            ['01', 'Answers from your knowledge'],
+            ['02', 'Human handoff when needed'],
+            ['03', 'Designed for your brand'],
+          ].map(([number, label]) => (
+            <div key={number} className="flex items-center gap-4 border-b border-border/50 px-6 py-5 sm:border-b-0 sm:border-r">
+              <span className="font-serif-display text-2xl text-accent">{number}</span>
+              <span className="text-sm font-medium">{label}</span>
             </div>
           ))}
         </div>

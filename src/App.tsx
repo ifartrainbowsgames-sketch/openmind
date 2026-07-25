@@ -8,7 +8,6 @@ import ErrorBoundary from './components/ErrorBoundary'
 const Home = lazy(() => import('./pages/Home'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Login = lazy(() => import('./pages/Login'))
-const Employees = lazy(() => import('./pages/Employees'))
 const WidgetEmbed = lazy(() => import('./pages/WidgetEmbed'))
 
 function PageLoader() {
@@ -29,7 +28,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/employees" element={<Employees />} />
+            <Route path="/employees" element={<Navigate to="/dashboard?view=automations" replace />} />
             <Route path="/widget" element={<WidgetEmbed />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

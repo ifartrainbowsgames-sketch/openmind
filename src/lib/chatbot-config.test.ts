@@ -21,6 +21,8 @@ describe('chatbot configuration', () => {
       allowed_origins: ['https://example.com'],
       appearance: { accent: '#123456', theme: 'dark', radius: 'round', preset: 'telegram', font: 'mono' },
       features: { voice: true, video: false, images: false, aiFix: true },
+      appearance_version: 4,
+      published_at: '2026-07-25T00:00:00.000Z',
     })
 
     expect(config).toMatchObject({
@@ -38,7 +40,12 @@ describe('chatbot configuration', () => {
         voice: true,
         video: false,
         images: false,
+        colors: {
+          accent: '#4f9fdd',
+          headerBackground: '#3b82a0',
+        },
       },
+      appearanceVersion: 4,
     })
   })
 
@@ -57,6 +64,8 @@ describe('chatbot configuration', () => {
       selected_employee_prompt: 'Review code safely.',
     })
     expect(row).not.toHaveProperty('public_key')
+    expect(row).not.toHaveProperty('appearance')
+    expect(row).toHaveProperty('draft_appearance')
   })
 
   it('keeps top-level greeting and agent name synchronized with the widget', () => {
@@ -67,5 +76,30 @@ describe('chatbot configuration', () => {
     })
     expect(next.greeting).toBe('Welcome!')
     expect(next.agentName).toBe('June')
+  })
+
+  it('prefers the visual draft without changing the published snapshot', () => {
+    const config = chatbotConfigFromRow({
+      greeting: 'Published greeting',
+      agent_name: 'Published name',
+      appearance: { accent: '#111111', preset: 'openmind' },
+      features: { voice: false },
+      draft_greeting: 'Draft greeting',
+      draft_agent_name: 'Draft name',
+      draft_appearance: {
+        preset: 'openmind',
+        colors: {
+          ...DEFAULT_CHATBOT_CONFIG.widget.colors,
+          headerBackground: '#123456',
+        },
+        style: { panelRadius: 27, bubbleRadius: 8, controlRadius: 4, fontSize: 16, shadow: 'soft' },
+      },
+      draft_features: { voice: true },
+    })
+    expect(config.greeting).toBe('Draft greeting')
+    expect(config.agentName).toBe('Draft name')
+    expect(config.widget.colors?.headerBackground).toBe('#123456')
+    expect(config.widget.style?.panelRadius).toBe(27)
+    expect(config.widget.voice).toBe(true)
   })
 })

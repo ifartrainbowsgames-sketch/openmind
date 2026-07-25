@@ -1,6 +1,5 @@
-// Connection marketplace — configure a plugin once, then attach it to employees.
-// Credentials remain session-only; public plugin metadata and non-secret config
-// are persisted separately.
+// Customer-facing app connections. Technical transports stay inside the
+// optional manual setup area.
 import { useEffect, useState, type CSSProperties } from 'react'
 import {
   AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Link2, Loader2,
@@ -74,7 +73,11 @@ export function StatusChip({ status }: { status: MarketplaceStatus }) {
   return (
     <span className={`inline-flex items-center gap-1.5 border px-2 py-0.5 font-mono-spec text-[9px] uppercase tracking-[0.14em] ${cls}`}>
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot} ${status === 'live' ? 'pulse-dot' : ''}`} />
-      {status}
+      {status === 'live' || status === 'ready'
+        ? 'connected'
+        : status === 'error'
+        ? 'needs attention'
+        : 'not connected'}
     </span>
   )
 }
@@ -203,18 +206,14 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
     <div className="border border-border/60 bg-card p-5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <span className="spec-label flex items-center gap-2">
-          <Link2 className="h-3.5 w-3.5" /> Connection marketplace
+          <Link2 className="h-3.5 w-3.5" /> Apps
         </span>
         <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          {connectedCount} configured · {Object.keys(CONNECTIONS).length} plugins
+          {connectedCount} connected · {Object.keys(CONNECTIONS).length} available
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Click Install on supported connectors to authorize on the provider's website. Credentials are encrypted
-        server-side and never returned to the browser or AI. Configure manual plugins here, then attach them to an employee.
-        n8n can expose MCP tools or one
-        workflow webhook; OpenClaw accepts delegated tasks through <span className="text-foreground">/hooks/agent</span>.
-        Manual tokens stay only in this tab session. Webhooks are saved as READY without firing them.
+        Connect the tools your business already uses. Secure sign-in opens on the provider's website when available.
       </p>
 
       {oauthNotice && (
@@ -228,8 +227,8 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
             : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
           <span>
             {oauthNotice.status === 'connected'
-              ? `${CONNECTIONS[oauthNotice.plugin ?? '']?.name ?? 'Connector'} authorized. OpenMind is checking its live tools.`
-              : `Authorization failed${oauthNotice.reason ? ` (${oauthNotice.reason.replace(/_/g, ' ')})` : ''}.`}
+              ? `${CONNECTIONS[oauthNotice.plugin ?? '']?.name ?? 'App'} is connected.`
+              : `Connection failed${oauthNotice.reason ? ` (${oauthNotice.reason.replace(/_/g, ' ')})` : ''}.`}
           </span>
         </div>
       )}
@@ -277,35 +276,17 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
                 <StatusChip status={status} />
               </div>
               <p className="mt-1 font-mono-spec text-[10px] leading-relaxed text-muted-foreground">{conn.desc}</p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {conn.transports.map((transport) => (
-                  <span key={transport} className="border border-border/50 px-1.5 py-0.5 font-mono-spec text-[8px] uppercase tracking-[0.12em] text-muted-foreground">
-                    {transport}
-                  </span>
-                ))}
-                {conn.docsUrl && (
-                  <a
-                    href={conn.docsUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 font-mono-spec text-[9px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-accent"
-                  >
-                    setup docs <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
-                )}
-              </div>
-
               {status === 'live' && (
                 <p className="mt-1.5 flex items-center gap-1.5 font-mono-spec text-[10px] text-emerald-700">
-                  <CheckCircle2 className="h-3 w-3" /> {cfg?.toolNames?.length ?? 0} tools live
+                  <CheckCircle2 className="h-3 w-3" /> Ready to use
                 </p>
               )}
               {status === 'ready' && (
                 <p className="mt-1.5 flex items-center gap-1.5 font-mono-spec text-[10px] text-sky-700">
                   <CheckCircle2 className="h-3 w-3" />
                   {cfg?.authSource === 'oauth'
-                    ? 'authorized · checking live tool access'
-                    : 'saved · executes on first employee task'}
+                    ? 'Finishing connection check'
+                    : 'Saved and ready to use'}
                 </p>
               )}
               {status === 'error' && cfg?.lastError && (
@@ -340,8 +321,8 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
                   </div>
                   <p className="mt-1.5 font-mono-spec text-[9px] leading-relaxed text-emerald-900/75">
                     {cfg?.authSource === 'oauth'
-                      ? `Authorized${cfg.accountLabel ? ` as ${cfg.accountLabel}` : ''} · token stored in the server vault`
-                      : 'Opens the provider consent page · no token copy and paste'}
+                      ? `Connected securely${cfg.accountLabel ? ` as ${cfg.accountLabel}` : ''}`
+                      : 'Sign in on the provider website to connect'}
                   </p>
                   {f.formError && (
                     <p className="mt-1.5 flex items-start gap-1.5 font-mono-spec text-[10px] text-red-600">
@@ -368,8 +349,8 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
               >
                 {f.open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 {conn.auth === 'oauth'
-                  ? f.open ? 'Hide manual setup' : 'Advanced manual setup'
-                  : status === 'mock' ? 'Configure plugin' : 'Edit configuration'}
+                  ? f.open ? 'Hide manual setup' : 'Set up manually'
+                  : status === 'mock' ? 'Set up' : 'Edit connection'}
               </button>
 
               {f.open && preset && (
@@ -474,6 +455,16 @@ export default function ConnectionsPanel({ configs, onChange, loadError }: Props
                     </>
                   )}
                   <p className="font-mono-spec text-[9px] leading-relaxed text-muted-foreground/80">{preset.note}</p>
+                  {conn.docsUrl && (
+                    <a
+                      href={conn.docsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-accent"
+                    >
+                      Setup guide <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
                   {f.formError && (
                     <p className="flex items-start gap-1.5 font-mono-spec text-[10px] text-red-600">
                       <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {f.formError}

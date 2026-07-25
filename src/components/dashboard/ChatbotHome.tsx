@@ -1,4 +1,4 @@
-import { Bot, Database, Inbox, Paintbrush, Power, Users } from 'lucide-react'
+import { Power } from 'lucide-react'
 import type { ChatbotConfig } from '@/lib/chatbot-config'
 import type { StaffMember } from '@/lib/staff'
 import AvailabilitySwitch from './AvailabilitySwitch'
@@ -16,23 +16,23 @@ export default function ChatbotHome({ config, published, sourceCount, staff, onA
   const availableStaff = staff.filter((member) => member.status === 'active' && member.available)
   const checks = [
     {
-      label: 'AI handler',
-      value: config.selectedEmployeeName ?? 'Default chatbot',
+      label: 'Replies',
+      value: config.selectedEmployeeName ?? 'Standard assistant',
       ready: Boolean(config.selectedEmployeeName || config.systemPrompt.trim()),
-      action: 'behavior',
+      action: 'settings',
     },
     { label: 'Knowledge sources', value: `${sourceCount} attached`, ready: sourceCount > 0, action: 'knowledge' },
-    { label: 'Available staff', value: `${availableStaff.length} online`, ready: availableStaff.length > 0, action: 'staff' },
-    { label: 'Widget key', value: published ? 'Issued' : 'Not published', ready: published, action: 'appearance' },
+    { label: 'Team', value: `${availableStaff.length} available`, ready: availableStaff.length > 0, action: 'team' },
+    { label: 'Website chatbot', value: published ? 'Published' : 'Draft', ready: published, action: 'chatbot' },
   ]
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h2 className="font-serif-display text-3xl font-semibold">Chatbot home</h2>
+          <h2 className="font-serif-display text-3xl font-semibold">Your chatbot</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            One operational view for customer chat, AI handling, human handoff, knowledge, and deployment.
+            See what is ready and choose the next step.
           </p>
         </div>
         <div className={`flex items-center gap-4 border px-4 py-3 ${
@@ -68,39 +68,12 @@ export default function ChatbotHome({ config, published, sourceCount, staff, onA
             </div>
             <div className="mt-2 font-serif-display text-2xl font-semibold">{check.value}</div>
             <div className="mt-1 font-mono-spec text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
-              {check.ready ? 'ready' : 'needs setup'} · open
+              {check.ready ? 'Ready' : 'Set up'} · Open
             </div>
           </button>
         ))}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {[
-          { id: 'inbox', label: 'Conversations', note: 'Take over customer chats', icon: Inbox },
-          { id: 'behavior', label: 'AI behavior', note: 'Connect an AI employee', icon: Bot },
-          { id: 'knowledge', label: 'Knowledge', note: 'Manage chatbot sources', icon: Database },
-          { id: 'appearance', label: 'Widget', note: 'Brand and publish', icon: Paintbrush },
-          { id: 'staff', label: 'Staff routing', note: 'Availability and alerts', icon: Users },
-        ].map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onNavigate(item.id)}
-            className="border border-border/60 bg-card p-4 text-left transition-colors hover:border-primary hover:bg-secondary"
-          >
-            <item.icon className="mb-3 h-5 w-5 text-accent" />
-            <div className="text-sm font-medium">{item.label}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{item.note}</div>
-          </button>
-        ))}
-      </div>
-
-      <div className="border border-primary bg-terminal p-5 text-white">
-        <span className="font-mono-spec text-[10px] uppercase tracking-[0.16em] text-accent">Live routing model</span>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/75">
-          Website message → selected AI employee prompt → persisted conversation → available staff assignment →
-          dashboard, Telegram, or WhatsApp alert. Call buttons create callback requests until a telephony provider is connected.
-        </p>
-      </div>
     </div>
   )
 }
