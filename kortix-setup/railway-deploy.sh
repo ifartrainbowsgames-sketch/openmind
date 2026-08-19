@@ -39,7 +39,18 @@ require OPENAI_API_KEY
 require ANTHROPIC_API_KEY
 require TAVILY_API_KEY
 require FIRECRAWL_API_KEY
-require DAYTONA_API_KEY
+# Community Railway backend is Daytona-only (no E2B/Platinum support).
+if [[ -z "${DAYTONA_API_KEY:-}" ]]; then
+  die "DAYTONA_API_KEY is required for the Railway template.
+
+The community backend (iqbalexperience/suna-backend) only supports Daytona.
+
+If Daytona signup failed, use one of these instead:
+  1. Kortix Cloud — https://kortix.com (no self-host)
+  2. Official self-host + E2B — see kortix-setup/README.md
+     Get E2B key: https://e2b.dev/dashboard?tab=keys
+     Then: ./configure-sandbox.sh e2b"
+fi
 require QSTASH_TOKEN
 require QSTASH_CURRENT_SIGNING_KEY
 require QSTASH_NEXT_SIGNING_KEY
