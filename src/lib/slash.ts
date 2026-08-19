@@ -15,7 +15,7 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { cmd: '/plan', title: 'Plan', desc: 'Implementation plan. No send, commit, or click.', skill: 'plan' },
   { cmd: '/debug', title: 'Debug', desc: 'Find the root cause.', skill: 'debug' },
-  { cmd: '/multitask', title: 'Multitask', desc: 'Crew in parallel, one merged answer.', skill: 'multitask' },
+  { cmd: '/multitask', title: 'Chat', desc: 'Normal conversation (default).', skill: 'multitask' },
   { cmd: '/ask', title: 'Ask', desc: 'Read-only answers.', skill: 'ask' },
   { cmd: '/files', title: 'Files', desc: 'Attach a file.', action: 'files' },
   { cmd: '/model', title: 'Model', desc: 'Pick model and Browserless key.', action: 'model' },

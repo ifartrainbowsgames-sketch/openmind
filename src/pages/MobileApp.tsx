@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import {
   ArrowLeft,
   ArrowUp,
-  BarChart3,
   Bot,
   Check,
   ChevronDown,
@@ -11,14 +10,12 @@ import {
   Github,
   Hash,
   History,
-  Mail,
   Menu,
   Mic,
   MoreHorizontal,
   Paperclip,
   Plug,
   Plus,
-  Presentation,
   Search,
   Settings,
   Sparkles,
@@ -29,7 +26,6 @@ import {
   WifiOff,
   X,
 } from 'lucide-react'
-import { PRESET_EMPLOYEES } from '@/data/employees'
 import {
   liveBrain,
   simulatedBrain,
@@ -87,16 +83,14 @@ import {
 const MOBILE_ASSISTANT: Employee = {
   id: 'openmind',
   name: 'OpenMind',
-  role: 'General Assistant',
+  role: 'Assistant',
   prompt:
-    'You coordinate a small crew. Split work to specialists, merge tool results, and answer plainly. Confirm before send, spend, or destructive actions.',
-    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'web_act', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'memory_search', 'memory_save'],
+    'You are a helpful assistant. Answer clearly and use tools only when the user’s request needs them. Confirm before send, spend, or destructive actions.',
+  tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'web_act', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'memory_search', 'memory_save'],
   connections: ['github', 'gdrive', 'slack'],
   accent: '#ff4d00',
-  tagline: 'Multi-agent crew — research, code, write',
+  tagline: 'Chat with tools when you need them',
 }
-
-const MOBILE_EMPLOYEES = [MOBILE_ASSISTANT, ...PRESET_EMPLOYEES]
 
 const STARTERS = [
   {
@@ -118,9 +112,9 @@ const STARTERS = [
     color: '#286a54',
   },
   {
-    label: 'Team of three',
-    prompt: 'a team of 3: researcher, coder, and writer — work together on improving our onboarding flow.',
-    icon: Presentation,
+    label: 'Quick math',
+    prompt: 'What is 847 × 23? Show the steps briefly.',
+    icon: Hash,
     color: '#a34f36',
   },
 ]
@@ -248,59 +242,6 @@ function ThreadList({
   )
 }
 
-function AssistantPicker({
-  open,
-  selected,
-  onClose,
-  onPick,
-}: {
-  open: boolean
-  selected: Employee
-  onClose: () => void
-  onPick: (employee: Employee) => void
-}) {
-  if (!open) return null
-  return (
-    <div className="fixed inset-0 z-[70] flex items-end justify-center lg:items-center" role="dialog" aria-modal="true" aria-label="Choose an assistant">
-      <button className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={onClose} aria-label="Close assistant picker" />
-      <div className="mobile-sheet-in relative z-10 w-full rounded-t-[28px] bg-white px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-2xl lg:max-w-md lg:rounded-[24px] lg:p-5">
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-black/15 lg:hidden" />
-        <div className="mb-4 flex items-center justify-between px-1">
-          <div>
-            <h2 className="text-lg font-semibold tracking-[-0.02em]">Choose an assistant</h2>
-            <p className="mt-0.5 text-xs text-[#85827b]">Each one brings a different brief and toolset.</p>
-          </div>
-          <button onClick={onClose} className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full bg-[#f3f1ed]" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="space-y-2">
-          {MOBILE_EMPLOYEES.map((employee) => (
-            <button
-              key={employee.id}
-              type="button"
-              onClick={() => onPick(employee)}
-              className={`mobile-tap flex w-full items-center gap-3 rounded-2xl border p-3 text-left transition-colors ${
-                selected.id === employee.id ? 'border-[#17140f] bg-[#faf9f6]' : 'border-black/[0.07] hover:bg-[#faf9f6]'
-              }`}
-            >
-              <AgentMark employee={employee} />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-sm font-semibold">
-                  {employee.name}
-                  <span className="text-[11px] font-normal text-[#96938c]">{employee.role}</span>
-                </span>
-                <span className="mt-0.5 block truncate text-xs text-[#7e7b74]">{employee.tagline}</span>
-              </span>
-              {selected.id === employee.id && <Check className="h-4 w-4 text-[#17140f]" />}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function VoiceSheet({
   open,
   provider,
@@ -418,7 +359,6 @@ export default function MobileApp() {
   const [activeId, setActiveId] = useState(() => threads[0].id)
   const [draft, setDraft] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [appsOpen, setAppsOpen] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
@@ -482,8 +422,7 @@ export default function MobileApp() {
   }
 
   const activeThread = threads.find((thread) => thread.id === activeId) ?? threads[0]
-  const selectedEmployee =
-    MOBILE_EMPLOYEES.find((employee) => employee.id === activeThread?.employeeId) ?? MOBILE_ASSISTANT
+  const selectedEmployee = MOBILE_ASSISTANT
   const hasMessages = (activeThread?.messages.length ?? 0) > 0
   const latestArtifacts = (activeThread?.messages ?? []).flatMap((message) => message.crewRun?.artifacts ?? [])
   const slashHits = matchSlashCommands(draft)
@@ -722,11 +661,6 @@ export default function MobileApp() {
     }
   }
 
-  const selectEmployee = (employee: Employee) => {
-    updateThread(activeThread.id, (thread) => ({ ...thread, employeeId: employee.id, updatedAt: Date.now() }))
-    setPickerOpen(false)
-  }
-
   const activeStatus = useMemo(() => {
     if (!pendingThreadId) return ''
     return liveTrace.at(-1)?.text ?? `${selectedEmployee.name} is thinking…`
@@ -795,16 +729,11 @@ export default function MobileApp() {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(true)}
-              className="mobile-tap flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-white/10"
-            >
+            <div className="mobile-tap flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5">
               <AgentMark employee={selectedEmployee} small />
               <span className="min-w-0">
                 <span className="flex items-center gap-1 text-[13px] font-semibold leading-none text-white">
                   {selectedEmployee.name}
-                  <ChevronDown className="h-3.5 w-3.5 text-white/45" />
                 </span>
                 <span className="mt-1 flex items-center gap-1 text-[10px] leading-none text-white/45">
                   {online ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
@@ -815,7 +744,7 @@ export default function MobileApp() {
                     : 'Offline'}
                 </span>
               </span>
-            </button>
+            </div>
             <span className="min-w-0 flex-1 truncate text-center text-xs font-medium text-white/40">
               {hasMessages ? activeThread.title : ''}
             </span>
@@ -938,11 +867,6 @@ export default function MobileApp() {
                         )}
                       </div>
                       <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#e8e6e1]">{message.content}</div>
-                      {!!message.crewRun?.memberNames.length && (
-                        <p className="mt-2 text-[11px] text-white/40">
-                          Crew: {message.crewRun.memberNames.join(' · ')}
-                        </p>
-                      )}
                       {!!message.crewRun?.artifacts.length && (
                         <div className="mt-3 space-y-2">
                           {message.crewRun.artifacts.map((artifact) => (
@@ -1113,7 +1037,7 @@ export default function MobileApp() {
                   className="mobile-tap flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-white/50 hover:bg-white/10"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  {SKILLS.find((item) => item.id === skill)?.name ?? 'Multitask'}
+                  {SKILLS.find((item) => item.id === skill)?.name ?? 'Chat'}
                   <ChevronDown className="h-3 w-3" />
                 </button>
                 <button
@@ -1199,12 +1123,6 @@ export default function MobileApp() {
         </div>
       )}
       <ToolConfirmHost />
-      <AssistantPicker
-        open={pickerOpen}
-        selected={selectedEmployee}
-        onClose={() => setPickerOpen(false)}
-        onPick={selectEmployee}
-      />
       <VoiceSheet
         open={voiceOpen}
         provider={provider}

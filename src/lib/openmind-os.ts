@@ -1,8 +1,10 @@
-// One crew. Shared board. Shared tools. Not siloed "apps that never talk."
-import { assembleCrew, runCrew, type CrewRun, type RunCrewOptions } from './crew'
-import type { AgentBrain, Employee } from './agent'
+// /app = one chat assistant (Claude/ChatGPT-shaped). Crew mode stays in WorkforceStudio.
+import { runCrew, withCrewTools, withGithubWorkspaceTools, type CrewRun, type RunCrewOptions } from './crew'
+import { runEmployee, type AgentBrain, type Employee } from './agent'
+import { setActiveCrewToolKeys } from './crew-tools'
 import { setMemoryOwner } from './memory'
 import { setNangoOwner } from './nango'
+import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
 
 export type OsAppId = 'research' | 'developer' | 'browser' | 'office' | 'memory' | 'connect'
 
@@ -13,7 +15,6 @@ export interface OsApp {
   kernel: string
 }
 
-/** Shared tools the one crew can use. Not separate products. */
 export const OS_APPS: readonly OsApp[] = [
   { id: 'research', name: 'Research', status: 'live', kernel: 'skill: search/browse when the task needs it' },
   { id: 'developer', name: 'Developer', status: 'partial', kernel: 'customer GitHub via Nango + E2B run_code' },
@@ -27,7 +28,6 @@ export interface BootKernelOptions {
   userId?: string
 }
 
-/** Bind this signed-in customer to Connect + memory. Call once per session. */
 export function bootKernel(options: BootKernelOptions = {}): void {
   if (options.userId) {
     setNangoOwner(options.userId)
@@ -37,16 +37,51 @@ export function bootKernel(options: BootKernelOptions = {}): void {
 
 export type RunTurnOptions = RunCrewOptions & {
   lead?: Employee
+  /** Explicit multi-agent crew (WorkforceStudio only). /app never sets this. */
+  crew?: boolean
 }
 
-/** One Super Agent turn. UI should call this instead of assembling a crew by hand. */
+/** One chat turn — single assistant by default. */
 export async function runTurn(
   task: string,
   brain: AgentBrain,
   options: RunTurnOptions = {},
 ): Promise<CrewRun> {
-  const employees = options.employees?.length
-    ? options.employees
-    : assembleCrew(options.lead, task)
-  return runCrew(task, brain, { ...options, employees })
+  if (options.crew || (options.employees?.length ?? 0) > 1) {
+    return runCrew(task, brain, options)
+  }
+
+  const lead = options.lead
+  if (!lead) throw new Error('runTurn needs a lead assistant')
+
+  setActiveCrewToolKeys(options.toolKeys ?? {})
+  try {
+    const skill: SkillId = options.skill ?? 'multitask'
+    let prompt = skill === 'multitask' ? task : wrapSkillPrompt(skill, task)
+    let employee = withGithubWorkspaceTools(withCrewTools(lead), options.workspace)
+    employee = { ...employee, tools: toolsForSkill(employee.tools, skill) }
+
+    const result = await runEmployee(
+      brain,
+      employee,
+      prompt,
+      options.onTrace,
+      options.configs,
+    )
+
+    return {
+      answer: result.answer,
+      members: [{
+        employeeId: employee.id,
+        name: employee.name,
+        role: employee.role,
+        result,
+      }],
+      artifacts: [],
+      trace: result.trace,
+      employeeIds: [employee.id],
+    }
+  } finally {
+    setActiveCrewToolKeys({})
+  }
 }

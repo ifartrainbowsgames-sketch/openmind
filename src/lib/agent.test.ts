@@ -101,7 +101,7 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
     expect(r.plan).toEqual([])
     expect(r.toolCalls).toEqual([])
     expect(r.trace.map((t) => t.node)).toEqual(['plan', 'respond'])
-    expect(r.answer).toContain('Ada')
+    expect(r.answer).toMatch(/Hi! How can I help/i)
   })
 
   it('an employee with no tools always answers directly', async () => {
@@ -118,7 +118,6 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
 
   it('returns tool output in a compact crew-friendly voice', async () => {
     const r = await runEmployee(simulatedBrain(), emp({ prompt: 'Always reply like a pirate.' }), 'Ahoy, what is 2+2?')
-    expect(r.answer).toContain('Ada')
     expect(r.answer).toMatch(/Calculator|4/)
   })
 

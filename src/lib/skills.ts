@@ -13,7 +13,7 @@ export interface SkillSpec {
 export const SKILLS: readonly SkillSpec[] = [
   { id: 'plan', name: 'Plan', desc: 'Generate an implementation plan.', accent: '#c2410c' },
   { id: 'debug', name: 'Debug', desc: 'Pinpoint the root cause of an issue.', accent: '#b91c1c' },
-  { id: 'multitask', name: 'Multitask', desc: 'Hire a crew, work in parallel, one merged answer.', accent: '#6d28d9' },
+  { id: 'multitask', name: 'Chat', desc: 'Normal conversation with tools when needed.', accent: '#6d28d9' },
   { id: 'ask', name: 'Ask', desc: 'Answer questions without sending, committing, or clicking.', accent: '#15803d' },
 ]
 
@@ -40,7 +40,7 @@ export function wrapSkillPrompt(skill: SkillId, task: string): string {
   if (skill === 'ask') {
     return `SKILL: ASK. Read-only. Answer from tools and the table. No gmail_send, slack_post, github writes, or web_act.\n\n${task}`
   }
-  return `SKILL: MULTITASK. Hire specialists, run in parallel, merge into one answer.\n\n${task}`
+  return task
 }
 
 export function toolsForSkill(tools: string[], skill: SkillId = 'multitask'): string[] {

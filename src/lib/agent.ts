@@ -885,6 +885,10 @@ const CONNECTION_ROUTES: { re: RegExp; ids: string[] }[] = [
 export function simulatedBrain(): AgentBrain {
   return {
     plan: async (input, tools) => {
+      const user = stripWorkspacePrompt(input)
+      if (user.length < 120 && /^(hi|hello|hey|yo|thanks|thank you|ok|okay)\b[!.?\s]*$/i.test(user.trim())) {
+        return []
+      }
       const has = (id: string) => tools.some((t) => t.id === id)
       const steps: PlanStep[] = []
       const push = (tool: string, toolInput: string) => {
@@ -902,7 +906,6 @@ export function simulatedBrain(): AgentBrain {
         push('web_search', input)
       if (/\b(run this|execute|sandbox|python -c)\b/i.test(input) && has('run_code'))
         push('run_code', input)
-      const user = stripWorkspacePrompt(input)
       const writeJson = user.match(/\{\s*"path"\s*:\s*"[\s\S]*"content"\s*:/) ? user.match(/\{[\s\S]*\}/)?.[0] : undefined
       if (has('github_write_file') && (/github_write_file|Coding space: GitHub/i.test(input) || /\b(commit|write files?)\b/i.test(user)))
         push('github_write_file', writeJson ?? user)
@@ -932,17 +935,18 @@ export function simulatedBrain(): AgentBrain {
         if (steps.length >= 3) break
         if (ids.includes('github') && steps.some((s) => s.tool.startsWith('github_'))) continue
         const hit = ids.find(has)
-        if (hit && re.test(input)) push(hit, input)
+        if (hit && re.test(user)) push(hit, user)
       }
       if (/summar|tl;dr|shorten|condense|key points/i.test(input) && has('summarize'))
         push('summarize', input)
       if (/sentiment|feeling|feels|opinion|feedback|happy|angry|upset|satisfied/i.test(input) && has('sentiment'))
         push('sentiment', input)
-      if (steps.length === 0 && has('search_docs') && /\?|openmind|widget|price|pricing|cost|key|embed|install|provider|refund|pro plan|capabilit/i.test(input))
-        push('search_docs', input)
+      if (steps.length === 0 && has('search_docs') && /\?|widget|price|pricing|cost|key|embed|install|provider|refund|pro plan|capabilit/i.test(user))
+        push('search_docs', user)
       return steps.slice(0, 3)
     },
     respond: async (input, observations, employee) => {
+      const user = stripWorkspacePrompt(input)
       if (employee.role === 'Crew lead') {
         const board = input.includes('Crew notes') ? input.split('Crew notes')[1] ?? input : input
         const toolLines = observations.map((o) => `• ${toolName(o.tool)}: ${o.output}`)
@@ -954,12 +958,13 @@ export function simulatedBrain(): AgentBrain {
           `(Simulated — add your model key for a polished single voice.)`
         )
       }
-      const intro = `${employee.name} (${employee.role}):`
       if (observations.length === 0) {
-        return `${intro} ${input.slice(0, 400)}`
+        if (/^(hi|hello|hey|yo)\b/i.test(user.trim())) return 'Hi! How can I help you today?'
+        if (/^(thanks|thank you)\b/i.test(user.trim())) return 'You’re welcome — anything else?'
+        return user.slice(0, 2000)
       }
       const lines = observations.map((o) => `• ${toolName(o.tool)}: ${o.output}`)
-      return `${intro}\n${lines.join('\n')}`
+      return `${lines.join('\n')}`
     },
   }
 }
