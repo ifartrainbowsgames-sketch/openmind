@@ -12,6 +12,7 @@ import {
   Hash,
   History,
   Mail,
+  Menu,
   Mic,
   MoreHorizontal,
   Paperclip,

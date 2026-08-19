@@ -1,4 +1,4 @@
-import { SKILLS, type SkillId } from './skills'
+import type { SkillId } from './skills'
 
 export type SlashAction = 'files' | 'model' | 'connect' | 'settings' | 'browser'
 
