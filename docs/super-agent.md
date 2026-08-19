@@ -100,3 +100,5 @@ Supabase
 ## Operator vs customer
 
 Customers never set `NANGO_SECRET_KEY`, LiteLLM, Langfuse, A2A, or gateway keys. They sign in and tap **Connect apps**.
+
+Feature-by-feature OSS map (Computer, Code, Build, Voice, Image/Video/Music, Docs/Slides/Sheets, Knowledge, Memory, Workflows, Marketplace, Universal Tasks): [`open-source-product-map.md`](./open-source-product-map.md).

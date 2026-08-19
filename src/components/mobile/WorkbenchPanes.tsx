@@ -15,7 +15,7 @@ export function FilesBrowserPanel({
   onOpenFile: (artifact: CrewArtifact) => void
 }) {
   return (
-    <aside className="hidden min-w-0 w-[min(42vw,440px)] shrink-0 flex-col border-l border-white/10 bg-[#141414] lg:flex">
+    <aside className="hidden min-w-0 w-[min(32vw,360px)] shrink-0 flex-col border-l border-white/10 bg-[#141414] xl:flex">
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-white/10 px-2 text-[11px] text-white/50">
         <FolderTree className="h-3.5 w-3.5" />
         Files

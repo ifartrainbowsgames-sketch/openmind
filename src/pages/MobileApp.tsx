@@ -171,16 +171,16 @@ function ThreadList({
   return (
     <>
       <div className="flex items-center justify-between px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
-        <Link to="/" className="flex items-center gap-2 rounded-xl px-1 py-1 transition-colors hover:bg-black/5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#17140f] text-white">
+        <Link to="/" className="flex items-center gap-2 rounded-xl px-1 py-1 transition-colors hover:bg-white/10">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ff4d00] text-white">
             <Bot className="h-4 w-4" />
           </span>
-          <span className="text-[15px] font-semibold tracking-[-0.02em]">OpenMind</span>
+          <span className="text-[15px] font-semibold tracking-[-0.02em] text-white">OpenMind</span>
         </Link>
         <button
           type="button"
           onClick={onNew}
-          className="mobile-tap flex h-9 w-9 items-center justify-center rounded-xl text-[#686761] hover:bg-black/5 hover:text-[#17140f]"
+          className="mobile-tap flex h-9 w-9 items-center justify-center rounded-xl text-white/55 hover:bg-white/10 hover:text-white"
           aria-label="New session"
         >
           <SquarePen className="h-[18px] w-[18px]" />
@@ -191,14 +191,14 @@ function ThreadList({
         <button
           type="button"
           onClick={onNew}
-          className="mobile-tap flex w-full items-center gap-2.5 rounded-xl bg-[#17140f] px-3.5 py-3 text-sm font-medium text-white hover:bg-[#2a2722]"
+          className="mobile-tap flex w-full items-center gap-2.5 rounded-xl bg-white/10 px-3.5 py-3 text-sm font-medium text-white hover:bg-white/15"
         >
           <Plus className="h-4 w-4" />
           New session
         </button>
       </div>
 
-      <div className="mt-6 flex items-center gap-2 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#8d8b84]">
+      <div className="mt-6 flex items-center gap-2 px-4 text-[11px] font-semibold uppercase tracking-[0.12em] text-white/35">
         <History className="h-3.5 w-3.5" />
         Recent
       </div>
@@ -208,7 +208,7 @@ function ThreadList({
           <div
             key={thread.id}
             className={`group flex items-center rounded-xl transition-colors ${
-              activeId === thread.id ? 'bg-white shadow-[0_1px_2px_rgba(0,0,0,0.06)]' : 'hover:bg-white/70'
+              activeId === thread.id ? 'bg-white/10' : 'hover:bg-white/5'
             }`}
           >
             <button
@@ -216,15 +216,15 @@ function ThreadList({
               onClick={() => onPick(thread.id)}
               className="min-w-0 flex-1 px-3 py-2.5 text-left"
             >
-              <span className="block truncate text-[13px] font-medium text-[#292722]">{thread.title}</span>
-              <span className="mt-0.5 block text-[11px] text-[#939089]">
+              <span className="block truncate text-[13px] font-medium text-white/90">{thread.title}</span>
+              <span className="mt-0.5 block text-[11px] text-white/40">
                 {thread.messages.length ? `${thread.messages.length} messages` : 'Ready when you are'}
               </span>
             </button>
             <button
               type="button"
               onClick={() => onDelete(thread.id)}
-              className="mobile-tap mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[#aaa7a0] opacity-100 hover:bg-[#f2efea] hover:text-red-600 lg:opacity-0 lg:group-hover:opacity-100"
+              className="mobile-tap mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white/35 opacity-100 hover:bg-white/10 hover:text-red-400 lg:opacity-0 lg:group-hover:opacity-100"
               aria-label={`Delete ${thread.title}`}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -233,12 +233,12 @@ function ThreadList({
         ))}
       </nav>
 
-      <div className="border-t border-black/[0.07] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <div className="border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
         <Link
           to="/dashboard"
-          className="flex items-center gap-3 rounded-xl px-2 py-2 text-xs text-[#77746d] transition-colors hover:bg-white hover:text-[#17140f]"
+          className="flex items-center gap-3 rounded-xl px-2 py-2 text-xs text-white/45 transition-colors hover:bg-white/10 hover:text-white"
         >
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5">
             <ArrowLeft className="h-3.5 w-3.5" />
           </span>
           Open desktop console
@@ -769,7 +769,7 @@ export default function MobileApp() {
             onClick={() => setDrawerOpen(false)}
             aria-label="Close session history"
           />
-          <aside className="mobile-drawer-in absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col bg-[#efede8] shadow-2xl">
+          <aside className="mobile-drawer-in absolute inset-y-0 left-0 flex w-[min(84vw,320px)] flex-col bg-[#1a1a1a] shadow-2xl">
             <ThreadList
               threads={threads}
               activeId={activeThread.id}
@@ -790,7 +790,7 @@ export default function MobileApp() {
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
-              className="mobile-tap flex h-10 w-10 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5 lg:hidden"
+              className="mobile-tap flex h-10 w-10 items-center justify-center rounded-xl text-white/70 hover:bg-white/10 lg:hidden"
               aria-label="Open session history"
             >
               <Menu className="h-5 w-5" />
@@ -798,15 +798,15 @@ export default function MobileApp() {
             <button
               type="button"
               onClick={() => setPickerOpen(true)}
-              className="mobile-tap flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-black/5"
+              className="mobile-tap flex min-w-0 items-center gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-white/10"
             >
               <AgentMark employee={selectedEmployee} small />
               <span className="min-w-0">
-                <span className="flex items-center gap-1 text-[13px] font-semibold leading-none">
+                <span className="flex items-center gap-1 text-[13px] font-semibold leading-none text-white">
                   {selectedEmployee.name}
-                  <ChevronDown className="h-3.5 w-3.5 text-[#8a8780]" />
+                  <ChevronDown className="h-3.5 w-3.5 text-white/45" />
                 </span>
-                <span className="mt-1 flex items-center gap-1 text-[10px] leading-none text-[#908d86]">
+                <span className="mt-1 flex items-center gap-1 text-[10px] leading-none text-white/45">
                   {online ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
                   {online
                     ? liveReady
@@ -816,7 +816,7 @@ export default function MobileApp() {
                 </span>
               </span>
             </button>
-            <span className="min-w-0 flex-1 truncate text-center text-xs font-medium text-[#77746d]">
+            <span className="min-w-0 flex-1 truncate text-center text-xs font-medium text-white/40">
               {hasMessages ? activeThread.title : ''}
             </span>
             <button
@@ -830,14 +830,14 @@ export default function MobileApp() {
             <button
               type="button"
               onClick={newThread}
-              className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5"
+              className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white/70 hover:bg-white/10"
               aria-label="New session"
             >
               <SquarePen className="h-[18px] w-[18px]" />
             </button>
             <button
               type="button"
-              className="mobile-tap hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5 sm:flex"
+              className="mobile-tap hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white/70 hover:bg-white/10 sm:flex"
               aria-label="Session options"
             >
               <MoreHorizontal className="h-5 w-5" />
@@ -855,7 +855,7 @@ export default function MobileApp() {
                 <h1 className="text-center text-[30px] font-semibold leading-[1.1] tracking-[-0.045em] sm:text-[38px]">
                   What can I help you do?
                 </h1>
-                <p className="mx-auto mt-3 max-w-md text-center text-sm leading-6 text-[#77746d]">
+                <p className="mx-auto mt-3 max-w-md text-center text-sm leading-6 text-white/45">
                   Connect GitHub / Slack / Gmail, then pick where work should land.
                 </p>
                 <div className="mt-8 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
@@ -864,7 +864,7 @@ export default function MobileApp() {
                       key={starter.label}
                       type="button"
                       onClick={() => void sendPrompt(starter.prompt)}
-                      className="mobile-starter-in mobile-tap group flex min-h-[112px] flex-col justify-between rounded-2xl border border-black/[0.07] bg-white p-3.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all hover:-translate-y-0.5 hover:border-black/15 hover:shadow-md"
+                      className="mobile-starter-in mobile-tap group flex min-h-[112px] flex-col justify-between rounded-2xl border border-white/10 bg-[#252525] p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-white/20"
                       style={{ animationDelay: `${index * 55 + 100}ms` }}
                     >
                       <span
@@ -873,11 +873,11 @@ export default function MobileApp() {
                       >
                         <starter.icon className="h-4 w-4" />
                       </span>
-                      <span className="text-[13px] font-medium leading-4 text-[#37342f]">{starter.label}</span>
+                      <span className="text-[13px] font-medium leading-4 text-white/90">{starter.label}</span>
                     </button>
                   ))}
                 </div>
-                <p className="mt-5 text-center text-[11px] text-[#a09d96]">
+                <p className="mt-5 text-center text-[11px] text-white/35">
                   Open source · your models · your keys
                 </p>
               </div>
@@ -885,8 +885,8 @@ export default function MobileApp() {
           ) : (
             <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-7 sm:px-8 sm:py-10">
               {activeThread.workspace && (
-                <div className="rounded-2xl border border-black/[0.07] bg-white px-3.5 py-2.5 text-[12px] leading-5 text-[#5f5c56]">
-                  <span className="font-medium text-[#37342f]">
+                <div className="rounded-2xl border border-white/10 bg-[#252525] px-3.5 py-2.5 text-[12px] leading-5 text-white/55">
+                  <span className="font-medium text-white/90">
                     {activeThread.workspace.kind === 'github'
                       ? `GitHub · ${activeThread.workspace.branch}`
                       : activeThread.workspace.kind === 'slack'
@@ -937,20 +937,20 @@ export default function MobileApp() {
                           </button>
                         )}
                       </div>
-                      <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#36332e]">{message.content}</div>
+                      <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#e8e6e1]">{message.content}</div>
                       {!!message.crewRun?.memberNames.length && (
-                        <p className="mt-2 text-[11px] text-[#7a7770]">
+                        <p className="mt-2 text-[11px] text-white/40">
                           Crew: {message.crewRun.memberNames.join(' · ')}
                         </p>
                       )}
                       {!!message.crewRun?.artifacts.length && (
                         <div className="mt-3 space-y-2">
                           {message.crewRun.artifacts.map((artifact) => (
-                            <details key={artifact.id} className="rounded-xl border border-black/[0.07] bg-white">
-                              <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-[#6f6c65]">
+                            <details key={artifact.id} className="rounded-xl border border-white/10 bg-[#252525]">
+                              <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-white/50">
                                 {artifact.title} · {artifact.kind}
                               </summary>
-                              <pre className="max-h-64 overflow-auto border-t border-black/[0.06] px-3 py-2 text-[11px] leading-5 text-[#4a4742] whitespace-pre-wrap">
+                              <pre className="max-h-64 overflow-auto border-t border-white/10 px-3 py-2 text-[11px] leading-5 text-white/70 whitespace-pre-wrap">
                                 {artifact.body}
                               </pre>
                             </details>
@@ -958,18 +958,18 @@ export default function MobileApp() {
                         </div>
                       )}
                       {!!message.toolCalls?.length && (
-                        <details className="mt-3 rounded-xl border border-black/[0.07] bg-white">
-                          <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-medium text-[#6f6c65]">
+                        <details className="mt-3 rounded-xl border border-white/10 bg-[#252525]">
+                          <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-medium text-white/50">
                             <span className="flex items-center gap-2">
                               <Check className="h-3.5 w-3.5 text-emerald-600" />
                               {message.toolCalls.length} tool {message.toolCalls.length === 1 ? 'step' : 'steps'} completed
                               <ChevronDown className="ml-auto h-3.5 w-3.5" />
                             </span>
                           </summary>
-                          <div className="space-y-2 border-t border-black/[0.06] px-3 py-2.5">
+                          <div className="space-y-2 border-t border-white/10 px-3 py-2.5">
                             {message.toolCalls.map((call, index) => (
-                              <div key={`${call.tool}-${index}`} className="text-[11px] leading-5 text-[#7a7770]">
-                                <span className="font-mono-spec font-medium text-[#34312d]">{call.tool}</span>
+                              <div key={`${call.tool}-${index}`} className="text-[11px] leading-5 text-white/45">
+                                <span className="font-mono-spec font-medium text-white/80">{call.tool}</span>
                                 <p className="line-clamp-3 whitespace-pre-wrap">{call.output}</p>
                               </div>
                             ))}
@@ -986,7 +986,7 @@ export default function MobileApp() {
                   <AgentMark employee={selectedEmployee} small />
                   <div className="min-w-0 flex-1 pt-1">
                     <div className="mb-2 text-xs font-semibold">{selectedEmployee.name}</div>
-                    <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-black/[0.07] bg-white px-3 py-2 text-[11px] text-[#77746d] shadow-sm">
+                    <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-white/10 bg-[#252525] px-3 py-2 text-[11px] text-white/55 shadow-sm">
                       <span className="mobile-orbit h-3.5 w-3.5 shrink-0 rounded-full border-2 border-[#ff4d00]/25 border-t-[#ff4d00]" />
                       <span className="truncate">{activeStatus}</span>
                     </div>
@@ -998,10 +998,10 @@ export default function MobileApp() {
           )}
         </div>
 
-        <div className="relative z-20 shrink-0 bg-gradient-to-t from-[#fbfaf8] via-[#fbfaf8] to-[#fbfaf8]/0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
+        <div className="relative z-20 shrink-0 bg-[#1e1e1e] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-6">
           <div className="mx-auto max-w-3xl">
             {attachment && (
-              <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-xl border border-black/[0.08] bg-white px-2.5 py-1.5 text-[11px] text-[#5f5c56] shadow-sm">
+              <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-xl border border-white/10 bg-[#252525] px-2.5 py-1.5 text-[11px] text-white/70">
                 <FileText className="h-3.5 w-3.5 shrink-0 text-[#ff4d00]" />
                 <span className="truncate">{attachment.name}</span>
                 <button onClick={() => setAttachment(null)} className="rounded-full p-0.5 hover:bg-black/5" aria-label="Remove attachment">
@@ -1021,8 +1021,8 @@ export default function MobileApp() {
                       disabled={!!pendingThreadId}
                       className={`mobile-tap inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
                         destination === choice.id
-                          ? 'bg-[#17140f] text-white'
-                          : 'bg-[#f2f0ec] text-[#5f5c56] hover:bg-[#e8e5df]'
+                          ? 'bg-white text-[#17140f]'
+                          : 'bg-white/10 text-white/60 hover:bg-white/15'
                       }`}
                     >
                       {choice.id === 'github' ? <Github className="h-3 w-3" /> : choice.id === 'slack' ? <Hash className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
@@ -1051,7 +1051,7 @@ export default function MobileApp() {
                           ? 'Describe the work — I’ll post it to Slack…'
                           : 'Ask the crew anything…'
                     }
-                className="block max-h-[120px] min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 outline-none placeholder:text-[#aaa7a0]"
+                className="block max-h-[120px] min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 text-white outline-none placeholder:text-white/35"
                 disabled={!!pendingThreadId}
               />
               {slashHits.length > 0 && (
@@ -1081,7 +1081,7 @@ export default function MobileApp() {
                 <button
                   type="button"
                   onClick={() => setCommandOpen(true)}
-                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
+                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-white/50 hover:bg-white/10"
                   aria-label="Skills, files, model, Connect"
                 >
                   <Plus className="h-[18px] w-[18px]" />
@@ -1091,7 +1091,7 @@ export default function MobileApp() {
                   onClick={() => void toggleRecording()}
                   disabled={!!pendingThreadId || transcribing}
                   className={`mobile-tap flex h-9 w-9 items-center justify-center rounded-full ${
-                    recording ? 'bg-[#ff4d00]/15 text-[#ff4d00]' : 'text-[#68655e] hover:bg-[#f2f0ec]'
+                    recording ? 'bg-[#ff4d00]/15 text-[#ff4d00]' : 'text-white/50 hover:bg-white/10'
                   }`}
                   aria-label={recording ? 'Stop recording' : 'Speak your message'}
                 >
@@ -1110,7 +1110,7 @@ export default function MobileApp() {
                 <button
                   type="button"
                   onClick={() => setCommandOpen(true)}
-                  className="mobile-tap flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-[#66635d] hover:bg-[#f2f0ec]"
+                  className="mobile-tap flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-white/50 hover:bg-white/10"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                   {SKILLS.find((item) => item.id === skill)?.name ?? 'Multitask'}
@@ -1119,7 +1119,7 @@ export default function MobileApp() {
                 <button
                   type="button"
                   onClick={() => setVoiceOpen(true)}
-                  className="mobile-tap flex h-9 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium text-[#66635d] hover:bg-[#f2f0ec]"
+                  className="mobile-tap flex h-9 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium text-white/50 hover:bg-white/10"
                   aria-label="Model"
                 >
                   Auto
@@ -1129,14 +1129,14 @@ export default function MobileApp() {
                   type="button"
                   onClick={() => void sendPrompt()}
                   disabled={!draft.trim() || !!pendingThreadId}
-                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full bg-[#ff4d00] text-white shadow-sm transition-colors hover:bg-[#e94500] disabled:bg-[#dedbd5] disabled:text-[#a5a29b]"
+                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full bg-[#ff4d00] text-white shadow-sm transition-colors hover:bg-[#e94500] disabled:bg-white/10 disabled:text-white/25"
                   aria-label="Send message"
                 >
                   <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.5} />
                 </button>
               </div>
             </div>
-            <p className="mt-2 hidden text-center text-[10px] text-[#aaa7a0] sm:block">
+            <p className="mt-2 hidden text-center text-[10px] text-white/30 sm:block">
               Agents can make mistakes. Review important work.
             </p>
           </div>
