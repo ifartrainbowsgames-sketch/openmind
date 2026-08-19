@@ -8,6 +8,7 @@ const Home = lazy(() => import('./pages/Home'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Login = lazy(() => import('./pages/Login'))
 const Employees = lazy(() => import('./pages/Employees'))
+const MobileApp = lazy(() => import('./pages/MobileApp'))
 
 function PageLoader() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/employees" element={<Employees />} />
+          <Route path="/app" element={<MobileApp />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

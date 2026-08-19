@@ -6,6 +6,7 @@ import { TransitionLink } from '@/components/fx'
 
 const links = [
   { label: 'Playground', href: '#playground' },
+  { label: 'Mobile app', href: '/app' },
   { label: 'Employees', href: '/employees' },
   { label: 'Chatbot', href: '#capabilities' },
   { label: 'Providers', href: '#providers' },
@@ -46,7 +47,7 @@ export default function Navbar() {
           <span className="spec-label hidden sm:inline">integration layer</span>
         </a>
 
-        <div className="hidden items-center gap-7 md:flex">
+        <div className="hidden items-center gap-6 lg:flex">
           {links.map((l) =>
             l.href.startsWith('/') ? (
               <TransitionLink
@@ -69,7 +70,7 @@ export default function Navbar() {
           )}
         </div>
 
-        <div className="hidden items-center gap-3 md:flex">
+        <div className="hidden items-center gap-3 lg:flex">
           <Magnetic>
             <Button
               size="sm"
@@ -81,13 +82,13 @@ export default function Navbar() {
           </Magnetic>
         </div>
 
-        <button className="md:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
+        <button className="lg:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
           {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
       </nav>
 
       {open && (
-        <div className="border-t border-border bg-background md:hidden">
+        <div className="border-t border-border bg-background lg:hidden">
           <div className="flex flex-col gap-1 px-6 py-4">
             {links.map((l) =>
               l.href.startsWith('/') ? (
