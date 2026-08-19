@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "baseUrl": "..",
+    "paths": { "@/*": ["./src/*"] },
+    // vite/client supplies import.meta.env, which the shared src/lib modules
+    // read. The worker never runs Vite, but it typechecks the same files.
+    "types": ["node", "vite/client"]
+  },
+  "include": ["./**/*.ts"]
+}

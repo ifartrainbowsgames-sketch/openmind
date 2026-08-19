@@ -20,7 +20,7 @@
 set -euo pipefail
 
 PROJECT_REF="${PROJECT_REF:-jvjxqrfzdhujtoenaejb}"
-FUNCTIONS=(agent-tools mcp-proxy nango-session nango-act)
+FUNCTIONS=(agent-tools vault-keys mcp-proxy nango-session nango-act)
 
 DO_MIGRATIONS=1
 DO_FUNCTIONS=1
