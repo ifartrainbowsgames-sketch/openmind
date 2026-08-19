@@ -1,9 +1,87 @@
+import { getSession } from './auth'
+import { upsertLiveConnection, removeLiveConnection, type LiveConnectionConfig } from './agent'
 import { SUPABASE_KEY, SUPABASE_URL, isSupabaseConfigured } from './supabase'
-import { extractNangoConnectionId } from './nango'
+import {
+  extractNangoConnectionId,
+  liveIdsForNangoProvider,
+  customerConnectError,
+  nangoOwnerId,
+  removeNangoConnection,
+  setNangoOwner,
+  upsertNangoConnection,
+  type NangoConnection,
+} from './nango'
+
+/** Customer-facing apps on /app — Connect GitHub / Slack / Gmail (and Drive). */
+export const CUSTOMER_APPS = [
+  { id: 'github', providerId: 'github', name: 'GitHub', blurb: 'Create repos and commit files' },
+  { id: 'slack', providerId: 'slack', name: 'Slack', blurb: 'Post updates to your workspace' },
+  { id: 'gmail', providerId: 'google', name: 'Gmail', blurb: 'Send mail from your inbox' },
+  { id: 'gdrive', providerId: 'google', name: 'Drive', blurb: 'Find files in Google Drive' },
+] as const
+
+export type CustomerAppId = (typeof CUSTOMER_APPS)[number]['id']
+
+export { customerConnectError, liveIdsForNangoProvider } from './nango'
+
+export function recordConnectedProvider(providerId: string, connectionId?: string): {
+  nango: NangoConnection[]
+  live: LiveConnectionConfig[]
+} {
+  const nango = upsertNangoConnection({
+    providerId,
+    connectionId,
+    connectedAt: Date.now(),
+    userId: nangoOwnerId() || undefined,
+  })
+  let live: LiveConnectionConfig[] = []
+  for (const omId of liveIdsForNangoProvider(providerId)) {
+    live = upsertLiveConnection({
+      connectionId: omId,
+      mode: 'mcp',
+      serverUrl: `nango://${providerId}`,
+      status: 'live',
+      toolNames: [omId],
+    })
+  }
+  return { nango, live }
+}
+
+export function disconnectProvider(providerId: string): NangoConnection[] {
+  const nango = removeNangoConnection(providerId)
+  for (const omId of liveIdsForNangoProvider(providerId)) {
+    removeLiveConnection(omId)
+  }
+  return nango
+}
+
+/** Shared Connect flow: session on Supabase, OAuth iframe, then crew can use the app. */
+export async function connectProvider(
+  providerId: string,
+  onEvent?: (event: { type: 'connect' | 'close'; live?: LiveConnectionConfig[] }) => void,
+): Promise<void> {
+  const session = await getSession()
+  if (!session?.user.id) {
+    throw new Error('Sign in to connect your own GitHub, Slack, or Gmail.')
+  }
+  setNangoOwner(session.user.id)
+  const token = await createNangoSession(providerId, {
+    id: session.user.id,
+    email: session.user.email ?? 'you@openmind.app',
+  })
+  openNangoConnectUi(token, (event) => {
+    if (event.type === 'connect') {
+      const { live } = recordConnectedProvider(providerId, event.connectionId)
+      onEvent?.({ type: 'connect', live })
+      return
+    }
+    onEvent?.({ type: 'close' })
+  })
+}
 
 export async function createNangoSession(providerId: string, user: { id: string; email: string }): Promise<string> {
   if (!isSupabaseConfigured || !SUPABASE_URL) {
-    throw new Error('Deploy the nango-session function and set VITE_SUPABASE_URL to connect from this app.')
+    throw new Error('Couldn’t start Connect. Try again in a moment.')
   }
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (SUPABASE_KEY) headers.Authorization = `Bearer ${SUPABASE_KEY}`
@@ -16,7 +94,7 @@ export async function createNangoSession(providerId: string, user: { id: string;
   const data = (await res.json()) as { sessionToken?: string; error?: unknown }
   if (!res.ok || !data.sessionToken) {
     const err = typeof data.error === 'string' ? data.error : JSON.stringify(data.error ?? `HTTP ${res.status}`)
-    throw new Error(err)
+    throw new Error(customerConnectError(err))
   }
   return data.sessionToken
 }
@@ -31,7 +109,7 @@ export function openNangoConnectUi(
 
   const overlay = document.createElement('div')
   overlay.setAttribute('data-om-nango', '1')
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:80;background:rgba(15,15,15,.45);display:flex;align-items:center;justify-content:center;padding:24px'
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:90;background:rgba(15,15,15,.45);display:flex;align-items:center;justify-content:center;padding:24px'
   const frame = document.createElement('iframe')
   frame.src = `${host}?session_token=${encodeURIComponent(sessionToken)}`
   frame.allow = 'clipboard-write; identity-credentials-get'

@@ -54,8 +54,8 @@ export function toolsForRole(employee: Employee): string[] {
   const extra: string[] = []
   if (RESEARCH_RE.test(hay)) extra.push('web_search', 'browse_url', 'search_docs', 'summarize')
   if (CODE_RE.test(hay)) extra.push('run_code', 'code_review', 'calculator', 'github_write_file', 'github_create_branch', 'github_open_pr')
-  if (WRITE_RE.test(hay)) extra.push('summarize', 'web_search')
-  extra.push('web_search')
+  if (WRITE_RE.test(hay)) extra.push('summarize', 'web_search', 'slack_post', 'gmail_send')
+  extra.push('web_search', 'slack_post', 'gmail_send', 'gdrive_list')
   return [...new Set([...employee.tools, ...extra])]
 }
 
@@ -64,10 +64,11 @@ export function withCrewTools(employee: Employee): Employee {
 }
 
 export function withGithubWorkspaceTools(employee: Employee, space?: WorkspaceSpace): Employee {
-  if (space?.kind !== 'github') return employee
+  const apps = [...new Set([...employee.tools, 'slack_post', 'gmail_send', 'gdrive_list'])]
+  if (space?.kind !== 'github') return { ...employee, tools: apps }
   return {
     ...employee,
-    tools: [...new Set([...employee.tools, 'github_write_file', 'github_create_branch', 'github_open_pr'])],
+    tools: [...new Set([...apps, 'github_write_file', 'github_create_branch', 'github_open_pr'])],
   }
 }
 

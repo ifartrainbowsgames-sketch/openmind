@@ -21,7 +21,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const secret = Deno.env.get('NANGO_SECRET_KEY') ?? ''
   const host = (Deno.env.get('NANGO_HOST') ?? 'https://api.nango.dev').replace(/\/$/, '')
-  if (!secret) return json(501, { error: 'NANGO_SECRET_KEY is not set on this function' })
+  if (!secret) return json(501, { error: 'Connect is not configured yet' })
 
   let body: { providerId?: unknown; email?: unknown; userId?: unknown }
   try {

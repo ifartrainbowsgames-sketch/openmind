@@ -67,6 +67,9 @@ async function resolveConnectionId(
   userId: string,
 ): Promise<string> {
   if (requested) return requested
+  if (!userId) {
+    throw new Error('Sign in and Connect your own apps — we will not use another customer\'s account')
+  }
 
   const res = await fetch(`${host}/connections`, {
     headers: { Authorization: `Bearer ${secret}` },
@@ -84,11 +87,11 @@ async function resolveConnectionId(
   const rows = Array.isArray(parsed.connections) ? parsed.connections
     : Array.isArray(parsed.data) ? parsed.data : []
   const matches = rows.filter((row) => matchesProvider(row, providerId))
-  const tagged = userId ? matches.filter((row) => matchesEndUser(row, userId)) : []
-  const pool = (tagged.length ? tagged : matches).slice().sort((a, b) => connectionTime(b) - connectionTime(a))
+  const tagged = matches.filter((row) => matchesEndUser(row, userId))
+  const pool = tagged.slice().sort((a, b) => connectionTime(b) - connectionTime(a))
   const id = asId(pool[0]?.connection_id) || asId(pool[0]?.connectionId)
   if (!id) {
-    throw new Error('No GitHub/Slack Nango connection found — reconnect in the marketplace')
+    throw new Error('No connection for this customer — Connect your own GitHub, Slack, or Gmail in the app')
   }
   return id
 }
@@ -99,7 +102,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const secret = Deno.env.get('NANGO_SECRET_KEY') ?? ''
   const host = (Deno.env.get('NANGO_HOST') ?? 'https://api.nango.dev').replace(/\/$/, '')
-  if (!secret) return json(501, { error: 'NANGO_SECRET_KEY is not set' })
+  if (!secret) return json(501, { error: 'Connect is not configured yet' })
 
   let body: Record<string, unknown>
   try {
@@ -176,6 +179,41 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!res.ok || parsed.ok === false) return json(res.status >= 400 ? res.status : 502, { error: parsed.error ?? raw.slice(0, 240) })
       return json(200, { ok: true, channel })
     }
+
+    if (action === 'gmail.send') {
+      const to = typeof body.to === 'string' ? body.to.trim() : ''
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return json(400, { error: 'to must be an email' })
+      const subject = typeof body.subject === 'string' ? body.subject.slice(0, 200) : 'OpenMind'
+      const bodyText = typeof body.body === 'string' ? body.body.slice(0, 20_000) : ''
+      const raw = rfc822Base64Url(to, subject, bodyText)
+      const sent = await githubJson(host, headers, 'POST', '/gmail/v1/users/me/messages/send', { raw })
+      if (!sent.ok) {
+        const err = typeof sent.data.message === 'string' ? sent.data.message : sent.text.slice(0, 240)
+        return json(sent.status, { error: err })
+      }
+      return json(200, { id: sent.data.id, threadId: sent.data.threadId })
+    }
+
+    if (action === 'gdrive.list') {
+      const query = typeof body.query === 'string' ? body.query.replace(/['\\]/g, '').slice(0, 120) : ''
+      const q = query ? `&q=${encodeURIComponent(`name contains '${query}'`)}` : ''
+      const listed = await githubJson(
+        host,
+        headers,
+        'GET',
+        `/drive/v3/files?pageSize=8&fields=files(id,name,mimeType,webViewLink)${q}`,
+      )
+      if (!listed.ok) {
+        const err = typeof listed.data.message === 'string' ? listed.data.message : listed.text.slice(0, 240)
+        return json(listed.status, { error: err })
+      }
+      const files = Array.isArray(listed.data.files) ? listed.data.files as { name?: string; webViewLink?: string }[] : []
+      return json(200, {
+        count: files.length,
+        names: files.map((f) => f.name).filter(Boolean).join(', '),
+        files,
+      })
+    }
   } catch (err) {
     return json(502, { error: err instanceof Error ? err.message : String(err) })
   }
@@ -208,6 +246,11 @@ function utf8ToBase64(text: string): string {
   let bin = ''
   for (const b of bytes) bin += String.fromCharCode(b)
   return btoa(bin)
+}
+
+function rfc822Base64Url(to: string, subject: string, body: string): string {
+  const msg = `To: ${to}\r\nSubject: ${subject.replace(/[\r\n]+/g, ' ')}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+  return utf8ToBase64(msg).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 async function githubJson(

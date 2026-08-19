@@ -59,14 +59,41 @@ export function parseWorkspaceSpace(value: unknown): WorkspaceSpace | undefined 
   }
 }
 
+export const USER_REQUEST_MARKER = '\n\nUser request:\n'
+
+/** Drop the crew workspace prefix so tool parsers never treat it as a filename or commit message. */
+export function stripWorkspacePrompt(input: string): string {
+  const idx = input.indexOf(USER_REQUEST_MARKER)
+  if (idx >= 0) return input.slice(idx + USER_REQUEST_MARKER.length).trim()
+  return input.trim()
+}
+
 export function workspacePrompt(space: WorkspaceSpace, userPrompt: string): string {
   const where =
     space.kind === 'github'
       ? `Coding space: GitHub repo ${space.repoName ?? space.slug} (default branch ${space.branch})${space.repoUrl ? ` — ${space.repoUrl}` : ''}. ` +
-        `Commit real files with github_write_file (one-line JSON: {"path","message","content","branch"?}). ` +
+        `Commit real files with github_write_file. Required one-line JSON: {"path","content"} (optional "message","branch"). Never pass this workspace prompt as the tool input. ` +
         `Do not invent fake files only in chat. Stay on ${space.branch} unless you create a feature branch from main and open a pull request into main.`
       : space.kind === 'slack'
         ? `Delivery space: Slack ${space.channel ?? '#general'}. Write the answer so it can be pasted as Slack updates.`
         : 'Delivery space: this OpenMind thread only.'
   return `${where}\n${space.summary}\n\nUser request:\n${userPrompt}`
+}
+
+/** Mock GitHub space when createRepo fails — never invent github.com/openmind/... */
+export function mockGithubWorkspace(
+  slug: string,
+  summary: string,
+  linked?: { connectionId?: string; providerId: string },
+): WorkspaceSpace {
+  return {
+    kind: 'github',
+    slug,
+    branch: 'main',
+    source: 'mock',
+    repoName: slug,
+    connectionId: linked?.connectionId,
+    providerId: linked?.providerId,
+    summary,
+  }
 }

@@ -16,6 +16,7 @@ import {
   Mic,
   MoreHorizontal,
   Paperclip,
+  Plug,
   Plus,
   Presentation,
   Search,
@@ -69,6 +70,9 @@ import {
   workspacePrompt,
   type WorkspaceKind,
 } from '@/lib/workspace'
+import ConnectAppsSheet from '@/components/mobile/ConnectAppsSheet'
+import { getSession } from '@/lib/auth'
+import { setNangoOwner } from '@/lib/nango'
 
 const MOBILE_ASSISTANT: Employee = {
   id: 'openmind',
@@ -76,7 +80,7 @@ const MOBILE_ASSISTANT: Employee = {
   role: 'General Assistant',
   prompt:
     'You are a capable, practical assistant. Break work into clear steps, use tools when useful, and be honest about what you can and cannot access.',
-    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr'],
+    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gdrive_list'],
   connections: ['github', 'gdrive', 'slack'],
   accent: '#ff4d00',
   tagline: 'Research, reason and get work done',
@@ -397,6 +401,7 @@ export default function MobileApp() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const [appsOpen, setAppsOpen] = useState(false)
   const [provider, setProvider] = useState<MobileProviderConfig>(() => loadMobileProvider())
   const [voice, setVoice] = useState<MobileVoiceSettings>(() => loadMobileVoiceSettings())
   const [recording, setRecording] = useState(false)
@@ -459,6 +464,12 @@ export default function MobileApp() {
   useEffect(() => {
     localStorage.setItem(MOBILE_THREADS_KEY, JSON.stringify(threads))
   }, [threads])
+
+  useEffect(() => {
+    void getSession().then((session) => {
+      if (session?.user.id) setNangoOwner(session.user.id)
+    })
+  }, [])
 
   useEffect(() => {
     const goOnline = () => setOnline(true)
@@ -724,6 +735,14 @@ export default function MobileApp() {
             </span>
             <button
               type="button"
+              onClick={() => setAppsOpen(true)}
+              className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5"
+              aria-label="Connect your apps"
+            >
+              <Plug className="h-[18px] w-[18px]" />
+            </button>
+            <button
+              type="button"
               onClick={newThread}
               className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5"
               aria-label="New session"
@@ -751,7 +770,7 @@ export default function MobileApp() {
                   What can I help you do?
                 </h1>
                 <p className="mx-auto mt-3 max-w-md text-center text-sm leading-6 text-[#77746d]">
-                  Pick GitHub, Slack, or this chat. The first message creates the space if that app is connected.
+                  Connect GitHub / Slack / Gmail, then pick where work should land.
                 </p>
                 <div className="mt-8 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                   {STARTERS.map((starter, index) => (
@@ -1013,6 +1032,7 @@ export default function MobileApp() {
         </div>
       </main>
 
+      <ConnectAppsSheet open={appsOpen} onClose={() => setAppsOpen(false)} />
       <AssistantPicker
         open={pickerOpen}
         selected={selectedEmployee}

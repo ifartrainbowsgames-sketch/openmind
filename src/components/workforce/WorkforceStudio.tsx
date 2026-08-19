@@ -595,7 +595,14 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
       {tab === 'connections' && (
         <div className="space-y-6">
           <ConnectorMarketplace onLinked={setLiveConfigs} />
-          <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />
+          <details className="border border-border/60 bg-card">
+            <summary className="cursor-pointer px-5 py-3 font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-accent">
+              Advanced
+            </summary>
+            <div className="border-t border-border/40">
+              <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />
+            </div>
+          </details>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 import { getSession } from './auth'
-import { nangoLinked } from './nango'
+import { customerConnectError, nangoLinked } from './nango'
 import { SUPABASE_KEY, SUPABASE_URL, isSupabaseConfigured } from './supabase'
-import { repoSlug, type WorkspaceKind, type WorkspaceSpace } from './workspace'
+import { mockGithubWorkspace, repoSlug, type WorkspaceKind, type WorkspaceSpace } from './workspace'
 
 export function defaultWorkspaceKind(): WorkspaceKind {
   if (nangoLinked('github')) return 'github'
@@ -10,7 +10,7 @@ export function defaultWorkspaceKind(): WorkspaceKind {
 }
 
 async function nangoAct(body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  if (!isSupabaseConfigured || !SUPABASE_URL) throw new Error('nango-act is not deployed')
+  if (!isSupabaseConfigured || !SUPABASE_URL) throw new Error('Couldn’t reach Connect. Try again in a moment.')
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (SUPABASE_KEY) headers.Authorization = `Bearer ${SUPABASE_KEY}`
   const res = await fetch(`${SUPABASE_URL.replace(/\/$/, '')}/functions/v1/nango-act`, {
@@ -20,7 +20,7 @@ async function nangoAct(body: Record<string, unknown>): Promise<Record<string, u
     signal: AbortSignal.timeout(25_000),
   })
   const data = (await res.json()) as Record<string, unknown> & { error?: string }
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`)
+  if (!res.ok) throw new Error(customerConnectError(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`))
   return data
 }
 
@@ -34,12 +34,10 @@ export async function provisionWorkspace(kind: WorkspaceKind, prompt: string): P
   if (kind === 'github') {
     const linked = nangoLinked('github')
     if (!linked) {
-      return {
-        kind, slug, branch: 'main', source: 'mock',
-        repoName: slug,
-        repoUrl: `https://github.com/openmind/${slug}`,
-        summary: `GitHub is not connected. Connect GitHub in the marketplace, then I can create \`${slug}\` on branch main. For now this is a simulated repo URL.`,
-      }
+      return mockGithubWorkspace(
+        slug,
+        `GitHub is not connected. Connect your GitHub in the app, then I can create \`${slug}\` on main in your account.`,
+      )
     }
     try {
       const session = await getSession()
@@ -62,13 +60,12 @@ export async function provisionWorkspace(kind: WorkspaceKind, prompt: string): P
         summary: `Created GitHub repo ${fullName} on branch main. Use github_write_file to commit there — not chat-only dumps.`,
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return {
-        kind, slug, branch: 'main', source: 'mock',
-        repoName: slug,
-        repoUrl: `https://github.com/openmind/${slug}`,
-        summary: `Could not create the GitHub repo yet (${msg}). Simulated space \`${slug}\` on main — connect GitHub in Nango and retry.`,
-      }
+      const msg = customerConnectError(err)
+      return mockGithubWorkspace(
+        slug,
+        `Could not create the GitHub repo yet (${msg}). Connect your GitHub and try a new session.`,
+        linked,
+      )
     }
   }
 
@@ -76,7 +73,7 @@ export async function provisionWorkspace(kind: WorkspaceKind, prompt: string): P
   if (!linked) {
     return {
       kind, slug, branch: 'main', source: 'mock', channel: '#general',
-      summary: 'Slack is not connected. Connect Slack in the marketplace to post this brief. Simulated post to #general.',
+      summary: 'Slack is not connected. Connect Slack to post this brief. Simulated post to #general.',
     }
   }
   try {
@@ -94,7 +91,7 @@ export async function provisionWorkspace(kind: WorkspaceKind, prompt: string): P
       summary: `Posted the project brief to Slack #general. Updates from this crew will go there.`,
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
+    const msg = customerConnectError(err)
     return {
       kind, slug, branch: 'main', source: 'mock', channel: '#general',
       summary: `Could not post to Slack yet (${msg}). Simulated #general post.`,

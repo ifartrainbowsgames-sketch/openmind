@@ -3,8 +3,11 @@ import {
   buildNangoGithubAction,
   invokeCrewTool,
   mockCrewTool,
+  parseGmailSendInput,
+  parseGithubBranchInput,
   parseGithubPrInput,
   parseGithubWriteInput,
+  parseSlackPostInput,
   setActiveWorkspace,
 } from './crew-tools'
 import type { WorkspaceSpace } from './workspace'
@@ -102,5 +105,47 @@ describe('GitHub write/PR routing', () => {
 
   it('parses a PR title from free text', () => {
     expect(parseGithubPrInput('Add home screen\nmore', 'main').title).toBe('Add home screen')
+  })
+
+  it('does not treat a GitHub workspace prompt blob as a file or branch', () => {
+    const blob =
+      'Coding space: GitHub repo me/hi (default branch main) — https://github.com/openmind/hi. ' +
+      'Commit real files with github_write_file. Required one-line JSON: {"path","content"}.\n' +
+      'Created GitHub repo.\n\nUser request:\nAdd a home screen'
+    const file = parseGithubWriteInput(blob)
+    expect(file.path).toBe('README.md')
+    expect(file.message).not.toMatch(/Coding space/i)
+    expect(file.content).toContain('Add a home screen')
+    expect(file.content).not.toMatch(/Coding space: GitHub/)
+    expect(parseGithubBranchInput(blob, 'main').name).toBe('openmind')
+    expect(parseGithubBranchInput(blob, 'main').name).not.toBe('Coding')
+  })
+
+  it('still prefers required JSON {"path","content"} even after a workspace prefix', () => {
+    const blob =
+      'Coding space: GitHub repo me/hi (default branch main).\n\nUser request:\n' +
+      '{"path":"src/Home.tsx","message":"home","content":"export const Home = () => null"}'
+    expect(parseGithubWriteInput(blob)).toMatchObject({
+      path: 'src/Home.tsx',
+      message: 'home',
+      content: 'export const Home = () => null',
+    })
+  })
+})
+
+describe('Nango app tools (Slack / Gmail / Drive)', () => {
+  it('parses slack and gmail JSON', () => {
+    expect(parseSlackPostInput('{"text":"hi","channel":"eng"}')).toEqual({ text: 'hi', channel: 'eng' })
+    expect(parseGmailSendInput('{"to":"a@b.com","subject":"Hi","body":"yo"}')).toEqual({
+      to: 'a@b.com',
+      subject: 'Hi',
+      body: 'yo',
+    })
+  })
+
+  it('mocks slack / gmail / drive when not connected', async () => {
+    await expect(invokeCrewTool('slack_post', '{"text":"shipped"}')).resolves.toMatch(/\[MOCK · slack_post\]/)
+    await expect(invokeCrewTool('gmail_send', '{"to":"a@b.com","subject":"x","body":"y"}')).resolves.toMatch(/\[MOCK · gmail_send\]/)
+    await expect(invokeCrewTool('gdrive_list', '{"query":"brief"}')).resolves.toMatch(/\[MOCK · gdrive_list\]/)
   })
 })

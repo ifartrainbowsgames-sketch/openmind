@@ -8,6 +8,7 @@ import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { analyzeSentiment, retrievePassages, summarize } from './demo'
 import { invokeCrewTool } from './crew-tools'
 import { callServerTool, listServerTools, restFetch, type McpServerSpec } from './mcp'
+import { stripWorkspacePrompt } from './workspace'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -185,7 +186,7 @@ TOOL_REGISTRY.run_code = {
 TOOL_REGISTRY.github_write_file = {
   id: 'github_write_file',
   name: 'GitHub write file',
-  desc: 'Commit a file to the GitHub · main workspace via Nango. One-line JSON: {"path","message","content","branch?"}.',
+  desc: 'Commit a file to the GitHub · main workspace. Required one-line JSON only: {"path","content"} with optional "message" and "branch". Do not pass the workspace prompt.',
   run: (q) => invokeCrewTool('github_write_file', q),
 }
 
@@ -201,6 +202,27 @@ TOOL_REGISTRY.github_open_pr = {
   name: 'GitHub open PR',
   desc: 'Open a pull request into main. One-line JSON: {"title","body?","head","base?"}.',
   run: (q) => invokeCrewTool('github_open_pr', q),
+}
+
+TOOL_REGISTRY.slack_post = {
+  id: 'slack_post',
+  name: 'Slack post',
+  desc: 'Post to Slack. One-line JSON: {"text","channel?"}. Connect Slack first.',
+  run: (q) => invokeCrewTool('slack_post', q),
+}
+
+TOOL_REGISTRY.gmail_send = {
+  id: 'gmail_send',
+  name: 'Gmail send',
+  desc: 'Send mail from Gmail. One-line JSON: {"to","subject","body"}. Connect Gmail first.',
+  run: (q) => invokeCrewTool('gmail_send', q),
+}
+
+TOOL_REGISTRY.gdrive_list = {
+  id: 'gdrive_list',
+  name: 'Drive list',
+  desc: 'List Google Drive files. Optional JSON: {"query"}. Connect Drive first.',
+  run: (q) => invokeCrewTool('gdrive_list', q),
 }
 
 // ── Connections — external apps as agent tools ───────────────────────────────
@@ -387,7 +409,7 @@ export const MCP_PRESETS: Record<string, McpPreset> = {
   gmail: {
     connectionId: 'gmail', mode: 'aggregator',
     auth: 'bearer', tokenLabel: 'Aggregator MCP URL + key (Composio / Zapier / Klavis)',
-    note: 'Google ships no first-party Gmail MCP — paste the MCP server URL from your aggregator of choice.',
+    note: 'Prefer Nango Connect (Google) so the crew can gmail_send. Or paste a self-hosted MCP URL from @modelcontextprotocol/servers.',
   },
   gcal: {
     connectionId: 'gcal', mode: 'aggregator',
@@ -397,7 +419,7 @@ export const MCP_PRESETS: Record<string, McpPreset> = {
   gdrive: {
     connectionId: 'gdrive', mode: 'aggregator',
     auth: 'bearer', tokenLabel: 'Aggregator MCP URL + key (Composio / Zapier / Klavis)',
-    note: 'No first-party Drive MCP — bring an aggregator URL.',
+    note: 'Prefer Nango Connect (google-drive) so the crew can gdrive_list. Official OSS MCP is stdio (@modelcontextprotocol/server-filesystem) if you tunnel it here.',
   },
   outlook: {
     connectionId: 'outlook', mode: 'aggregator',
@@ -833,12 +855,20 @@ export function simulatedBrain(): AgentBrain {
         push('web_search', input)
       if (/\b(run this|execute|sandbox|python -c)\b/i.test(input) && has('run_code'))
         push('run_code', input)
-      if (has('github_write_file') && /github_write_file|Coding space: GitHub|\b(commit|write files?)\b/i.test(input))
-        push('github_write_file', input)
-      if (has('github_create_branch') && /github_create_branch|feature branch from main/i.test(input))
-        push('github_create_branch', input)
-      if (has('github_open_pr') && /github_open_pr|\bopen a (pr|pull request)\b/i.test(input))
-        push('github_open_pr', input)
+      const user = stripWorkspacePrompt(input)
+      const writeJson = user.match(/\{\s*"path"\s*:\s*"[\s\S]*"content"\s*:/) ? user.match(/\{[\s\S]*\}/)?.[0] : undefined
+      if (has('github_write_file') && (/github_write_file|Coding space: GitHub/i.test(input) || /\b(commit|write files?)\b/i.test(user)))
+        push('github_write_file', writeJson ?? user)
+      if (has('github_create_branch') && /github_create_branch|feature branch from main/i.test(user))
+        push('github_create_branch', user)
+      if (has('github_open_pr') && /github_open_pr|\bopen a (pr|pull request)\b/i.test(user))
+        push('github_open_pr', user)
+      if (has('slack_post') && /slack_post|\b(slack|post to (the )?channel)\b/i.test(input))
+        push('slack_post', input)
+      if (has('gmail_send') && /gmail_send|\b(send (an? )?e-?mail|email .+@)\b/i.test(input))
+        push('gmail_send', input)
+      if (has('gdrive_list') && /gdrive_list|\b(google drive|list (my )?files)\b/i.test(input))
+        push('gdrive_list', input)
       for (const { re, ids } of CONNECTION_ROUTES) {
         if (steps.length >= 3) break
         if (ids.includes('github') && steps.some((s) => s.tool.startsWith('github_'))) continue

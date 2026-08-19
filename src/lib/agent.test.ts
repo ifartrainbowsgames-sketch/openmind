@@ -129,7 +129,10 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
       prompt,
     )
     expect(r.plan.map((p) => p.tool)).toContain('github_write_file')
+    expect(r.plan.map((p) => p.tool)).not.toContain('github_create_branch')
+    expect(r.plan.find((p) => p.tool === 'github_write_file')?.input).not.toMatch(/^Coding space:/)
     expect(r.toolCalls.find((c) => c.tool === 'github_write_file')?.output).toMatch(/\[MOCK · github_write_file\]/)
+    expect(r.toolCalls.find((c) => c.tool === 'github_write_file')?.output).not.toMatch(/Coding space/)
   })
 
   it('parses a github_write_file plan line', () => {

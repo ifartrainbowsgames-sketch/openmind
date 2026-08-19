@@ -1,17 +1,13 @@
 import { useMemo, useState } from 'react'
 import { CheckCircle2, Loader2, Plug, Search, Unplug } from 'lucide-react'
-import { getSession } from '@/lib/auth'
-import { createNangoSession, openNangoConnectUi } from '@/lib/nango-connect'
+import { connectProvider, customerConnectError, disconnectProvider } from '@/lib/nango-connect'
 import {
   loadNangoConnections,
   nangoCatalog,
   nangoLogoUrl,
-  NANGO_TO_OPENMIND,
-  removeNangoConnection,
   searchNangoProviders,
-  upsertNangoConnection,
 } from '@/lib/nango'
-import { upsertLiveConnection, type LiveConnectionConfig } from '@/lib/agent'
+import type { LiveConnectionConfig } from '@/lib/agent'
 import { inputCls } from '@/components/demos/shared'
 
 const PAGE = 60
@@ -37,54 +33,33 @@ export default function ConnectorMarketplace({ onLinked }: Props) {
     setError(null)
     setBusyId(providerId)
     try {
-      const session = await getSession()
-      const token = await createNangoSession(providerId, {
-        id: session?.user.id ?? 'openmind-local',
-        email: session?.user.email ?? 'openmind@local',
-      })
-      openNangoConnectUi(token, (event) => {
+      await connectProvider(providerId, (event) => {
         if (event.type === 'connect') {
-          const next = upsertNangoConnection({
-            providerId,
-            connectionId: event.connectionId,
-            connectedAt: Date.now(),
-          })
-          setLinked(next)
-          const omId = NANGO_TO_OPENMIND[providerId]
-          if (omId) {
-            onLinked?.(upsertLiveConnection({
-              connectionId: omId,
-              mode: 'mcp',
-              serverUrl: `nango://${providerId}`,
-              status: 'live',
-              toolNames: [omId],
-            }))
-          }
+          setLinked(loadNangoConnections())
+          if (event.live) onLinked?.(event.live)
         }
         setBusyId(null)
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(customerConnectError(err))
       setBusyId(null)
     }
   }
 
   const disconnect = (providerId: string) => {
-    setLinked(removeNangoConnection(providerId))
+    setLinked(disconnectProvider(providerId))
   }
 
   return (
     <div className="border border-border/60 bg-card p-5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <span className="spec-label">Connector marketplace — Nango · {catalog.count} APIs</span>
+        <span className="spec-label">Connect more apps · {catalog.count} available</span>
         <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {linked.length} connected · {matches.length} shown
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Search the full Nango catalog and connect with a browser OAuth flow (same idea as Claude / ChatGPT).
-        Tokens stay in Nango. Deploy <span className="text-foreground">nango-session</span> with
-        {' '}<span className="text-foreground">NANGO_SECRET_KEY</span> to enable Connect.
+        Connect GitHub / Slack / Gmail and hundreds of other apps. Sign in in the browser — the crew can use them right after.
       </p>
 
       <div className="relative mb-3">

@@ -121,7 +121,7 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Advanced — paste an MCP URL or Zendesk token if you are not using the Nango marketplace above.
+        Advanced — paste an MCP URL or Zendesk token if you are not using Connect apps.
         Mock data until you connect. Tokens stay in this browser.
       </p>
 
