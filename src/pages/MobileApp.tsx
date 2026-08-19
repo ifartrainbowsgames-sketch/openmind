@@ -9,8 +9,11 @@ import {
   ChevronDown,
   Code2,
   FileText,
+  Github,
+  Hash,
   History,
   Menu,
+  Mic,
   MoreHorizontal,
   Paperclip,
   Plus,
@@ -19,17 +22,37 @@ import {
   Sparkles,
   SquarePen,
   Trash2,
+  Volume2,
   Wifi,
   WifiOff,
   X,
 } from 'lucide-react'
 import { PRESET_EMPLOYEES } from '@/data/employees'
 import {
-  runEmployee,
+  liveBrain,
   simulatedBrain,
   type Employee,
   type TraceLine,
 } from '@/lib/agent'
+import { assembleCrew, runCrew } from '@/lib/crew'
+import {
+  loadMobileVoiceSettings,
+  OPENAI_TTS_VOICES,
+  playOpenAiSpeech,
+  recordMicrophone,
+  saveMobileVoiceSettings,
+  stopOpenAiSpeech,
+  transcribeOpenAi,
+  type MobileVoiceSettings,
+  type OpenAiTtsVoice,
+} from '@/lib/openai-voice'
+import {
+  loadMobileProvider,
+  mobileLiveReady,
+  resolveMobileProviderSpec,
+  saveMobileProvider,
+  type MobileProviderConfig,
+} from '@/lib/mobile-provider'
 import {
   MOBILE_THREADS_KEY,
   createMobileThread,
@@ -40,6 +63,12 @@ import {
   type MobileMessage,
   type MobileThread,
 } from '@/lib/mobile-chat'
+import { defaultWorkspaceKind, provisionWorkspace } from '@/lib/workspace-act'
+import {
+  WORKSPACE_CHOICES,
+  workspacePrompt,
+  type WorkspaceKind,
+} from '@/lib/workspace'
 
 const MOBILE_ASSISTANT: Employee = {
   id: 'openmind',
@@ -47,7 +76,7 @@ const MOBILE_ASSISTANT: Employee = {
   role: 'General Assistant',
   prompt:
     'You are a capable, practical assistant. Break work into clear steps, use tools when useful, and be honest about what you can and cannot access.',
-  tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review'],
+    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr'],
   connections: ['github', 'gdrive', 'slack'],
   accent: '#ff4d00',
   tagline: 'Research, reason and get work done',
@@ -258,19 +287,169 @@ function AssistantPicker({
   )
 }
 
+function VoiceSheet({
+  open,
+  provider,
+  voice,
+  onClose,
+  onProviderChange,
+  onVoiceChange,
+}: {
+  open: boolean
+  provider: MobileProviderConfig
+  voice: MobileVoiceSettings
+  onClose: () => void
+  onProviderChange: (next: MobileProviderConfig) => void
+  onVoiceChange: (next: MobileVoiceSettings) => void
+}) {
+  if (!open) return null
+  const spec = resolveMobileProviderSpec(provider)
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center lg:items-center" role="dialog" aria-modal="true" aria-label="Voice settings">
+      <button className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={onClose} aria-label="Close voice settings" />
+      <div className="mobile-sheet-in relative z-10 w-full rounded-t-[28px] bg-white px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-2xl lg:max-w-md lg:rounded-[24px] lg:p-5">
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-black/15 lg:hidden" />
+        <div className="mb-4 flex items-center justify-between px-1">
+          <div>
+            <h2 className="text-lg font-semibold tracking-[-0.02em]">Voice & model</h2>
+            <p className="mt-0.5 text-xs text-[#85827b]">OpenAI Whisper in · OpenAI voices out. Key stays on your device.</p>
+          </div>
+          <button onClick={onClose} className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full bg-[#f3f1ed]" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">OpenAI API key</label>
+        <input
+          type="password"
+          value={provider.apiKey}
+          onChange={(event) => onProviderChange({ ...provider, apiKey: event.target.value })}
+          placeholder="sk-..."
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
+        <p className="mt-1.5 text-[11px] text-[#aaa7a0]">
+          Chat uses {spec.model}. Search and browse are open-source by default (DuckDuckGo + Jina) once agent-tools is deployed. Keys below are optional upgrades.
+        </p>
+        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Tavily (optional search upgrade)</label>
+        <input
+          type="password"
+          value={provider.tavilyKey ?? ''}
+          onChange={(event) => onProviderChange({ ...provider, tavilyKey: event.target.value })}
+          placeholder="tvly-... leave empty to use DuckDuckGo"
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
+        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Firecrawl (optional browse upgrade)</label>
+        <input
+          type="password"
+          value={provider.firecrawlKey ?? ''}
+          onChange={(event) => onProviderChange({ ...provider, firecrawlKey: event.target.value })}
+          placeholder="fc-... leave empty to use Jina / fetch"
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
+        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">E2B (run code)</label>
+        <input
+          type="password"
+          value={provider.e2bKey ?? ''}
+          onChange={(event) => onProviderChange({ ...provider, e2bKey: event.target.value })}
+          placeholder="e2b_... (optional)"
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
+        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Voice</label>
+        <select
+          value={voice.voice}
+          onChange={(event) => onVoiceChange({ ...voice, voice: event.target.value as OpenAiTtsVoice })}
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+        >
+          {OPENAI_TTS_VOICES.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <label className="mt-4 flex items-center gap-2 text-sm text-[#44413c]">
+          <input
+            type="checkbox"
+            checked={voice.autoSpeak}
+            onChange={(event) => onVoiceChange({ ...voice, autoSpeak: event.target.checked })}
+            className="h-4 w-4 rounded border-black/20"
+          />
+          Read replies aloud automatically
+        </label>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mobile-tap mt-5 w-full rounded-xl bg-[#17140f] py-3 text-sm font-medium text-white"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function MobileApp() {
   const [threads, setThreads] = useState<MobileThread[]>(getStoredThreads)
   const [activeId, setActiveId] = useState(() => threads[0].id)
   const [draft, setDraft] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  const [provider, setProvider] = useState<MobileProviderConfig>(() => loadMobileProvider())
+  const [voice, setVoice] = useState<MobileVoiceSettings>(() => loadMobileVoiceSettings())
+  const [recording, setRecording] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [speakingId, setSpeakingId] = useState<string | null>(null)
   const [pendingThreadId, setPendingThreadId] = useState<string | null>(null)
   const [liveTrace, setLiveTrace] = useState<TraceLine[]>([])
   const [attachment, setAttachment] = useState<PendingAttachment | null>(null)
+  const [destination, setDestination] = useState<WorkspaceKind>(() => defaultWorkspaceKind())
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine))
   const fileRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const recordingRef = useRef<{ stop: () => void } | null>(null)
+
+  const liveReady = mobileLiveReady(provider)
+  const providerSpec = resolveMobileProviderSpec(provider)
+  const openAiVoiceReady = provider.providerId === 'openai' && provider.apiKey.trim().length > 0
+
+  const brain = () =>
+    liveReady
+      ? liveBrain({
+          baseUrl: providerSpec.baseUrl,
+          model: providerSpec.model,
+          key: provider.apiKey.trim(),
+          fixedParams: providerSpec.fixedParams,
+        })
+      : simulatedBrain()
+
+  const persistProvider = (next: MobileProviderConfig) => {
+    setProvider(next)
+    saveMobileProvider(next)
+  }
+
+  const persistVoice = (next: MobileVoiceSettings) => {
+    setVoice(next)
+    saveMobileVoiceSettings(next)
+  }
+
+  const speakReply = async (messageId: string, text: string) => {
+    if (!openAiVoiceReady) {
+      setVoiceOpen(true)
+      return
+    }
+    setSpeakingId(messageId)
+    try {
+      await playOpenAiSpeech(provider.apiKey.trim(), text, voice.voice)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSpeakingId(null)
+    }
+  }
 
   const activeThread = threads.find((thread) => thread.id === activeId) ?? threads[0]
   const selectedEmployee =
@@ -313,6 +492,7 @@ export default function MobileApp() {
     setActiveId(thread.id)
     setDraft('')
     setAttachment(null)
+    setDestination(defaultWorkspaceKind())
     setDrawerOpen(false)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }
@@ -364,25 +544,43 @@ export default function MobileApp() {
     setLiveTrace([])
 
     try {
-      const result = await runEmployee(
-        simulatedBrain(),
-        employee,
-        runtimePrompt,
-        (line) => setLiveTrace((trace) => [...trace, line]),
-      )
+      const space = thread.workspace ?? (await provisionWorkspace(destination, text))
+      if (!thread.workspace) {
+        updateThread(threadId, (current) => ({ ...current, workspace: space, updatedAt: Date.now() }))
+      }
+      const crewPrompt = workspacePrompt(space, runtimePrompt)
+      const crew = assembleCrew(employee, crewPrompt)
+      const result = await runCrew(crewPrompt, brain(), {
+        employees: crew,
+        workspace: space,
+        onTrace: (line) => setLiveTrace((trace) => [...trace, line]),
+        toolKeys: {
+          tavily: provider.tavilyKey,
+          firecrawl: provider.firecrawlKey,
+          e2b: provider.e2bKey,
+        },
+      })
       const assistantMessage: MobileMessage = {
         id: makeId('message'),
         role: 'assistant',
         content: result.answer,
         createdAt: Date.now(),
         trace: result.trace,
-        toolCalls: result.toolCalls,
+        toolCalls: result.members.flatMap((mem) => mem.result.toolCalls),
+        crewRun: {
+          employeeIds: result.employeeIds,
+          memberNames: result.members.map((mem) => mem.name),
+          artifacts: result.artifacts,
+        },
       }
       updateThread(threadId, (current) => ({
         ...current,
         messages: [...current.messages, assistantMessage],
         updatedAt: Date.now(),
       }))
+      if (voice.autoSpeak && openAiVoiceReady) {
+        void speakReply(assistantMessage.id, assistantMessage.content)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The agent could not finish this request.'
       updateThread(threadId, (current) => ({
@@ -409,6 +607,40 @@ export default function MobileApp() {
     const readable = /^(text\/|application\/(json|csv))/.test(file.type) || /\.(md|txt|csv|json)$/i.test(file.name)
     const text = readable && file.size <= 250_000 ? await file.text() : undefined
     setAttachment({ name: file.name, text })
+  }
+
+  const toggleRecording = async () => {
+    if (transcribing || pendingThreadId) return
+    if (!openAiVoiceReady) {
+      setVoiceOpen(true)
+      return
+    }
+    if (recording) {
+      recordingRef.current?.stop()
+      return
+    }
+    try {
+      stopOpenAiSpeech()
+      setRecording(true)
+      const session = await recordMicrophone()
+      recordingRef.current = session
+      const blob = await session.done
+      setRecording(false)
+      recordingRef.current = null
+      setTranscribing(true)
+      const text = await transcribeOpenAi(provider.apiKey.trim(), blob)
+      if (text) {
+        setDraft((current) => (current ? `${current.trimEnd()} ${text}` : text))
+        requestAnimationFrame(() => textareaRef.current?.focus())
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Voice input failed'
+      setDraft((current) => current || `[Voice error: ${message}]`)
+    } finally {
+      setRecording(false)
+      setTranscribing(false)
+      recordingRef.current = null
+    }
   }
 
   const selectEmployee = (employee: Employee) => {
@@ -479,7 +711,11 @@ export default function MobileApp() {
                 </span>
                 <span className="mt-1 flex items-center gap-1 text-[10px] leading-none text-[#908d86]">
                   {online ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
-                  {online ? 'Ready' : 'Offline · local tools only'}
+                  {online
+                    ? liveReady
+                      ? `Live · ${providerSpec.name}`
+                      : 'Simulated · tap speaker to add key'
+                    : 'Offline'}
                 </span>
               </span>
             </button>
@@ -515,7 +751,7 @@ export default function MobileApp() {
                   What can I help you do?
                 </h1>
                 <p className="mx-auto mt-3 max-w-md text-center text-sm leading-6 text-[#77746d]">
-                  Choose a starting point or ask anything. Your agent can plan, use tools and report back.
+                  Pick GitHub, Slack, or this chat. The first message creates the space if that app is connected.
                 </p>
                 <div className="mt-8 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                   {STARTERS.map((starter, index) => (
@@ -543,6 +779,25 @@ export default function MobileApp() {
             </div>
           ) : (
             <div className="mx-auto w-full max-w-3xl space-y-7 px-4 py-7 sm:px-8 sm:py-10">
+              {activeThread.workspace && (
+                <div className="rounded-2xl border border-black/[0.07] bg-white px-3.5 py-2.5 text-[12px] leading-5 text-[#5f5c56]">
+                  <span className="font-medium text-[#37342f]">
+                    {activeThread.workspace.kind === 'github'
+                      ? `GitHub · ${activeThread.workspace.branch}`
+                      : activeThread.workspace.kind === 'slack'
+                        ? 'Slack'
+                        : 'OpenMind'}
+                  </span>
+                  {' · '}
+                  {activeThread.workspace.repoUrl ? (
+                    <a href={activeThread.workspace.repoUrl} className="text-[#ff4d00] underline-offset-2 hover:underline" target="_blank" rel="noreferrer">
+                      {activeThread.workspace.repoName ?? activeThread.workspace.slug}
+                    </a>
+                  ) : (
+                    activeThread.workspace.summary
+                  )}
+                </div>
+              )}
               {activeThread.messages.map((message) =>
                 message.role === 'user' ? (
                   <div key={message.id} className="mobile-message-in flex justify-end">
@@ -566,8 +821,37 @@ export default function MobileApp() {
                       <div className="mb-1.5 flex items-center gap-2">
                         <span className="text-xs font-semibold">{selectedEmployee.name}</span>
                         <span className="text-[10px] text-[#aaa7a0]">{formatTime(message.createdAt)}</span>
+                        {openAiVoiceReady && (
+                          <button
+                            type="button"
+                            onClick={() => void speakReply(message.id, message.content)}
+                            className="mobile-tap ml-auto flex h-7 w-7 items-center justify-center rounded-full text-[#8a8780] hover:bg-black/5"
+                            aria-label="Read reply aloud"
+                          >
+                            <Volume2 className={`h-3.5 w-3.5 ${speakingId === message.id ? 'text-[#ff4d00]' : ''}`} />
+                          </button>
+                        )}
                       </div>
                       <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#36332e]">{message.content}</div>
+                      {!!message.crewRun?.memberNames.length && (
+                        <p className="mt-2 text-[11px] text-[#7a7770]">
+                          Crew: {message.crewRun.memberNames.join(' · ')}
+                        </p>
+                      )}
+                      {!!message.crewRun?.artifacts.length && (
+                        <div className="mt-3 space-y-2">
+                          {message.crewRun.artifacts.map((artifact) => (
+                            <details key={artifact.id} className="rounded-xl border border-black/[0.07] bg-white">
+                              <summary className="cursor-pointer px-3 py-2 text-[11px] font-medium text-[#6f6c65]">
+                                {artifact.title} · {artifact.kind}
+                              </summary>
+                              <pre className="max-h-64 overflow-auto border-t border-black/[0.06] px-3 py-2 text-[11px] leading-5 text-[#4a4742] whitespace-pre-wrap">
+                                {artifact.body}
+                              </pre>
+                            </details>
+                          ))}
+                        </div>
+                      )}
                       {!!message.toolCalls?.length && (
                         <details className="mt-3 rounded-xl border border-black/[0.07] bg-white">
                           <summary className="cursor-pointer list-none px-3 py-2 text-[11px] font-medium text-[#6f6c65]">
@@ -621,6 +905,27 @@ export default function MobileApp() {
               </div>
             )}
             <div className="rounded-[22px] border border-black/[0.11] bg-white p-2 shadow-[0_8px_30px_rgba(36,32,26,0.09)] transition-shadow focus-within:shadow-[0_10px_36px_rgba(36,32,26,0.14)]">
+              {!hasMessages && (
+                <div className="mb-1 flex flex-wrap gap-1.5 px-1 pt-1">
+                  {WORKSPACE_CHOICES.map((choice) => (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      title={choice.hint}
+                      onClick={() => setDestination(choice.id)}
+                      disabled={!!pendingThreadId}
+                      className={`mobile-tap inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        destination === choice.id
+                          ? 'bg-[#17140f] text-white'
+                          : 'bg-[#f2f0ec] text-[#5f5c56] hover:bg-[#e8e5df]'
+                      }`}
+                    >
+                      {choice.id === 'github' ? <Github className="h-3 w-3" /> : choice.id === 'slack' ? <Hash className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+                      {choice.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <textarea
                 ref={textareaRef}
                 rows={1}
@@ -632,18 +937,35 @@ export default function MobileApp() {
                     void sendPrompt()
                   }
                 }}
-                placeholder={`Ask ${selectedEmployee.name} anything…`}
+                    placeholder={
+                      destination === 'github'
+                        ? 'Describe the project — I’ll create a GitHub repo on main…'
+                        : destination === 'slack'
+                          ? 'Describe the work — I’ll post it to Slack…'
+                          : 'Ask the crew anything…'
+                    }
                 className="block max-h-[120px] min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 outline-none placeholder:text-[#aaa7a0]"
                 disabled={!!pendingThreadId}
               />
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
-                  aria-label="Attach a file"
+                  onClick={() => void toggleRecording()}
+                  disabled={!!pendingThreadId || transcribing}
+                  className={`mobile-tap flex h-9 w-9 items-center justify-center rounded-full ${
+                    recording ? 'bg-[#ff4d00]/15 text-[#ff4d00]' : 'text-[#68655e] hover:bg-[#f2f0ec]'
+                  }`}
+                  aria-label={recording ? 'Stop recording' : 'Speak your message'}
                 >
-                  <Plus className="h-[18px] w-[18px]" />
+                  <Mic className={`h-[18px] w-[18px] ${recording ? 'animate-pulse' : ''}`} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVoiceOpen(true)}
+                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
+                  aria-label="Voice settings"
+                >
+                  <Volume2 className="h-[18px] w-[18px]" />
                 </button>
                 <input
                   ref={fileRef}
@@ -655,6 +977,14 @@ export default function MobileApp() {
                     event.target.value = ''
                   }}
                 />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
+                  aria-label="Attach a file"
+                >
+                  <Plus className="h-[18px] w-[18px]" />
+                </button>
                 <button
                   type="button"
                   onClick={() => setPickerOpen(true)}
@@ -688,6 +1018,14 @@ export default function MobileApp() {
         selected={selectedEmployee}
         onClose={() => setPickerOpen(false)}
         onPick={selectEmployee}
+      />
+      <VoiceSheet
+        open={voiceOpen}
+        provider={provider}
+        voice={voice}
+        onClose={() => setVoiceOpen(false)}
+        onProviderChange={persistProvider}
+        onVoiceChange={persistVoice}
       />
     </div>
   )

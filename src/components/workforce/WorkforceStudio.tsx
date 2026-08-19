@@ -18,6 +18,8 @@ import {
   simulatedBrain, liveBrain, toolName,
   type AgentBrain, type Employee, type LiveConnectionConfig, type PlanStep, type TraceLine,
 } from '@/lib/agent'
+import { runCrew, type CrewArtifact } from '@/lib/crew'
+import { MAX_HIRES } from '@/lib/staffing'
 import { planWorkforce, StaffingError, type StaffingStage } from '@/lib/llm-staffing'
 import { generateStaff, provisionPlan, type ProvisionStage } from '@/lib/staffing'
 import { loadCustomEmployees, PRESET_EMPLOYEES, saveCustomEmployees } from '@/data/employees'
@@ -27,6 +29,7 @@ import { inputCls, ModeStamp, RunButton, textareaCls } from '@/components/demos/
 import WorkforceMap from './WorkforceMap'
 import GraphFlow from './GraphFlow'
 import ConnectionsPanel, { connStatus } from './ConnectionsPanel'
+import ConnectorMarketplace from './ConnectorMarketplace'
 import ReportCard, { MiniScorecard } from './ReportCard'
 
 // ── types & constants ────────────────────────────────────────────────────────
@@ -38,6 +41,8 @@ interface Msg {
   error?: boolean
   score?: RunScore
   brainStamp?: string
+  artifacts?: CrewArtifact[]
+  crewNames?: string[]
 }
 
 type Autonomy = 'auto' | 'ask' | 'draft'
@@ -456,6 +461,53 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
     await executeRun(input, { draftMode: autonomy === 'draft' })
   }
 
+  const runTeam = async () => {
+    const input = draft.trim()
+    if (!input || running || planning || approval) return
+    setDraft('')
+    setApproval(null)
+    setMsgs((m) => [...m, { from: 'user', text: input }])
+    setRunning(true)
+    setLiveTrace([])
+    setFlowOpen(true)
+    const stamp = `${brainStamp} · CREW`
+    try {
+      const crew = roster.slice(0, MAX_HIRES)
+      const result = await runCrew(input, brain(), {
+        employees: crew,
+        onTrace: (line) => setLiveTrace((t) => [...t, line]),
+        configs: liveConfigs,
+      })
+      const trace = result.trace
+      const names = result.members.map((mem) => mem.name)
+      setMsgs((m) => [...m, {
+        from: 'agent',
+        text: '',
+        trace,
+        brainStamp: stamp,
+        artifacts: result.artifacts,
+        crewNames: names,
+      }])
+      await streamText(result.answer, (p) =>
+        setMsgs((m) => [...m.slice(0, -1), {
+          from: 'agent',
+          text: p,
+          trace,
+          brainStamp: stamp,
+          artifacts: result.artifacts,
+          crewNames: names,
+        }]),
+      )
+    } catch (err) {
+      setMsgs((m) => [
+        ...m,
+        { from: 'agent', text: `Crew failed — ${err instanceof Error ? err.message : String(err)}`, error: true },
+      ])
+    } finally {
+      setRunning(false)
+    }
+  }
+
   const activeTrace = running ? liveTrace : ([...msgs].reverse().find((m) => m.trace)?.trace ?? [])
   const liveCount = liveConfigs.filter((c) => c.status === 'live').length
 
@@ -540,7 +592,12 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
         </button>
       </div>
 
-      {tab === 'connections' && <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />}
+      {tab === 'connections' && (
+        <div className="space-y-6">
+          <ConnectorMarketplace onLinked={setLiveConfigs} />
+          <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />
+        </div>
+      )}
 
       {tab === 'studio' && (
         <>
@@ -816,7 +873,26 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                         {m.from === 'agent' && m.brainStamp && (
                           <div className="mt-1.5 font-mono-spec text-[9px] uppercase tracking-[0.16em] text-white/35">{m.brainStamp}</div>
                         )}
+                        {m.from === 'agent' && m.crewNames && m.crewNames.length > 0 && (
+                          <div className="mt-1.5 font-mono-spec text-[9px] uppercase tracking-[0.16em] text-white/35">
+                            crew · {m.crewNames.join(' · ')}
+                          </div>
+                        )}
                         {m.from === 'agent' && m.trace && m.trace.length > 0 && <TraceBlock trace={m.trace} />}
+                        {m.from === 'agent' && m.artifacts && m.artifacts.length > 0 && (
+                          <div className="mt-2 space-y-1 border border-white/15 p-2">
+                            {m.artifacts.map((artifact) => (
+                              <details key={artifact.id}>
+                                <summary className="cursor-pointer font-mono-spec text-[10px] uppercase tracking-[0.14em] text-white/50">
+                                  {artifact.title} · {artifact.kind}
+                                </summary>
+                                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-white/70">
+                                  {artifact.body}
+                                </pre>
+                              </details>
+                            ))}
+                          </div>
+                        )}
                         {m.from === 'agent' && m.score && <ReportCard score={m.score} employeeName={employee.name} />}
                       </div>
                     </div>
@@ -900,6 +976,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                   onKeyDown={(e) => { if (e.key === 'Enter') run() }}
                 />
                 <RunButton onClick={run} running={running || planning} label="Run" stopLabel="Working…" disabled={!draft.trim() || !!approval} />
+                <RunButton onClick={runTeam} running={running || planning} label="Run team" stopLabel="Crew…" disabled={!draft.trim() || !!approval} />
                 <span className="hidden items-center text-muted-foreground/40 sm:flex"><Send className="h-4 w-4" /></span>
               </div>
             </div>

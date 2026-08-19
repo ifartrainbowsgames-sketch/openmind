@@ -67,9 +67,10 @@ describe('tool registry', () => {
   it('sentiment scores feedback', () => {
     expect(TOOL_REGISTRY.sentiment.run('I love it, excellent work')).toMatch(/Positive/)
   })
-  it('summarize condenses text', () => {
+  it('summarize condenses text', async () => {
     const t = 'Cats are mammals. Cats sleep most of the day. The weather is nice. Cats hunt mice.'
-    expect(TOOL_REGISTRY.summarize.run(t).length).toBeLessThan(t.length)
+    const out = await Promise.resolve(TOOL_REGISTRY.summarize.run(t))
+    expect(out.length).toBeLessThan(t.length)
   })
 })
 
@@ -118,5 +119,24 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
   it('carries the owner prompt into the answer', async () => {
     const r = await runEmployee(simulatedBrain(), emp({ prompt: 'Always reply like a pirate.' }), 'Ahoy, what is 2+2?')
     expect(r.answer).toContain('pirate')
+  })
+
+  it('routes GitHub workspace coding to github_write_file, not chat-only dumps', async () => {
+    const prompt = 'Coding space: GitHub repo me/weather-app (default branch main). Use github_write_file.\n\nUser request:\nAdd a home screen'
+    const r = await runEmployee(
+      simulatedBrain(),
+      emp({ tools: ['github_write_file', 'github_open_pr', 'code_review'] }),
+      prompt,
+    )
+    expect(r.plan.map((p) => p.tool)).toContain('github_write_file')
+    expect(r.toolCalls.find((c) => c.tool === 'github_write_file')?.output).toMatch(/\[MOCK · github_write_file\]/)
+  })
+
+  it('parses a github_write_file plan line', () => {
+    const out = parsePlan(
+      'TOOL: github_write_file | {"path":"src/a.ts","message":"add","content":"x"}',
+      ['github_write_file'],
+    )
+    expect(out).toEqual([{ tool: 'github_write_file', input: '{"path":"src/a.ts","message":"add","content":"x"}' }])
   })
 })

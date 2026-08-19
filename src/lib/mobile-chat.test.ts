@@ -33,4 +33,72 @@ describe('mobile chat threads', () => {
     expect(sortMobileThreads(valid).map((thread) => thread.id)).toEqual(['new', 'old'])
     expect(parseMobileThreads('{nope')).toEqual([])
   })
+
+  it('keeps crewRun artifacts on assistant messages', () => {
+    const thread = {
+      id: 't1',
+      title: 'Research',
+      employeeId: 'openmind',
+      updatedAt: 9,
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          content: 'Done.',
+          createdAt: 9,
+          crewRun: {
+            employeeIds: ['otto', 'rex'],
+            memberNames: ['Otto', 'Rex'],
+            artifacts: [
+              { id: 'artifact-brief', kind: 'markdown', title: 'Crew brief', body: '# Research' },
+            ],
+          },
+        },
+      ],
+    }
+    const parsed = parseMobileThreads(JSON.stringify([thread]))
+    expect(parsed[0].messages[0].crewRun?.employeeIds).toEqual(['otto', 'rex'])
+    expect(parsed[0].messages[0].crewRun?.artifacts[0]).toMatchObject({
+      kind: 'markdown',
+      title: 'Crew brief',
+    })
+  })
+
+  it('strips invalid crewRun but keeps the message', () => {
+    const thread = {
+      id: 't1',
+      title: 'Bad',
+      employeeId: 'openmind',
+      updatedAt: 1,
+      messages: [
+        { id: 'ok', role: 'user', content: 'hi', createdAt: 1 },
+        { id: 'bad', role: 'assistant', content: 'x', createdAt: 2, crewRun: { employeeIds: 'nope' } },
+      ],
+    }
+    const parsed = parseMobileThreads(JSON.stringify([thread]))
+    expect(parsed).toHaveLength(1)
+    expect(parsed[0].messages).toHaveLength(2)
+    expect(parsed[0].messages[1].crewRun).toBeUndefined()
+  })
+
+  it('keeps a GitHub workspace on the thread', () => {
+    const thread = {
+      id: 't1',
+      title: 'Weather',
+      employeeId: 'openmind',
+      updatedAt: 1,
+      workspace: {
+        kind: 'github',
+        slug: 'weather-app',
+        branch: 'main',
+        source: 'live',
+        summary: 'Created repo.',
+        repoUrl: 'https://github.com/me/weather-app',
+        repoName: 'me/weather-app',
+      },
+      messages: [],
+    }
+    const parsed = parseMobileThreads(JSON.stringify([thread]))
+    expect(parsed[0].workspace).toMatchObject({ kind: 'github', branch: 'main', repoName: 'me/weather-app' })
+  })
 })

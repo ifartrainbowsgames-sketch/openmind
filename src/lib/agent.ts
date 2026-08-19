@@ -6,6 +6,7 @@
 
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { analyzeSentiment, retrievePassages, summarize } from './demo'
+import { invokeCrewTool } from './crew-tools'
 import { callServerTool, listServerTools, restFetch, type McpServerSpec } from './mcp'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -78,9 +79,7 @@ export interface ToolSpec {
   run: (input: string) => string | Promise<string>
 }
 
-export interface AgentTool extends ToolSpec {
-  run: (input: string) => string
-}
+export type AgentTool = ToolSpec
 
 /** Safe arithmetic — whitelist means no identifiers can reach Function. */
 export function calc(expr: string): string {
@@ -160,6 +159,48 @@ TOOL_REGISTRY.code_review = {
   name: 'Code review',
   desc: 'Static analysis of pasted code — bugs, smells, risks',
   run: reviewCode,
+}
+
+TOOL_REGISTRY.web_search = {
+  id: 'web_search',
+  name: 'Web search',
+  desc: 'Search the public web (DuckDuckGo / SearXNG; Tavily optional)',
+  run: (q) => invokeCrewTool('web_search', q),
+}
+
+TOOL_REGISTRY.browse_url = {
+  id: 'browse_url',
+  name: 'Browse URL',
+  desc: 'Read a URL to text (Jina Reader / fetch; Firecrawl optional)',
+  run: (q) => invokeCrewTool('browse_url', q),
+}
+
+TOOL_REGISTRY.run_code = {
+  id: 'run_code',
+  name: 'Run code',
+  desc: 'Execute Python in an E2B sandbox (mock if no key; no Docker on Edge Functions)',
+  run: (q) => invokeCrewTool('run_code', q),
+}
+
+TOOL_REGISTRY.github_write_file = {
+  id: 'github_write_file',
+  name: 'GitHub write file',
+  desc: 'Commit a file to the GitHub · main workspace via Nango. One-line JSON: {"path","message","content","branch?"}.',
+  run: (q) => invokeCrewTool('github_write_file', q),
+}
+
+TOOL_REGISTRY.github_create_branch = {
+  id: 'github_create_branch',
+  name: 'GitHub create branch',
+  desc: 'Create a branch from main on the GitHub workspace. One-line JSON: {"name","from?"}.',
+  run: (q) => invokeCrewTool('github_create_branch', q),
+}
+
+TOOL_REGISTRY.github_open_pr = {
+  id: 'github_open_pr',
+  name: 'GitHub open PR',
+  desc: 'Open a pull request into main. One-line JSON: {"title","body?","head","base?"}.',
+  run: (q) => invokeCrewTool('github_open_pr', q),
 }
 
 // ── Connections — external apps as agent tools ───────────────────────────────
@@ -784,8 +825,23 @@ export function simulatedBrain(): AgentBrain {
       if (math && /[+\-*/%]/.test(math[0]) && has('calculator')) push('calculator', math[0].trim())
       if (/\b(code|bug|refactor|function|script|typescript|javascript|python|review this)\b/i.test(input) && has('code_review'))
         push('code_review', input)
+      if (/\b(https?:\/\/[^\s]+)\b/i.test(input) && has('browse_url')) {
+        const url = input.match(/https?:\/\/[^\s]+/i)?.[0] ?? input
+        push('browse_url', url)
+      }
+      if (/\b(search the web|look up|latest|trends?|research|who is|what is happening)\b/i.test(input) && has('web_search'))
+        push('web_search', input)
+      if (/\b(run this|execute|sandbox|python -c)\b/i.test(input) && has('run_code'))
+        push('run_code', input)
+      if (has('github_write_file') && /github_write_file|Coding space: GitHub|\b(commit|write files?)\b/i.test(input))
+        push('github_write_file', input)
+      if (has('github_create_branch') && /github_create_branch|feature branch from main/i.test(input))
+        push('github_create_branch', input)
+      if (has('github_open_pr') && /github_open_pr|\bopen a (pr|pull request)\b/i.test(input))
+        push('github_open_pr', input)
       for (const { re, ids } of CONNECTION_ROUTES) {
         if (steps.length >= 3) break
+        if (ids.includes('github') && steps.some((s) => s.tool.startsWith('github_'))) continue
         const hit = ids.find(has)
         if (hit && re.test(input)) push(hit, input)
       }

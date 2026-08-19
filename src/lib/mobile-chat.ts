@@ -1,6 +1,14 @@
 import type { ToolCall, TraceLine } from './agent'
+import type { CrewArtifact } from './crew'
+import { parseWorkspaceSpace, type WorkspaceSpace } from './workspace'
 
 export const MOBILE_THREADS_KEY = 'openmind-mobile-threads-v1'
+
+export interface CrewRunSummary {
+  employeeIds: string[]
+  memberNames: string[]
+  artifacts: CrewArtifact[]
+}
 
 export interface MobileMessage {
   id: string
@@ -10,6 +18,7 @@ export interface MobileMessage {
   attachmentName?: string
   trace?: TraceLine[]
   toolCalls?: ToolCall[]
+  crewRun?: CrewRunSummary
 }
 
 export interface MobileThread {
@@ -18,6 +27,31 @@ export interface MobileThread {
   employeeId: string
   messages: MobileMessage[]
   updatedAt: number
+  workspace?: WorkspaceSpace
+}
+
+export function isCrewArtifact(value: unknown): value is CrewArtifact {
+  if (!value || typeof value !== 'object') return false
+  const artifact = value as Partial<CrewArtifact>
+  return (
+    typeof artifact.id === 'string' &&
+    (artifact.kind === 'markdown' || artifact.kind === 'html') &&
+    typeof artifact.title === 'string' &&
+    typeof artifact.body === 'string'
+  )
+}
+
+export function parseCrewRun(value: unknown): CrewRunSummary | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const run = value as Partial<CrewRunSummary>
+  if (!Array.isArray(run.employeeIds) || !run.employeeIds.every((id) => typeof id === 'string')) return undefined
+  if (!Array.isArray(run.memberNames) || !run.memberNames.every((name) => typeof name === 'string')) return undefined
+  if (!Array.isArray(run.artifacts) || !run.artifacts.every(isCrewArtifact)) return undefined
+  return {
+    employeeIds: run.employeeIds,
+    memberNames: run.memberNames,
+    artifacts: run.artifacts,
+  }
 }
 
 export function makeId(prefix = 'item'): string {
@@ -77,7 +111,16 @@ export function parseMobileThreads(raw: string | null): MobileThread[] {
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return sortMobileThreads(parsed.filter(isThread))
+    return sortMobileThreads(
+      parsed.filter(isThread).map((thread) => ({
+        ...thread,
+        workspace: parseWorkspaceSpace(thread.workspace),
+        messages: thread.messages.map((message) => {
+          const crewRun = parseCrewRun(message.crewRun)
+          return crewRun ? { ...message, crewRun } : { ...message, crewRun: undefined }
+        }),
+      })),
+    )
   } catch {
     return []
   }

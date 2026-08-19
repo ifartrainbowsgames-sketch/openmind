@@ -16,15 +16,15 @@ const emp = (over: Partial<Employee> = {}): Employee => ({
 })
 
 describe('connection tools', () => {
-  it('every connection has a callable tool that returns data', () => {
+  it('every connection has a callable tool that returns data', async () => {
     for (const id of CONNECTION_IDS) {
-      const out = CONNECTION_TOOLS[id].run('status')
+      const out = await Promise.resolve(CONNECTION_TOOLS[id].run('status'))
       expect(out.length, id).toBeGreaterThan(0)
     }
   })
 
-  it('filters by query keywords', () => {
-    const out = CONNECTION_TOOLS.gmail.run('any refund emails?')
+  it('filters by query keywords', async () => {
+    const out = await Promise.resolve(CONNECTION_TOOLS.gmail.run('any refund emails?'))
     expect(out.toLowerCase()).toContain('refund')
   })
 })
