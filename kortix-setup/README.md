@@ -1,5 +1,22 @@
 # Kortix / Suna deploy options
 
+## Start here: E2B (recommended)
+
+One command on a Linux machine with Docker:
+
+```bash
+git clone https://github.com/ifartrainbowsgames-sketch/openmind
+cd openmind/kortix-setup
+cp .env.example .env          # paste E2B_API_KEY (+ optional LLM keys)
+./e2b-deploy.sh
+```
+
+Opens a public URL on your phone and runs agent sandboxes on E2B ($100 free credits).
+
+**Needs:** laptop or VPS with Docker. **Skips:** Daytona, Railway, QStash, Tavily, Firecrawl.
+
+---
+
 Daytona often blocks signup ("use your primary or work email"). You still have three working paths.
 
 ## Quick pick
