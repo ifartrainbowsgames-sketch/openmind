@@ -20,7 +20,7 @@ const CORS: Record<string, string> = {
 const UPSTREAM_TIMEOUT_MS = 22_000
 const UA = 'OpenMind/1.0 (https://openmind.dev)'
 
-type ToolKind = 'web_search' | 'browse_url' | 'run_code'
+type ToolKind = 'web_search' | 'browse_url' | 'run_code' | 'web_act'
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +36,9 @@ function mock(kind: ToolKind, input: string): string {
   }
   if (kind === 'browse_url') {
     return `[MOCK · browse_url] Simulated extract for ${q.split(/\s+/)[0]}. Deploy agent-tools for Jina Reader / direct fetch.`
+  }
+  if (kind === 'web_act') {
+    return `[MOCK · web_act] Hosted Chrome not configured. Set BROWSERLESS_API_KEY. Task: ${q.slice(0, 240)}`
   }
   return `[MOCK · run_code] Simulated sandbox for:\n${q.slice(0, 300)}\nAdd E2B_API_KEY for real execution.`
 }
@@ -215,6 +218,74 @@ async function liveBrowse(input: string, keys: Record<string, unknown>): Promise
   throw new Error(errors.join(' · ') || 'browse failed')
 }
 
+function parseWebAct(input: string): { url: string; goal: string; steps: { click?: string; type?: { selector: string; text: string }; waitMs?: number }[] } {
+  const raw = input.trim()
+  if (raw.startsWith('{')) {
+    try {
+      const rec = JSON.parse(raw) as Record<string, unknown>
+      const url = typeof rec.url === 'string' ? rec.url.trim() : ''
+      const goal = typeof rec.goal === 'string' ? rec.goal : typeof rec.task === 'string' ? rec.task : ''
+      const steps = Array.isArray(rec.steps) ? rec.steps.slice(0, 8) : []
+      const parsed = steps.map((s) => {
+        if (!s || typeof s !== 'object') return null
+        const row = s as Record<string, unknown>
+        if (typeof row.click === 'string') return { click: row.click.slice(0, 200) }
+        if (row.type && typeof row.type === 'object') {
+          const t = row.type as Record<string, unknown>
+          if (typeof t.selector === 'string' && typeof t.text === 'string') {
+            return { type: { selector: t.selector.slice(0, 200), text: t.text.slice(0, 500) } }
+          }
+        }
+        if (typeof row.waitMs === 'number') return { waitMs: Math.min(row.waitMs, 8000) }
+        return null
+      }).filter(Boolean) as { click?: string; type?: { selector: string; text: string }; waitMs?: number }[]
+      if (/^https?:\/\//i.test(url)) return { url, goal: String(goal).slice(0, 500), steps: parsed }
+    } catch {
+      /* fall through */
+    }
+  }
+  const url = firstHttpUrl(input)
+  return { url, goal: input.replace(url, '').trim().slice(0, 500), steps: [] }
+}
+
+async function liveWebAct(input: string, keys: Record<string, unknown>): Promise<string> {
+  const spec = parseWebAct(input)
+  const token = (typeof keys.browserless === 'string' && keys.browserless) || Deno.env.get('BROWSERLESS_API_KEY') || ''
+  const base = (Deno.env.get('BROWSERLESS_URL') || 'https://production-sfo.browserless.io').replace(/\/$/, '')
+  if (!token) throw new Error('no Browserless key — hosted Chrome is off')
+  if (!spec.steps.length) {
+    const res = await fetch(`${base}/content?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: spec.url }),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    })
+    const html = await res.text()
+    if (!res.ok) throw new Error(`browserless content ${res.status}: ${html.slice(0, 180)}`)
+    return `[LIVE · web_act · chrome] ${spec.url}\n${htmlToText(html).slice(0, 4000)}`
+  }
+  const code = `module.exports = async ({ page, context }) => {
+    const { url, steps } = context;
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    for (const step of steps) {
+      if (step.click) await page.click(step.click, { timeout: 8000 });
+      if (step.type) await page.type(step.type.selector, step.type.text, { delay: 20 });
+      if (step.waitMs) await page.waitForTimeout(step.waitMs);
+    }
+    const text = await page.evaluate(() => (document.body && document.body.innerText) ? document.body.innerText.slice(0, 8000) : '');
+    return text;
+  }`
+  const res = await fetch(`${base}/function?token=${encodeURIComponent(token)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, context: { url: spec.url, steps: spec.steps } }),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  })
+  const text = await res.text()
+  if (!res.ok) throw new Error(`browserless function ${res.status}: ${text.slice(0, 180)}`)
+  return `[LIVE · web_act · chrome] ${spec.url}\nGoal: ${spec.goal}\n${text.slice(0, 4000)}`
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
   if (req.method !== 'POST') return json(405, { error: 'POST only', ok: false, source: 'mock', output: '' })
@@ -227,8 +298,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const tool = body.tool
-  if (tool !== 'web_search' && tool !== 'browse_url' && tool !== 'run_code') {
-    return json(400, { error: 'tool must be web_search | browse_url | run_code', ok: false, source: 'mock', output: '' })
+  if (tool !== 'web_search' && tool !== 'browse_url' && tool !== 'run_code' && tool !== 'web_act') {
+    return json(400, { error: 'tool must be web_search | browse_url | run_code | web_act', ok: false, source: 'mock', output: '' })
   }
   const input = typeof body.input === 'string' ? body.input : ''
   const keys = (body.keys && typeof body.keys === 'object' ? body.keys : {}) as Record<string, unknown>
@@ -240,6 +311,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     if (tool === 'browse_url') {
       return json(200, { ok: true, source: 'live', output: await liveBrowse(input, keys) })
+    }
+    if (tool === 'web_act') {
+      return json(200, { ok: true, source: 'live', output: await liveWebAct(input, keys) })
     }
     if (tool === 'run_code' && e2b) {
       return json(200, { ok: true, source: 'live', output: await e2bRun(input, e2b) })

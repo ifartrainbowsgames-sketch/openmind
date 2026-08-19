@@ -1,4 +1,4 @@
-// Supervisor crew — staff → dispatch specialists in parallel → synthesize.
+// Supervisor crew — staff → gather → work → table (they talk) → one voice.
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import {
   liveBrain,
@@ -12,7 +12,9 @@ import {
 } from './agent'
 import { generateStaff, MAX_HIRES } from './staffing'
 import { setActiveCrewToolKeys, setActiveWorkspace, type CrewToolKeys } from './crew-tools'
-import type { WorkspaceSpace } from './workspace'
+import { needsDeepResearch, runDeepResearch } from './deep-research'
+import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
+import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
 
 export interface CrewArtifact {
   id: string
@@ -41,6 +43,7 @@ export interface RunCrewOptions {
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>
   toolKeys?: CrewToolKeys
   workspace?: WorkspaceSpace
+  skill?: SkillId
   /** When empty, the staff node hires from the task via generateStaff. */
   employees?: Employee[]
 }
@@ -55,7 +58,11 @@ export function toolsForRole(employee: Employee): string[] {
   if (RESEARCH_RE.test(hay)) extra.push('web_search', 'browse_url', 'search_docs', 'summarize')
   if (CODE_RE.test(hay)) extra.push('run_code', 'code_review', 'calculator', 'github_write_file', 'github_create_branch', 'github_open_pr')
   if (WRITE_RE.test(hay)) extra.push('summarize', 'web_search', 'slack_post', 'gmail_send')
-  extra.push('web_search', 'slack_post', 'gmail_send', 'gdrive_list')
+  extra.push(
+    'web_search', 'browse_url', 'web_act',
+    'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list',
+    'memory_search', 'memory_save', 'business_plan',
+  )
   return [...new Set([...employee.tools, ...extra])]
 }
 
@@ -64,7 +71,7 @@ export function withCrewTools(employee: Employee): Employee {
 }
 
 export function withGithubWorkspaceTools(employee: Employee, space?: WorkspaceSpace): Employee {
-  const apps = [...new Set([...employee.tools, 'slack_post', 'gmail_send', 'gdrive_list'])]
+  const apps = [...new Set([...employee.tools, 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'web_act'])]
   if (space?.kind !== 'github') return { ...employee, tools: apps }
   return {
     ...employee,
@@ -72,11 +79,41 @@ export function withGithubWorkspaceTools(employee: Employee, space?: WorkspaceSp
   }
 }
 
+export function workCrew(lead: Employee): Employee[] {
+  const inbox = withCrewTools({
+    ...lead,
+    role: 'Inbox',
+    prompt:
+      'Work email with the team. Use gmail_list and gmail_read. Draft replies on the table. Only gmail_send after teammates agree.',
+  })
+  const ops = withCrewTools({
+    ...lead,
+    id: `${lead.id}-ops`,
+    name: 'Ops',
+    role: 'Business',
+    prompt:
+      'Structure the business. Use business_plan. Argue scope, price, and the next action on the table. Do not invent busywork.',
+    tools: ['business_plan', 'summarize', 'memory_save'],
+    accent: '#0e7490',
+  })
+  const web = withCrewTools({
+    ...lead,
+    id: `${lead.id}-web`,
+    name: 'Web',
+    role: 'Browser',
+    prompt:
+      'Complete web tasks in hosted Chrome with web_act. JSON {"url","goal","steps"}. Confirm before money or delete. Tell the table what you clicked.',
+    tools: ['web_act', 'browse_url', 'web_search'],
+    accent: '#15803d',
+  })
+  return [inbox, ops, web]
+}
+
 export function assembleCrew(lead: Employee | undefined, task: string): Employee[] {
-  const hired = generateStaff(task).map(withCrewTools)
+  const hired = generateStaff(stripWorkspacePrompt(task)).map(withCrewTools)
   if (!lead) return hired.slice(0, MAX_HIRES)
   const leadReady = withCrewTools(lead)
-  if (hired.length === 1 && hired[0].role === 'Generalist') return [leadReady]
+  if (hired.length === 1 && hired[0].role === 'Generalist') return workCrew(leadReady)
   const seen = new Set<string>([leadReady.id])
   const out = [leadReady]
   for (const e of hired) {
@@ -139,6 +176,35 @@ export function extractArtifacts(task: string, answer: string, members: CrewMemb
   return artifacts
 }
 
+export function formatTeamBoard(members: CrewMemberResult[]): string {
+  return members
+    .map((mem) => `### ${mem.name} (${mem.role})\n${mem.result.answer}`)
+    .join('\n\n')
+}
+
+export function conferPrompt(task: string, board: string, speaker: Employee, dossier: string): string {
+  return [
+    `You are ${speaker.name}, ${speaker.role}. You are on one crew — talk to your teammates, do not work in a silo.`,
+    `Original task:\n${task}`,
+    dossier ? `Shared research:\n${dossier}` : '',
+    `Team board (everyone can see this):\n${board}`,
+    'Reply to them: agree, correct, or take the next step in your specialty. Name who you are answering.',
+  ].filter(Boolean).join('\n\n')
+}
+
+export function mergeMemberPass(first: CrewMemberResult | undefined, second: CrewMemberResult): CrewMemberResult {
+  if (!first) return second
+  return {
+    ...second,
+    result: {
+      ...second.result,
+      toolCalls: [...first.result.toolCalls, ...second.result.toolCalls],
+      plan: [...first.result.plan, ...second.result.plan],
+      trace: [...first.result.trace, ...second.result.trace],
+    },
+  }
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -147,6 +213,7 @@ const CrewState = Annotation.Root({
   task: Annotation<string>(),
   employees: Annotation<Employee[]>({ reducer: (_a, b) => b, default: () => [] }),
   members: Annotation<CrewMemberResult[]>({ reducer: (_a, b) => b, default: () => [] }),
+  dossier: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
   answer: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
   artifacts: Annotation<CrewArtifact[]>({ reducer: (_a, b) => b, default: () => [] }),
   trace: Annotation<TraceLine[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
@@ -161,11 +228,17 @@ export async function runCrew(
 ): Promise<CrewRun> {
   setActiveCrewToolKeys(options.toolKeys ?? {})
   setActiveWorkspace(options.workspace)
+  const skill = options.skill ?? 'multitask'
+  task = wrapSkillPrompt(skill, task)
+  const applySkillTools = (employee: Employee): Employee => ({
+    ...employee,
+    tools: toolsForSkill(employee.tools, skill),
+  })
   const supervisor: Employee = {
     id: 'supervisor',
     name: 'Supervisor',
     role: 'Crew lead',
-    prompt: 'Synthesize specialist findings into one clear answer. Prefer evidence over speculation.',
+    prompt: 'You heard the team table. Merge into one voice. Prefer evidence. Cite URLs from the shared research when present. Do not invent links.',
     tools: [],
     accent: '#17140f',
   }
@@ -173,24 +246,41 @@ export async function runCrew(
   const staffNode = async (state: CS): Promise<Partial<CS>> => {
     const employees = (state.employees.length ? state.employees : generateStaff(state.task))
       .map(withCrewTools)
+      .map(applySkillTools)
       .map((employee) => withGithubWorkspaceTools(employee, options.workspace))
+      .map(applySkillTools)
       .slice(0, MAX_HIRES)
     return {
       employees,
       trace: [{
         node: 'plan',
-        text: `crew of ${employees.length} — ${employees.map((e) => e.role).join(' → ')}`,
+        text: `${skill} · crew of ${employees.length} — ${employees.map((e) => e.role).join(' → ')}`,
+      }],
+    }
+  }
+
+  const gatherNode = async (state: CS): Promise<Partial<CS>> => {
+    if (!needsDeepResearch(state.task)) return { dossier: '' }
+    const run = await runDeepResearch(state.task)
+    return {
+      dossier: run.dossier,
+      trace: [{
+        node: 'plan',
+        text: `deep research — ${run.queries.length} queries · ${run.urls.length} source URL${run.urls.length === 1 ? '' : 's'}`,
       }],
     }
   }
 
   const dispatchNode = async (state: CS): Promise<Partial<CS>> => {
+    const brief = state.dossier
+      ? `${state.task}\n\nUse this research dossier. Cite the listed URLs.\n${state.dossier}`
+      : state.task
     const members = await Promise.all(
       state.employees.map(async (employee) => {
         const result = await runEmployee(
           brain,
           employee,
-          state.task,
+          brief,
           (line) => options.onTrace?.({ ...line, text: `${employee.name}: ${line.text}` }),
           options.configs,
         )
@@ -206,15 +296,44 @@ export async function runCrew(
     }
   }
 
+  const tableNode = async (state: CS): Promise<Partial<CS>> => {
+    if (state.employees.length < 2) return {}
+    let board = formatTeamBoard(state.members)
+    const members: CrewMemberResult[] = []
+    for (const employee of state.employees) {
+      const prior = state.members.find((mem) => mem.employeeId === employee.id)
+      const result = await runEmployee(
+        brain,
+        employee,
+        conferPrompt(state.task, board, employee, state.dossier),
+        (line) => options.onTrace?.({ ...line, text: `${employee.name} (table): ${line.text}` }),
+        options.configs,
+      )
+      const row = mergeMemberPass(prior, {
+        employeeId: employee.id,
+        name: employee.name,
+        role: employee.role,
+        result,
+      })
+      members.push(row)
+      board = `${board}\n\n### ${employee.name} (table)\n${result.answer}`
+    }
+    return {
+      members,
+      trace: [{
+        node: 'act',
+        text: `table — ${state.employees.map((e) => e.name).join(' then ')} replied on the shared board`,
+      }],
+    }
+  }
+
   const synthesizeNode = async (state: CS): Promise<Partial<CS>> => {
     const observations = state.members.flatMap((mem) =>
       mem.result.toolCalls.map((c) => ({ ...c, tool: `${mem.name}:${c.tool}` })),
     )
-    const dossier = state.members
-      .map((mem) => `### ${mem.name} — ${mem.role}\n${mem.result.answer}`)
-      .join('\n\n')
+    const table = formatTeamBoard(state.members)
     const answer = await brain.respond(
-      `${state.task}\n\nSpecialist reports:\n${dossier}`,
+      `${state.task}\n\n${state.dossier ? `Shared research:\n${state.dossier}\n\n` : ''}Team table (they already talked):\n${table}`,
       observations,
       supervisor,
     )
@@ -224,24 +343,28 @@ export async function runCrew(
       artifacts,
       trace: [{
         node: 'respond',
-        text: `synthesized from ${state.members.length} specialist${state.members.length === 1 ? '' : 's'} · ${artifacts.length} artifact${artifacts.length === 1 ? '' : 's'}`,
+        text: `one crew voice after the table · ${state.members.length} teammate${state.members.length === 1 ? '' : 's'} · ${artifacts.length} artifact${artifacts.length === 1 ? '' : 's'}`,
       }],
     }
   }
 
   const app = new StateGraph(CrewState)
     .addNode('staff', staffNode)
+    .addNode('gather', gatherNode)
     .addNode('dispatch', dispatchNode)
+    .addNode('table', tableNode)
     .addNode('synthesize', synthesizeNode)
     .addEdge(START, 'staff')
-    .addEdge('staff', 'dispatch')
-    .addEdge('dispatch', 'synthesize')
+    .addEdge('staff', 'gather')
+    .addEdge('gather', 'dispatch')
+    .addEdge('dispatch', 'table')
+    .addEdge('table', 'synthesize')
     .addEdge('synthesize', END)
     .compile()
 
   const seed: Partial<CS> = {
     task,
-    employees: (options.employees ?? []).map(withCrewTools).map((employee) => withGithubWorkspaceTools(employee, options.workspace)).slice(0, MAX_HIRES),
+    employees: (options.employees ?? []).map(withCrewTools).map(applySkillTools).map((employee) => withGithubWorkspaceTools(employee, options.workspace)).map(applySkillTools).slice(0, MAX_HIRES),
   }
 
   try {

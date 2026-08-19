@@ -43,8 +43,8 @@ const ROLE_SPECS: RoleSpec[] = [
   {
     keys: /research|librarian|knowledge|wiki/i,
     role: 'Researcher',
-    promptBase: 'Find evidence, cite sources, and compress findings into tight briefs.',
-    tools: ['search_docs', 'summarize', 'web_search', 'browse_url'],
+    promptBase: 'Find evidence, cite sources, and compress findings into tight briefs. Prefer the research dossier URLs over invented links.',
+    tools: ['search_docs', 'summarize', 'web_search', 'browse_url', 'memory_search'],
     connections: ['notion', 'gdrive'],
   },
   {
@@ -79,7 +79,7 @@ const ROLE_SPECS: RoleSpec[] = [
     keys: /assistant|secretary|admin|schedul|inbox|calendar|email/i,
     role: 'Executive Assistant',
     promptBase: 'Triage the inbox, watch the calendar, and draft crisp replies for sign-off.',
-    tools: ['summarize', 'search_docs'],
+    tools: ['summarize', 'search_docs', 'gmail_list', 'gmail_read', 'gmail_send'],
     connections: ['gmail', 'gcal', 'slack'],
   },
   {

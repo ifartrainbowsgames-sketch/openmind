@@ -6,6 +6,7 @@
 
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { analyzeSentiment, retrievePassages, summarize } from './demo'
+import { draftBusinessPlan } from './business-plan'
 import { invokeCrewTool } from './crew-tools'
 import { callServerTool, listServerTools, restFetch, type McpServerSpec } from './mcp'
 import { stripWorkspacePrompt } from './workspace'
@@ -58,9 +59,9 @@ export interface AgentBrain {
 // ── Knowledge base for the search_docs tool ──────────────────────────────────
 
 export const KNOWLEDGE = `
+The chatbot widget embeds on any site with two lines of code: a script tag with a data-service attribute.
 OpenMind is the open-source integration layer for AI. Its chatbot ships as an embeddable widget and one unified API.
 The chatbot runs on the customer's own provider keys — OpenMind never marks up tokens. You pay your provider directly.
-The chatbot widget embeds on any site with two lines of code: a script tag with a data-service attribute.
 Key modes: Browser-direct keeps the visitor's key in their browser with zero servers. Vaulted keys are encrypted server-side with AES-256. Gateway mode adds rate limiting and caching.
 The playground lets visitors test the chatbot in the browser — it answers with real ChatGPT through a secure gateway.
 The console includes Data Studio for uploading and indexing company data, a Widget Builder with live preview, Inbox, Engage popups, Prompt Studio and service settings.
@@ -68,6 +69,10 @@ Pro is ten dollars per month during early access. The free plan includes the cha
 Refunds are processed within five business days — email billing@openmind.dev to request one.
 The stack is React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui, Supabase and Stripe. MIT licensed.
 AI Employees are LangGraph agents that plan, call tools and respond — create your own with a custom system prompt.
+The customer Super Agent lives at /app: a LangGraph crew that can research, write to the user's own GitHub, and use Slack, Gmail, and Drive after they tap Connect apps.
+Research tasks run a deep-research step first: several web searches in parallel, then a short browse, then a cited dossier for specialists.
+Sends, GitHub writes, and checkout-like pages wait for a confirm tap. Notes can be saved with memory_save and recalled with memory_search (this device, or your account when signed in).
+MCP connects agents to tools; A2A connects separate agent runtimes. OpenMind's in-process crew does not use AutoGen.
 `
 
 // ── Tools ────────────────────────────────────────────────────────────────────
@@ -218,11 +223,53 @@ TOOL_REGISTRY.gmail_send = {
   run: (q) => invokeCrewTool('gmail_send', q),
 }
 
+TOOL_REGISTRY.gmail_list = {
+  id: 'gmail_list',
+  name: 'Gmail list',
+  desc: 'List inbox threads. Optional JSON {"query"} e.g. is:unread. Connect Gmail first.',
+  run: (q) => invokeCrewTool('gmail_list', q),
+}
+
+TOOL_REGISTRY.gmail_read = {
+  id: 'gmail_read',
+  name: 'Gmail read',
+  desc: 'Read one message. JSON {"id"} from gmail_list. Connect Gmail first.',
+  run: (q) => invokeCrewTool('gmail_read', q),
+}
+
+TOOL_REGISTRY.web_act = {
+  id: 'web_act',
+  name: 'Web act',
+  desc: 'Hosted Chrome: JSON {"url","goal","steps":[{"click":"css"},{"type":{"selector","text"}}]}. Confirm first.',
+  run: (q) => invokeCrewTool('web_act', q),
+}
+
+TOOL_REGISTRY.business_plan = {
+  id: 'business_plan',
+  name: 'Business plan',
+  desc: 'Structure the business: offer, 14-day plan, risks. Teammates argue it on the table.',
+  run: (q) => draftBusinessPlan(q),
+}
+
 TOOL_REGISTRY.gdrive_list = {
   id: 'gdrive_list',
   name: 'Drive list',
   desc: 'List Google Drive files. Optional JSON: {"query"}. Connect Drive first.',
   run: (q) => invokeCrewTool('gdrive_list', q),
+}
+
+TOOL_REGISTRY.memory_search = {
+  id: 'memory_search',
+  name: 'Memory search',
+  desc: 'Recall notes saved for this user (account or this device)',
+  run: (q) => import('./memory').then((m) => m.searchMemory(q)),
+}
+
+TOOL_REGISTRY.memory_save = {
+  id: 'memory_save',
+  name: 'Memory save',
+  desc: 'Save a note. Plain text, or JSON {"content","scope?"} where scope is user, project, or ephemeral.',
+  run: (q) => import('./memory').then((m) => m.saveMemory(q)),
 }
 
 // ── Connections — external apps as agent tools ───────────────────────────────
@@ -867,8 +914,20 @@ export function simulatedBrain(): AgentBrain {
         push('slack_post', input)
       if (has('gmail_send') && /gmail_send|\b(send (an? )?e-?mail|email .+@)\b/i.test(input))
         push('gmail_send', input)
+      if (has('gmail_list') && /gmail_list|\b(inbox|unread|e-?mails?|triage (the )?mail)\b/i.test(input))
+        push('gmail_list', input)
+      if (has('gmail_read') && /gmail_read/.test(input))
+        push('gmail_read', input)
+      if (has('web_act') && /web_act|\b(click|fill (the |this )?form|hosted chrome|do this on the (web|site)|complete (this|the) (web )?task)\b/i.test(input))
+        push('web_act', input)
+      if (has('business_plan') && /business_plan|\b(structure (the |our )?business|business plan|offer and price)\b/i.test(input))
+        push('business_plan', input)
       if (has('gdrive_list') && /gdrive_list|\b(google drive|list (my )?files)\b/i.test(input))
         push('gdrive_list', input)
+      if (has('memory_save') && /\b(remember (that|this)|save this (note|fact)|don'?t forget)\b/i.test(input))
+        push('memory_save', stripWorkspacePrompt(input))
+      if (has('memory_search') && /\b(what do you (know|remember)|recall|you said)\b/i.test(input))
+        push('memory_search', stripWorkspacePrompt(input))
       for (const { re, ids } of CONNECTION_ROUTES) {
         if (steps.length >= 3) break
         if (ids.includes('github') && steps.some((s) => s.tool.startsWith('github_'))) continue

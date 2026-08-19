@@ -5,25 +5,30 @@
 
 import { nangoLinked, customerConnectError } from './nango'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
+import { mockWebAct, parseWebActInput } from './web-act'
 
 export type CrewToolKind =
   | 'web_search'
   | 'browse_url'
+  | 'web_act'
   | 'run_code'
   | 'github_write_file'
   | 'github_create_branch'
   | 'github_open_pr'
   | 'slack_post'
   | 'gmail_send'
+  | 'gmail_list'
+  | 'gmail_read'
   | 'gdrive_list'
 
 export type GithubCrewToolKind = 'github_write_file' | 'github_create_branch' | 'github_open_pr'
-export type NangoAppToolKind = 'slack_post' | 'gmail_send' | 'gdrive_list'
+export type NangoAppToolKind = 'slack_post' | 'gmail_send' | 'gmail_list' | 'gmail_read' | 'gdrive_list'
 
 export interface CrewToolKeys {
   tavily?: string
   firecrawl?: string
   e2b?: string
+  browserless?: string
 }
 
 export interface CrewToolResponse {
@@ -58,12 +63,68 @@ export interface NangoGithubAction {
 
 let activeKeys: CrewToolKeys = {}
 let activeWorkspace: WorkspaceSpace | undefined
+let activeGuard: ((kind: CrewToolKind, summary: string) => Promise<boolean>) | undefined
+
+const RISKY_BROWSE = /checkout|payment|pay\.|cart|billing|wallet|bank|unsubscribe|delete[-_ ]?account/i
+
+export function setCrewToolGuard(
+  guard?: (kind: CrewToolKind, summary: string) => Promise<boolean>,
+): void {
+  activeGuard = guard
+}
+
+export function needsCrewToolConfirm(kind: CrewToolKind, input: string): boolean {
+  if (
+    kind === 'gmail_send' ||
+    kind === 'slack_post' ||
+    kind === 'github_write_file' ||
+    kind === 'github_create_branch' ||
+    kind === 'github_open_pr'
+  ) {
+    return true
+  }
+  if (kind === 'web_act') return true
+  if (kind === 'browse_url') return RISKY_BROWSE.test(input)
+  return false
+}
+
+export function crewToolConfirmSummary(kind: CrewToolKind, input: string): string {
+  if (kind === 'gmail_send') {
+    const spec = parseGmailSendInput(input)
+    return `Send email to ${spec.to} — ${spec.subject}`
+  }
+  if (kind === 'slack_post') {
+    const spec = parseSlackPostInput(input)
+    return `Post to Slack #${spec.channel}: ${spec.text.slice(0, 160)}`
+  }
+  if (kind === 'github_write_file') {
+    const file = parseGithubWriteInput(input)
+    return `Commit ${file.path} (${file.message})`
+  }
+  if (kind === 'github_create_branch') {
+    const spec = parseGithubBranchInput(input, getActiveWorkspace()?.branch ?? 'main')
+    return `Create branch ${spec.name} from ${spec.from}`
+  }
+  if (kind === 'github_open_pr') {
+    const pr = parseGithubPrInput(input, getActiveWorkspace()?.branch ?? 'main')
+    return `Open PR "${pr.title}" (${pr.head} → ${pr.base})`
+  }
+  if (kind === 'web_act') {
+    const spec = parseWebActInput(input)
+    return `Use hosted Chrome on ${spec.url} — ${spec.goal || 'complete the page task'}`
+  }
+  if (kind === 'browse_url') {
+    return `Open a page that looks financial or destructive:\n${input.trim().slice(0, 240)}`
+  }
+  return `${kind}: ${input.trim().slice(0, 200)}`
+}
 
 export function setActiveCrewToolKeys(keys: CrewToolKeys = {}): void {
   activeKeys = {
     tavily: keys.tavily?.trim() || undefined,
     firecrawl: keys.firecrawl?.trim() || undefined,
     e2b: keys.e2b?.trim() || undefined,
+    browserless: keys.browserless?.trim() || undefined,
   }
 }
 
@@ -84,7 +145,7 @@ export function isGithubCrewTool(kind: CrewToolKind): kind is GithubCrewToolKind
 }
 
 export function isNangoAppTool(kind: CrewToolKind): kind is NangoAppToolKind {
-  return kind === 'slack_post' || kind === 'gmail_send' || kind === 'gdrive_list'
+  return kind === 'slack_post' || kind === 'gmail_send' || kind === 'gmail_list' || kind === 'gmail_read' || kind === 'gdrive_list'
 }
 
 function parseJsonRecord(input: string): Record<string, unknown> | null {
@@ -132,6 +193,19 @@ export function parseGdriveListInput(input: string): { query: string } {
   return { query: input.trim().slice(0, 200) }
 }
 
+export function parseGmailListInput(input: string): { query: string } {
+  const rec = parseJsonRecord(input)
+  if (rec && typeof rec.query === 'string') return { query: rec.query.trim().slice(0, 200) }
+  return { query: stripWorkspacePrompt(input).trim().slice(0, 200) }
+}
+
+export function parseGmailReadInput(input: string): { id: string } {
+  const rec = parseJsonRecord(input)
+  if (rec && typeof rec.id === 'string' && rec.id.trim()) return { id: rec.id.trim() }
+  const token = stripWorkspacePrompt(input).trim().split(/\s+/)[0] ?? ''
+  return { id: token.slice(0, 200) }
+}
+
 export function buildNangoAppAction(kind: NangoAppToolKind, input: string): { action: string; body: Record<string, unknown> } | null {
   if (kind === 'slack_post') {
     const linked = nangoLinked('slack')
@@ -149,6 +223,25 @@ export function buildNangoAppAction(kind: NangoAppToolKind, input: string): { ac
     return {
       action: 'gmail.send',
       body: { providerId: linked.providerId, connectionId: linked.connectionId, to: spec.to, subject: spec.subject, body: spec.body },
+    }
+  }
+  if (kind === 'gmail_list') {
+    const linked = nangoLinked('gmail')
+    if (!linked) return null
+    const spec = parseGmailListInput(input)
+    return {
+      action: 'gmail.list',
+      body: { providerId: linked.providerId, connectionId: linked.connectionId, query: spec.query },
+    }
+  }
+  if (kind === 'gmail_read') {
+    const linked = nangoLinked('gmail')
+    if (!linked) return null
+    const spec = parseGmailReadInput(input)
+    if (!spec.id) return null
+    return {
+      action: 'gmail.read',
+      body: { providerId: linked.providerId, connectionId: linked.connectionId, id: spec.id },
     }
   }
   const linked = nangoLinked('gdrive')
@@ -362,6 +455,9 @@ export function mockCrewTool(kind: CrewToolKind, input: string, space = getActiv
     return `[MOCK · browse_url] Extract from ${url}:
 The page describes a multi-agent workspace: a supervisor plans, specialists research/code/write, then a synthesizer returns artifacts (markdown briefs, HTML decks). Live scrape uses Jina Reader or a direct fetch once agent-tools is deployed.`
   }
+  if (kind === 'web_act') {
+    return mockWebAct(parseWebActInput(q))
+  }
   if (kind === 'github_write_file') {
     const file = parseGithubWriteInput(q)
     const repo = space?.kind === 'github' ? (space.repoName ?? space.slug) : '(no GitHub workspace)'
@@ -384,6 +480,14 @@ The page describes a multi-agent workspace: a supervisor plans, specialists rese
   if (kind === 'gmail_send') {
     const spec = parseGmailSendInput(q)
     return `[MOCK · gmail_send] Would send to ${spec.to} — ${spec.subject}`
+  }
+  if (kind === 'gmail_list') {
+    const spec = parseGmailListInput(q)
+    return `[MOCK · gmail_list] Would list inbox${spec.query ? ` q="${spec.query}"` : ''}. Connect Gmail for live mail.`
+  }
+  if (kind === 'gmail_read') {
+    const spec = parseGmailReadInput(q)
+    return `[MOCK · gmail_read] Would open message ${spec.id || '(missing id)'}. Connect Gmail for live mail.`
   }
   if (kind === 'gdrive_list') {
     const spec = parseGdriveListInput(q)
@@ -462,6 +566,14 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
       const id = typeof data.id === 'string' ? data.id : ''
       return `[LIVE · gmail_send] Sent${id ? ` (${id})` : ''}`
     }
+    if (kind === 'gmail_list') {
+      const summary = typeof data.summary === 'string' ? data.summary : JSON.stringify(data.messages ?? data)
+      return `[LIVE · gmail_list] ${summary}`
+    }
+    if (kind === 'gmail_read') {
+      const summary = typeof data.summary === 'string' ? data.summary : JSON.stringify(data)
+      return `[LIVE · gmail_read] ${summary}`
+    }
     const count = typeof data.count === 'number' ? data.count : 0
     const names = typeof data.names === 'string' ? data.names : JSON.stringify(data.files ?? [])
     return `[LIVE · gdrive_list] ${count} file(s): ${names}`
@@ -472,6 +584,11 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
 }
 
 export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = getActiveCrewToolKeys()): Promise<string> {
+  if (needsCrewToolConfirm(kind, input)) {
+    const allowed = await (activeGuard?.(kind, crewToolConfirmSummary(kind, input)) ?? Promise.resolve(true))
+    if (!allowed) return `[BLOCKED · ${kind}] You declined this action.`
+  }
+
   const env = (import.meta as { env?: Record<string, string | boolean | undefined> }).env ?? {}
   if (env.MODE === 'test' || env.VITEST) return mockCrewTool(kind, input)
 

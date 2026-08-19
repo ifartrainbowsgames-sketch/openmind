@@ -31,6 +31,7 @@ import GraphFlow from './GraphFlow'
 import ConnectionsPanel, { connStatus } from './ConnectionsPanel'
 import ConnectorMarketplace from './ConnectorMarketplace'
 import ReportCard, { MiniScorecard } from './ReportCard'
+import ToolConfirmHost from '@/components/crew/ToolConfirmSheet'
 
 // ── types & constants ────────────────────────────────────────────────────────
 
@@ -515,6 +516,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
 
   return (
     <div className={embedded ? 'space-y-8' : 'space-y-10'}>
+      <ToolConfirmHost />
       {/* ── shared brain bar ── */}
       <div className="border border-border/60 bg-card p-4">
         <div className="flex flex-wrap items-center gap-3">

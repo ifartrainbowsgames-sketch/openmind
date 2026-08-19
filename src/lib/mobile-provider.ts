@@ -8,6 +8,7 @@ export interface MobileProviderConfig {
   tavilyKey?: string
   firecrawlKey?: string
   e2bKey?: string
+  browserlessKey?: string
 }
 
 export function loadMobileProvider(): MobileProviderConfig {
@@ -25,6 +26,7 @@ export function loadMobileProvider(): MobileProviderConfig {
       tavilyKey: parsed.tavilyKey?.trim() || undefined,
       firecrawlKey: parsed.firecrawlKey?.trim() || undefined,
       e2bKey: parsed.e2bKey?.trim() || undefined,
+      browserlessKey: parsed.browserlessKey?.trim() || undefined,
     }
   } catch {
     return { providerId: 'openai', apiKey: '' }

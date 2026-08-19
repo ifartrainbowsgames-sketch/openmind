@@ -194,6 +194,68 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(200, { id: sent.data.id, threadId: sent.data.threadId })
     }
 
+    if (action === 'gmail.list') {
+      const query = typeof body.query === 'string' ? body.query.replace(/["\\]/g, '').slice(0, 120) : ''
+      const q = query ? `&q=${encodeURIComponent(query)}` : ''
+      const listed = await githubJson(host, headers, 'GET', `/gmail/v1/users/me/messages?maxResults=5${q}`)
+      if (!listed.ok) {
+        const err = typeof listed.data.message === 'string' ? listed.data.message : listed.text.slice(0, 240)
+        return json(listed.status, { error: err })
+      }
+      const rows = Array.isArray(listed.data.messages) ? listed.data.messages as { id?: string }[] : []
+      const lines: string[] = []
+      for (const row of rows.slice(0, 5)) {
+        const id = typeof row.id === 'string' ? row.id : ''
+        if (!id) continue
+        const got = await githubJson(
+          host,
+          headers,
+          'GET',
+          `/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+        )
+        const headersList = Array.isArray((got.data.payload as { headers?: { name?: string; value?: string }[] } | undefined)?.headers)
+          ? (got.data.payload as { headers: { name?: string; value?: string }[] }).headers
+          : []
+        const from = headersList.find((h) => h.name === 'From')?.value ?? ''
+        const subject = headersList.find((h) => h.name === 'Subject')?.value ?? ''
+        const snippet = typeof got.data.snippet === 'string' ? got.data.snippet : ''
+        lines.push(`${id} | ${from} | ${subject} | ${snippet}`)
+      }
+      return json(200, { summary: lines.join('\n') || '(empty inbox)', count: lines.length })
+    }
+
+    if (action === 'gmail.read') {
+      const id = typeof body.id === 'string' ? body.id.trim() : ''
+      if (!id) return json(400, { error: 'id required' })
+      const got = await githubJson(
+        host,
+        headers,
+        'GET',
+        `/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`,
+      )
+      if (!got.ok) {
+        const err = typeof got.data.message === 'string' ? got.data.message : got.text.slice(0, 240)
+        return json(got.status, { error: err })
+      }
+      const snippet = typeof got.data.snippet === 'string' ? got.data.snippet : ''
+      const payload = got.data.payload as { headers?: { name?: string; value?: string }[]; body?: { data?: string }; parts?: { mimeType?: string; body?: { data?: string } }[] } | undefined
+      const headersList = Array.isArray(payload?.headers) ? payload.headers : []
+      const from = headersList.find((h) => h.name === 'From')?.value ?? ''
+      const subject = headersList.find((h) => h.name === 'Subject')?.value ?? ''
+      let text = snippet
+      const parts = payload?.parts ?? []
+      const plain = parts.find((p) => p.mimeType === 'text/plain')?.body?.data ?? payload?.body?.data
+      if (typeof plain === 'string' && plain) {
+        try {
+          const pad = plain.replace(/-/g, '+').replace(/_/g, '/')
+          text = atob(pad).slice(0, 4000)
+        } catch {
+          text = snippet
+        }
+      }
+      return json(200, { summary: `From: ${from}\nSubject: ${subject}\n\n${text}`, id })
+    }
+
     if (action === 'gdrive.list') {
       const query = typeof body.query === 'string' ? body.query.replace(/['\\]/g, '').slice(0, 120) : ''
       const q = query ? `&q=${encodeURIComponent(`name contains '${query}'`)}` : ''

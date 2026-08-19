@@ -7,12 +7,11 @@ import {
   Bot,
   Check,
   ChevronDown,
-  Code2,
   FileText,
   Github,
   Hash,
   History,
-  Menu,
+  Mail,
   Mic,
   MoreHorizontal,
   Paperclip,
@@ -20,6 +19,7 @@ import {
   Plus,
   Presentation,
   Search,
+  Settings,
   Sparkles,
   SquarePen,
   Trash2,
@@ -35,7 +35,6 @@ import {
   type Employee,
   type TraceLine,
 } from '@/lib/agent'
-import { assembleCrew, runCrew } from '@/lib/crew'
 import {
   loadMobileVoiceSettings,
   OPENAI_TTS_VOICES,
@@ -71,16 +70,26 @@ import {
   type WorkspaceKind,
 } from '@/lib/workspace'
 import ConnectAppsSheet from '@/components/mobile/ConnectAppsSheet'
+import CommandSheet from '@/components/mobile/CommandSheet'
+import { FilesBrowserPanel } from '@/components/mobile/WorkbenchPanes'
+import ToolConfirmHost from '@/components/crew/ToolConfirmSheet'
 import { getSession } from '@/lib/auth'
-import { setNangoOwner } from '@/lib/nango'
+import { bootKernel, runTurn } from '@/lib/openmind-os'
+import { SKILLS, type SkillId } from '@/lib/skills'
+import {
+  applySlashToDraft,
+  consumeSlash,
+  lastHttpUrl,
+  matchSlashCommands,
+} from '@/lib/slash'
 
 const MOBILE_ASSISTANT: Employee = {
   id: 'openmind',
   name: 'OpenMind',
   role: 'General Assistant',
   prompt:
-    'You are a capable, practical assistant. Break work into clear steps, use tools when useful, and be honest about what you can and cannot access.',
-    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gdrive_list'],
+    'You are a capable, practical assistant. Work as one crew: Inbox, Ops, and Web. List mail, structure the business, and complete web tasks. Research is a skill when needed — not a costume. Confirm before send or spend.',
+    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'web_act', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'memory_search', 'memory_save', 'business_plan'],
   connections: ['github', 'gdrive', 'slack'],
   accent: '#ff4d00',
   tagline: 'Research, reason and get work done',
@@ -90,26 +99,26 @@ const MOBILE_EMPLOYEES = [MOBILE_ASSISTANT, ...PRESET_EMPLOYEES]
 
 const STARTERS = [
   {
-    label: 'Research a topic',
-    prompt: 'Research the most important trends in open-source AI agents and give me a concise brief.',
-    icon: Search,
+    label: 'Work the inbox',
+    prompt: 'List my unread email. Draft replies together on the table. Do not send until we agree.',
+    icon: Mail,
     color: '#286a54',
   },
   {
-    label: 'Review code',
-    prompt: 'Review this code and help me find the most important bugs and risks.',
-    icon: Code2,
-    color: '#6c50a1',
-  },
-  {
-    label: 'Analyze data',
-    prompt: 'Help me analyze a dataset and turn the findings into clear recommendations.',
+    label: 'Structure the business',
+    prompt: 'Structure the business: offer, who it is for, 14-day plan, and the next real action. Argue it on the table.',
     icon: BarChart3,
     color: '#2f6594',
   },
   {
-    label: 'Create a deck',
-    prompt: 'Create an outline for a clear 8-slide presentation about my next big idea.',
+    label: 'Do it on the web',
+    prompt: 'Open this site in Chrome and complete the task. Use web_act. Confirm before anything that spends money: https://example.com',
+    icon: Search,
+    color: '#6c50a1',
+  },
+  {
+    label: 'Research a topic',
+    prompt: 'Research the most important trends in open-source AI agents and give me a concise brief.',
     icon: Presentation,
     color: '#a34f36',
   },
@@ -361,6 +370,15 @@ function VoiceSheet({
           className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
           autoComplete="off"
         />
+        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Browserless (hosted Chrome)</label>
+        <input
+          type="password"
+          value={provider.browserlessKey ?? ''}
+          onChange={(event) => onProviderChange({ ...provider, browserlessKey: event.target.value })}
+          placeholder="token — same as Cursor mini-Chrome, cloud browser"
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
         <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Voice</label>
         <select
           value={voice.voice}
@@ -402,6 +420,12 @@ export default function MobileApp() {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
   const [appsOpen, setAppsOpen] = useState(false)
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [skill, setSkill] = useState<SkillId>('multitask')
+  const [accountEmail, setAccountEmail] = useState<string | null>(null)
+  const [browserUrl, setBrowserUrl] = useState('')
+  const [openFileBody, setOpenFileBody] = useState('')
   const [provider, setProvider] = useState<MobileProviderConfig>(() => loadMobileProvider())
   const [voice, setVoice] = useState<MobileVoiceSettings>(() => loadMobileVoiceSettings())
   const [recording, setRecording] = useState(false)
@@ -460,6 +484,14 @@ export default function MobileApp() {
   const selectedEmployee =
     MOBILE_EMPLOYEES.find((employee) => employee.id === activeThread?.employeeId) ?? MOBILE_ASSISTANT
   const hasMessages = (activeThread?.messages.length ?? 0) > 0
+  const latestArtifacts = (activeThread?.messages ?? []).flatMap((message) => message.crewRun?.artifacts ?? [])
+  const slashHits = matchSlashCommands(draft)
+
+  useEffect(() => {
+    const blob = (activeThread?.messages ?? []).flatMap((message) => (message.toolCalls ?? []).map((call) => call.output)).join('\n')
+    const url = lastHttpUrl(blob)
+    if (url) setBrowserUrl(url)
+  }, [activeThread?.messages])
 
   useEffect(() => {
     localStorage.setItem(MOBILE_THREADS_KEY, JSON.stringify(threads))
@@ -467,7 +499,8 @@ export default function MobileApp() {
 
   useEffect(() => {
     void getSession().then((session) => {
-      if (session?.user.id) setNangoOwner(session.user.id)
+      if (session?.user.id) bootKernel({ userId: session.user.id })
+      setAccountEmail(session?.user.email ?? null)
     })
   }, [])
 
@@ -523,7 +556,40 @@ export default function MobileApp() {
   }
 
   const sendPrompt = async (override?: string) => {
-    const text = (override ?? draft).trim()
+    let text = (override ?? draft).trim()
+    const taken = consumeSlash(text)
+    let turnSkill = skill
+    if (taken) {
+      if (taken.command.action === 'files') {
+        fileRef.current?.click()
+        setDraft('')
+        return
+      }
+      if (taken.command.action === 'model' || taken.command.action === 'settings') {
+        setSettingsOpen(true)
+        setVoiceOpen(taken.command.action === 'model')
+        setDraft('')
+        return
+      }
+      if (taken.command.action === 'connect') {
+        setAppsOpen(true)
+        setDraft('')
+        return
+      }
+      if (taken.command.action === 'browser') {
+        setDraft('')
+        return
+      }
+      if (taken.command.skill) {
+        turnSkill = taken.command.skill
+        setSkill(taken.command.skill)
+      }
+      text = applySlashToDraft(taken.command, taken.rest)
+      if (!text) {
+        setDraft('')
+        return
+      }
+    }
     const thread = activeThread
     if (!text || !thread || pendingThreadId) return
 
@@ -560,15 +626,16 @@ export default function MobileApp() {
         updateThread(threadId, (current) => ({ ...current, workspace: space, updatedAt: Date.now() }))
       }
       const crewPrompt = workspacePrompt(space, runtimePrompt)
-      const crew = assembleCrew(employee, crewPrompt)
-      const result = await runCrew(crewPrompt, brain(), {
-        employees: crew,
+      const result = await runTurn(crewPrompt, brain(), {
+        lead: employee,
+        skill: turnSkill,
         workspace: space,
         onTrace: (line) => setLiveTrace((trace) => [...trace, line]),
         toolKeys: {
           tavily: provider.tavilyKey,
           firecrawl: provider.firecrawlKey,
           e2b: provider.e2bKey,
+          browserless: provider.browserlessKey,
         },
       })
       const assistantMessage: MobileMessage = {
@@ -665,8 +732,26 @@ export default function MobileApp() {
   }, [liveTrace, pendingThreadId, selectedEmployee.name])
 
   return (
-    <div className="mobile-app relative flex h-[100dvh] overflow-hidden bg-[#f8f7f4] text-[#17140f]">
-      <aside className="hidden w-[276px] shrink-0 flex-col border-r border-black/[0.07] bg-[#efede8] lg:flex">
+    <div className="mobile-app relative flex h-[100dvh] overflow-hidden bg-[#121212] text-[#e8e6e1]">
+      <nav className="hidden w-12 shrink-0 flex-col items-center border-r border-white/10 bg-[#181818] py-2 lg:flex" aria-label="Workbench">
+        <button type="button" onClick={newThread} className="flex h-10 w-10 items-center justify-center rounded-lg text-white/60 hover:bg-white/10" aria-label="New session">
+          <Plus className="h-[18px] w-[18px]" />
+        </button>
+        <button type="button" onClick={() => setCommandOpen(true)} className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg text-white/60 hover:bg-white/10" aria-label="Search skills">
+          <Search className="h-[18px] w-[18px]" />
+        </button>
+        <button type="button" onClick={() => setAppsOpen(true)} className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg text-white/60 hover:bg-white/10" aria-label="Connect">
+          <Plug className="h-[18px] w-[18px]" />
+        </button>
+        <div className="flex-1" />
+        <p className="mb-1 max-w-[44px] truncate px-0.5 text-center text-[8px] leading-3 text-white/35" title={accountEmail ?? 'Sign in'}>
+          {accountEmail ?? 'guest'}
+        </p>
+        <button type="button" onClick={() => setSettingsOpen(true)} className="flex h-10 w-10 items-center justify-center rounded-lg text-white/60 hover:bg-white/10" aria-label="Settings">
+          <Settings className="h-[18px] w-[18px]" />
+        </button>
+      </nav>
+      <aside className="hidden w-[276px] shrink-0 flex-col border-r border-white/10 bg-[#1a1a1a] lg:flex">
         <ThreadList
           threads={threads}
           activeId={activeThread.id}
@@ -698,8 +783,8 @@ export default function MobileApp() {
         </div>
       )}
 
-      <main className="relative flex min-w-0 flex-1 flex-col bg-[#fbfaf8]">
-        <header className="z-20 flex h-[calc(3.75rem+env(safe-area-inset-top))] shrink-0 items-end border-b border-black/[0.06] bg-[#fbfaf8]/90 px-3 pb-2.5 pt-[env(safe-area-inset-top)] backdrop-blur-xl sm:px-5">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-[#1e1e1e]">
+        <header className="z-20 flex h-[calc(3.75rem+env(safe-area-inset-top))] shrink-0 items-end border-b border-white/10 bg-[#1e1e1e] px-3 pb-2.5 pt-[env(safe-area-inset-top)] sm:px-5">
           <div className="flex w-full items-center gap-2">
             <button
               type="button"
@@ -735,11 +820,11 @@ export default function MobileApp() {
             </span>
             <button
               type="button"
-              onClick={() => setAppsOpen(true)}
-              className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#5f5d57] hover:bg-black/5"
-              aria-label="Connect your apps"
+              onClick={() => setSettingsOpen(true)}
+              className="mobile-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#c8c5be] hover:bg-white/10"
+              aria-label="Settings"
             >
-              <Plug className="h-[18px] w-[18px]" />
+              <Settings className="h-[18px] w-[18px]" />
             </button>
             <button
               type="button"
@@ -923,7 +1008,7 @@ export default function MobileApp() {
                 </button>
               </div>
             )}
-            <div className="rounded-[22px] border border-black/[0.11] bg-white p-2 shadow-[0_8px_30px_rgba(36,32,26,0.09)] transition-shadow focus-within:shadow-[0_10px_36px_rgba(36,32,26,0.14)]">
+            <div className="rounded-[22px] border border-white/10 bg-[#252525] p-2 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
               {!hasMessages && (
                 <div className="mb-1 flex flex-wrap gap-1.5 px-1 pt-1">
                   {WORKSPACE_CHOICES.map((choice) => (
@@ -957,7 +1042,9 @@ export default function MobileApp() {
                   }
                 }}
                     placeholder={
-                      destination === 'github'
+                      hasMessages
+                        ? 'Send follow-up'
+                        : destination === 'github'
                         ? 'Describe the project — I’ll create a GitHub repo on main…'
                         : destination === 'slack'
                           ? 'Describe the work — I’ll post it to Slack…'
@@ -966,7 +1053,38 @@ export default function MobileApp() {
                 className="block max-h-[120px] min-h-11 w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 outline-none placeholder:text-[#aaa7a0]"
                 disabled={!!pendingThreadId}
               />
+              {slashHits.length > 0 && (
+                <div className="mb-1 max-h-48 overflow-y-auto rounded-xl border border-white/10 bg-[#161616] py-1">
+                  {slashHits.map((item) => (
+                    <button
+                      key={item.cmd}
+                      type="button"
+                      onClick={() => {
+                        if (item.action) {
+                          void sendPrompt(item.cmd)
+                          return
+                        }
+                        setDraft(`${item.cmd} `)
+                        if (item.skill) setSkill(item.skill)
+                        textareaRef.current?.focus()
+                      }}
+                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-white/8"
+                    >
+                      <span className="font-mono-spec text-[11px] text-[#ff4d00]">{item.cmd}</span>
+                      <span className="text-[11px] text-white/45">{item.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCommandOpen(true)}
+                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
+                  aria-label="Skills, files, model, Connect"
+                >
+                  <Plus className="h-[18px] w-[18px]" />
+                </button>
                 <button
                   type="button"
                   onClick={() => void toggleRecording()}
@@ -977,14 +1095,6 @@ export default function MobileApp() {
                   aria-label={recording ? 'Stop recording' : 'Speak your message'}
                 >
                   <Mic className={`h-[18px] w-[18px] ${recording ? 'animate-pulse' : ''}`} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVoiceOpen(true)}
-                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
-                  aria-label="Voice settings"
-                >
-                  <Volume2 className="h-[18px] w-[18px]" />
                 </button>
                 <input
                   ref={fileRef}
@@ -998,20 +1108,20 @@ export default function MobileApp() {
                 />
                 <button
                   type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full text-[#68655e] hover:bg-[#f2f0ec]"
-                  aria-label="Attach a file"
-                >
-                  <Plus className="h-[18px] w-[18px]" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPickerOpen(true)}
+                  onClick={() => setCommandOpen(true)}
                   className="mobile-tap flex h-9 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-[#66635d] hover:bg-[#f2f0ec]"
                 >
                   <Sparkles className="h-3.5 w-3.5" />
-                  {selectedEmployee.name}
+                  {SKILLS.find((item) => item.id === skill)?.name ?? 'Multitask'}
                   <ChevronDown className="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVoiceOpen(true)}
+                  className="mobile-tap flex h-9 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium text-[#66635d] hover:bg-[#f2f0ec]"
+                  aria-label="Model"
+                >
+                  Auto
                 </button>
                 <div className="flex-1" />
                 <button
@@ -1031,8 +1141,63 @@ export default function MobileApp() {
           </div>
         </div>
       </main>
+      <FilesBrowserPanel
+        artifacts={latestArtifacts}
+        browserUrl={browserUrl}
+        onBrowserUrl={setBrowserUrl}
+        fileBody={openFileBody}
+        onOpenFile={(artifact) => setOpenFileBody(artifact.body)}
+      />
 
       <ConnectAppsSheet open={appsOpen} onClose={() => setAppsOpen(false)} />
+      <CommandSheet
+        open={commandOpen}
+        skill={skill}
+        modelName={liveReady ? providerSpec.model : 'Simulated'}
+        onClose={() => setCommandOpen(false)}
+        onPickSkill={setSkill}
+        onFiles={() => fileRef.current?.click()}
+        onModel={() => setVoiceOpen(true)}
+        onMcp={() => setAppsOpen(true)}
+      />
+      {settingsOpen && (
+        <div className="fixed inset-0 z-[76] flex items-end justify-center lg:items-center" role="dialog" aria-modal="true" aria-label="Settings">
+          <button className="absolute inset-0 bg-black/50" onClick={() => setSettingsOpen(false)} aria-label="Close settings" />
+          <div className="relative z-10 w-full rounded-t-[28px] bg-[#1c1c1c] px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 text-white shadow-2xl lg:max-w-md lg:rounded-[24px]">
+            <div className="mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                <Settings className="h-4 w-4" />
+                Settings
+              </span>
+              <button type="button" onClick={() => setSettingsOpen(false)} className="rounded-full p-1 text-white/50 hover:bg-white/10" aria-label="Close">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-[11px] uppercase tracking-[0.12em] text-white/35">Account</p>
+            <p className="mt-1 truncate text-sm">{accountEmail ?? 'Not signed in'}</p>
+            {!accountEmail && (
+              <Link to="/login?next=/app" className="mt-2 inline-block text-[12px] text-[#ff4d00]">
+                Sign in
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => { setSettingsOpen(false); setVoiceOpen(true) }}
+              className="mt-5 w-full rounded-xl bg-white/10 py-3 text-sm"
+            >
+              Model, Browserless, voice
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSettingsOpen(false); setAppsOpen(true) }}
+              className="mt-2 w-full rounded-xl bg-white/10 py-3 text-sm"
+            >
+              Connect apps
+            </button>
+          </div>
+        </div>
+      )}
+      <ToolConfirmHost />
       <AssistantPicker
         open={pickerOpen}
         selected={selectedEmployee}

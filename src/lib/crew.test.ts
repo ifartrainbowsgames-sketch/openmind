@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { simulatedBrain } from './agent'
 import {
   assembleCrew,
+  conferPrompt,
   extractArtifacts,
+  formatTeamBoard,
   runCrew,
   toolsForRole,
   withCrewTools,
@@ -52,7 +54,10 @@ describe('assembleCrew', () => {
   it('keeps the lead when staffing a vague generalist brief', () => {
     const crew = assembleCrew(lead, 'someone to help out')
     expect(crew[0].id).toBe('openmind')
+    expect(crew.map((e) => e.role)).toEqual(['Inbox', 'Business', 'Browser'])
     expect(crew[0].tools).toContain('web_search')
+    expect(crew.some((e) => e.tools.includes('gmail_list'))).toBe(true)
+    expect(crew.some((e) => e.tools.includes('web_act'))).toBe(true)
   })
 
   it('fans a research+code brief into specialists without duplicating the lead role', () => {
@@ -89,6 +94,19 @@ describe('extractArtifacts', () => {
   })
 })
 
+describe('team table', () => {
+  it('lets teammates reply on a shared board after the first pass', () => {
+    const otto = { employeeId: 'otto', name: 'Otto', role: 'Researcher', result: { answer: 'Use LangGraph.', plan: [], toolCalls: [], trace: [] } }
+    const rex = { employeeId: 'rex', name: 'Rex', role: 'Code Copilot', result: { answer: 'I can commit that.', plan: [], toolCalls: [], trace: [] } }
+    const board = formatTeamBoard([otto, rex])
+    expect(board).toContain('Otto')
+    expect(board).toContain('Rex')
+    const prompt = conferPrompt('Ship it', board, { ...lead, name: 'Otto', role: 'Researcher' }, '')
+    expect(prompt).toMatch(/talk to your teammates/i)
+    expect(prompt).toContain('Rex')
+  })
+})
+
 describe('runCrew', () => {
   it('staffs, dispatches in parallel, and synthesizes with artifacts', async () => {
     const crew = [
@@ -108,6 +126,7 @@ describe('runCrew', () => {
     expect(run.employeeIds).toEqual(['otto', 'rex'])
     expect(run.members).toHaveLength(2)
     expect(run.trace.map((t) => t.node)).toEqual(expect.arrayContaining(['plan', 'act', 'respond']))
+    expect(run.trace.some((t) => t.text.includes('table'))).toBe(true)
     expect(run.trace[0].text).toMatch(/crew of 2/)
     expect(run.answer.length).toBeGreaterThan(20)
     expect(run.artifacts[0].kind).toBe('markdown')
