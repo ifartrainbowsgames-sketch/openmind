@@ -30,7 +30,21 @@ The **official** Kortix stack supports `daytona`, `e2b`, and `platinum`. E2B is 
 - Signup: [e2b.dev/dashboard?tab=keys](https://e2b.dev/dashboard?tab=keys)
 - Copy your `E2B_API_KEY` (starts with `e2b_`)
 
-### On a VPS or home Linux box
+### Cloudflare tunnel (no domain — good for testing)
+
+One command on a Linux box with Docker (laptop, VPS, home PC):
+
+```bash
+cd kortix-setup
+# .env must contain E2B_API_KEY (and optionally other keys for reference)
+./cloudflare-deploy.sh
+```
+
+This installs Kortix, starts the stack, and prints a `https://….trycloudflare.com` URL you can open on your phone.
+
+**Note:** The tunnel URL changes every time you stop/start the stack. For a stable URL, use a VPS + domain later.
+
+### On a VPS with a domain (production)
 
 ```bash
 # 1. Bootstrap Kortix (Docker + CLI + stack)
