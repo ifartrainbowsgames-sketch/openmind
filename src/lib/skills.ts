@@ -13,7 +13,7 @@ export interface SkillSpec {
 export const SKILLS: readonly SkillSpec[] = [
   { id: 'plan', name: 'Plan', desc: 'Generate an implementation plan.', accent: '#c2410c' },
   { id: 'debug', name: 'Debug', desc: 'Pinpoint the root cause of an issue.', accent: '#b91c1c' },
-  { id: 'multitask', name: 'Multitask', desc: 'Orchestrate the crew in parallel, then they talk.', accent: '#6d28d9' },
+  { id: 'multitask', name: 'Multitask', desc: 'Hire a crew, work in parallel, one merged answer.', accent: '#6d28d9' },
   { id: 'ask', name: 'Ask', desc: 'Answer questions without sending, committing, or clicking.', accent: '#15803d' },
 ]
 
@@ -32,7 +32,7 @@ export function isSkillId(value: string): value is SkillId {
 
 export function wrapSkillPrompt(skill: SkillId, task: string): string {
   if (skill === 'plan') {
-    return `SKILL: PLAN. Produce a concrete implementation plan with steps, owners (Inbox / Ops / Web), and risks. Do not send email, commit, or use web_act.\n\n${task}`
+    return `SKILL: PLAN. Produce a concrete implementation plan with steps and risks. Do not send email, commit, or use web_act.\n\n${task}`
   }
   if (skill === 'debug') {
     return `SKILL: DEBUG. Find the root cause. Use search, inbox, code review, and browse. Only write or send if the user asked to fix it.\n\n${task}`
@@ -40,7 +40,7 @@ export function wrapSkillPrompt(skill: SkillId, task: string): string {
   if (skill === 'ask') {
     return `SKILL: ASK. Read-only. Answer from tools and the table. No gmail_send, slack_post, github writes, or web_act.\n\n${task}`
   }
-  return `SKILL: MULTITASK. Split work, run in parallel, then talk on the shared board and return one voice.\n\n${task}`
+  return `SKILL: MULTITASK. Hire specialists, run in parallel, merge into one answer.\n\n${task}`
 }
 
 export function toolsForSkill(tools: string[], skill: SkillId = 'multitask'): string[] {

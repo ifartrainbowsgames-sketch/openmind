@@ -1,4 +1,4 @@
-// Supervisor crew — staff → gather → work → table (they talk) → one voice.
+// Supervisor crew — staff → gather → parallel work → one merged voice (CrewAI-style).
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import {
   liveBrain,
@@ -54,15 +54,12 @@ const WRITE_RE = /writ|content|copy|present|slide|deck|editor|author/i
 
 export function toolsForRole(employee: Employee): string[] {
   const hay = `${employee.role} ${employee.prompt}`
-  const extra: string[] = []
+  const extra: string[] = ['memory_search', 'memory_save']
   if (RESEARCH_RE.test(hay)) extra.push('web_search', 'browse_url', 'search_docs', 'summarize')
   if (CODE_RE.test(hay)) extra.push('run_code', 'code_review', 'calculator', 'github_write_file', 'github_create_branch', 'github_open_pr')
   if (WRITE_RE.test(hay)) extra.push('summarize', 'web_search', 'slack_post', 'gmail_send')
-  extra.push(
-    'web_search', 'browse_url', 'web_act',
-    'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list',
-    'memory_search', 'memory_save', 'business_plan',
-  )
+  if (/inbox|executive assistant|mail/i.test(hay)) extra.push('gmail_list', 'gmail_read', 'gmail_send')
+  if (/browser|web_act/i.test(hay)) extra.push('web_act', 'browse_url', 'web_search')
   return [...new Set([...employee.tools, ...extra])]
 }
 
@@ -79,41 +76,28 @@ export function withGithubWorkspaceTools(employee: Employee, space?: WorkspaceSp
   }
 }
 
-export function workCrew(lead: Employee): Employee[] {
-  const inbox = withCrewTools({
-    ...lead,
-    role: 'Inbox',
-    prompt:
-      'Work email with the team. Use gmail_list and gmail_read. Draft replies on the table. Only gmail_send after teammates agree.',
-  })
-  const ops = withCrewTools({
-    ...lead,
-    id: `${lead.id}-ops`,
-    name: 'Ops',
-    role: 'Business',
-    prompt:
-      'Structure the business. Use business_plan. Argue scope, price, and the next action on the table. Do not invent busywork.',
-    tools: ['business_plan', 'summarize', 'memory_save'],
-    accent: '#0e7490',
-  })
-  const web = withCrewTools({
-    ...lead,
-    id: `${lead.id}-web`,
-    name: 'Web',
-    role: 'Browser',
-    prompt:
-      'Complete web tasks in hosted Chrome with web_act. JSON {"url","goal","steps"}. Confirm before money or delete. Tell the table what you clicked.',
-    tools: ['web_act', 'browse_url', 'web_search'],
-    accent: '#15803d',
-  })
-  return [inbox, ops, web]
+/** Default teammates when the task does not name roles — classic multi-agent, not Inbox/Ops theater. */
+export function defaultTeammates(task: string, seed = 1): Employee[] {
+  return generateStaff(`${stripWorkspacePrompt(task)} — team of 2: researcher and writer`, seed)
+    .slice(0, 2)
+    .map(withCrewTools)
 }
 
 export function assembleCrew(lead: Employee | undefined, task: string): Employee[] {
   const hired = generateStaff(stripWorkspacePrompt(task)).map(withCrewTools)
   if (!lead) return hired.slice(0, MAX_HIRES)
   const leadReady = withCrewTools(lead)
-  if (hired.length === 1 && hired[0].role === 'Generalist') return workCrew(leadReady)
+  if (hired.length === 1 && hired[0].role === 'Generalist') {
+    const seen = new Set<string>([leadReady.id])
+    const out = [leadReady]
+    for (const teammate of defaultTeammates(task)) {
+      if (seen.has(teammate.id) || teammate.role === leadReady.role) continue
+      seen.add(teammate.id)
+      out.push(teammate)
+      if (out.length >= MAX_HIRES) break
+    }
+    return out
+  }
   const seen = new Set<string>([leadReady.id])
   const out = [leadReady]
   for (const e of hired) {
@@ -184,11 +168,11 @@ export function formatTeamBoard(members: CrewMemberResult[]): string {
 
 export function conferPrompt(task: string, board: string, speaker: Employee, dossier: string): string {
   return [
-    `You are ${speaker.name}, ${speaker.role}. You are on one crew — talk to your teammates, do not work in a silo.`,
-    `Original task:\n${task}`,
-    dossier ? `Shared research:\n${dossier}` : '',
-    `Team board (everyone can see this):\n${board}`,
-    'Reply to them: agree, correct, or take the next step in your specialty. Name who you are answering.',
+    `You are ${speaker.name}, ${speaker.role}. One crew — add facts or corrections for the lead, not roleplay.`,
+    `Task:\n${task}`,
+    dossier ? `Research:\n${dossier}` : '',
+    `Teammate notes:\n${board}`,
+    'In 2–4 sentences: what you found, what you recommend, and anything the lead should merge.',
   ].filter(Boolean).join('\n\n')
 }
 
@@ -238,7 +222,8 @@ export async function runCrew(
     id: 'supervisor',
     name: 'Supervisor',
     role: 'Crew lead',
-    prompt: 'You heard the team table. Merge into one voice. Prefer evidence. Cite URLs from the shared research when present. Do not invent links.',
+    prompt:
+      'Merge the crew’s first-pass notes into one clear answer for the user. No fake dialogue between agents. Prefer evidence and tool results.',
     tools: [],
     accent: '#17140f',
   }
@@ -296,35 +281,9 @@ export async function runCrew(
     }
   }
 
-  const tableNode = async (state: CS): Promise<Partial<CS>> => {
-    if (state.employees.length < 2) return {}
-    let board = formatTeamBoard(state.members)
-    const members: CrewMemberResult[] = []
-    for (const employee of state.employees) {
-      const prior = state.members.find((mem) => mem.employeeId === employee.id)
-      const result = await runEmployee(
-        brain,
-        employee,
-        conferPrompt(state.task, board, employee, state.dossier),
-        (line) => options.onTrace?.({ ...line, text: `${employee.name} (table): ${line.text}` }),
-        options.configs,
-      )
-      const row = mergeMemberPass(prior, {
-        employeeId: employee.id,
-        name: employee.name,
-        role: employee.role,
-        result,
-      })
-      members.push(row)
-      board = `${board}\n\n### ${employee.name} (table)\n${result.answer}`
-    }
-    return {
-      members,
-      trace: [{
-        node: 'act',
-        text: `table — ${state.employees.map((e) => e.name).join(' then ')} replied on the shared board`,
-      }],
-    }
+  const tableNode = async (_state: CS): Promise<Partial<CS>> => {
+    // Skip second-pass table talk — dispatch notes go straight to synthesis.
+    return {}
   }
 
   const synthesizeNode = async (state: CS): Promise<Partial<CS>> => {
@@ -333,7 +292,7 @@ export async function runCrew(
     )
     const table = formatTeamBoard(state.members)
     const answer = await brain.respond(
-      `${state.task}\n\n${state.dossier ? `Shared research:\n${state.dossier}\n\n` : ''}Team table (they already talked):\n${table}`,
+      `${state.task}\n\n${state.dossier ? `Shared research:\n${state.dossier}\n\n` : ''}Crew notes (parallel first pass):\n${table}`,
       observations,
       supervisor,
     )
@@ -343,7 +302,7 @@ export async function runCrew(
       artifacts,
       trace: [{
         node: 'respond',
-        text: `one crew voice after the table · ${state.members.length} teammate${state.members.length === 1 ? '' : 's'} · ${artifacts.length} artifact${artifacts.length === 1 ? '' : 's'}`,
+        text: `one answer · ${state.members.length} teammate${state.members.length === 1 ? '' : 's'} · ${artifacts.length} artifact${artifacts.length === 1 ? '' : 's'}`,
       }],
     }
   }

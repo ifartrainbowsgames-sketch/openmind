@@ -51,13 +51,13 @@ describe('withGithubWorkspaceTools', () => {
 })
 
 describe('assembleCrew', () => {
-  it('keeps the lead when staffing a vague generalist brief', () => {
+  it('keeps the lead and adds researcher + writer for a vague brief', () => {
     const crew = assembleCrew(lead, 'someone to help out')
     expect(crew[0].id).toBe('openmind')
-    expect(crew.map((e) => e.role)).toEqual(['Inbox', 'Business', 'Browser'])
-    expect(crew[0].tools).toContain('web_search')
-    expect(crew.some((e) => e.tools.includes('gmail_list'))).toBe(true)
-    expect(crew.some((e) => e.tools.includes('web_act'))).toBe(true)
+    expect(crew.length).toBeGreaterThanOrEqual(2)
+    expect(crew.map((e) => e.role)).toEqual(expect.arrayContaining(['General Assistant']))
+    expect(crew.some((e) => /research/i.test(e.role))).toBe(true)
+    expect(crew.some((e) => /writer|content/i.test(e.role))).toBe(true)
   })
 
   it('fans a research+code brief into specialists without duplicating the lead role', () => {
@@ -102,7 +102,7 @@ describe('team table', () => {
     expect(board).toContain('Otto')
     expect(board).toContain('Rex')
     const prompt = conferPrompt('Ship it', board, { ...lead, name: 'Otto', role: 'Researcher' }, '')
-    expect(prompt).toMatch(/talk to your teammates/i)
+    expect(prompt).toMatch(/not roleplay/i)
     expect(prompt).toContain('Rex')
   })
 })
@@ -126,7 +126,7 @@ describe('runCrew', () => {
     expect(run.employeeIds).toEqual(['otto', 'rex'])
     expect(run.members).toHaveLength(2)
     expect(run.trace.map((t) => t.node)).toEqual(expect.arrayContaining(['plan', 'act', 'respond']))
-    expect(run.trace.some((t) => t.text.includes('table'))).toBe(true)
+    expect(run.trace.some((t) => t.text.includes('table'))).toBe(false)
     expect(run.trace[0].text).toMatch(/crew of 2/)
     expect(run.answer.length).toBeGreaterThan(20)
     expect(run.artifacts[0].kind).toBe('markdown')

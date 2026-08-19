@@ -89,37 +89,37 @@ const MOBILE_ASSISTANT: Employee = {
   name: 'OpenMind',
   role: 'General Assistant',
   prompt:
-    'You are a capable, practical assistant. Work as one crew: Inbox, Ops, and Web. List mail, structure the business, and complete web tasks. Research is a skill when needed — not a costume. Confirm before send or spend.',
-    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'web_act', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'memory_search', 'memory_save', 'business_plan'],
+    'You coordinate a small crew. Split work to specialists, merge tool results, and answer plainly. Confirm before send, spend, or destructive actions.',
+    tools: ['search_docs', 'summarize', 'sentiment', 'calculator', 'code_review', 'web_search', 'browse_url', 'web_act', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr', 'slack_post', 'gmail_send', 'gmail_list', 'gmail_read', 'gdrive_list', 'memory_search', 'memory_save'],
   connections: ['github', 'gdrive', 'slack'],
   accent: '#ff4d00',
-  tagline: 'Research, reason and get work done',
+  tagline: 'Multi-agent crew — research, code, write',
 }
 
 const MOBILE_EMPLOYEES = [MOBILE_ASSISTANT, ...PRESET_EMPLOYEES]
 
 const STARTERS = [
   {
-    label: 'Work the inbox',
-    prompt: 'List my unread email. Draft replies together on the table. Do not send until we agree.',
-    icon: Mail,
-    color: '#286a54',
-  },
-  {
-    label: 'Structure the business',
-    prompt: 'Structure the business: offer, who it is for, 14-day plan, and the next real action. Argue it on the table.',
-    icon: BarChart3,
-    color: '#2f6594',
-  },
-  {
-    label: 'Do it on the web',
-    prompt: 'Open this site in Chrome and complete the task. Use web_act. Confirm before anything that spends money: https://example.com',
+    label: 'Research a topic',
+    prompt: 'Research the most important trends in open-source AI agents and give me a concise brief with sources.',
     icon: Search,
     color: '#6c50a1',
   },
   {
-    label: 'Research a topic',
-    prompt: 'Research the most important trends in open-source AI agents and give me a concise brief.',
+    label: 'Build something',
+    prompt: 'Plan a small feature, then outline the code changes needed. Keep it practical.',
+    icon: Github,
+    color: '#2f6594',
+  },
+  {
+    label: 'Write it up',
+    prompt: 'Turn this idea into a clear one-page summary with next steps: a multi-agent app for small teams.',
+    icon: FileText,
+    color: '#286a54',
+  },
+  {
+    label: 'Team of three',
+    prompt: 'a team of 3: researcher, coder, and writer — work together on improving our onboarding flow.',
     icon: Presentation,
     color: '#a34f36',
   },

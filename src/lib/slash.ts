@@ -15,12 +15,8 @@ export interface SlashCommand {
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { cmd: '/plan', title: 'Plan', desc: 'Implementation plan. No send, commit, or click.', skill: 'plan' },
   { cmd: '/debug', title: 'Debug', desc: 'Find the root cause.', skill: 'debug' },
-  { cmd: '/multitask', title: 'Multitask', desc: 'Crew in parallel, then they talk.', skill: 'multitask' },
+  { cmd: '/multitask', title: 'Multitask', desc: 'Crew in parallel, one merged answer.', skill: 'multitask' },
   { cmd: '/ask', title: 'Ask', desc: 'Read-only answers.', skill: 'ask' },
-  { cmd: '/inbox', title: 'Inbox', desc: 'List mail and draft together.', skill: 'multitask', prompt: 'List my unread email. Draft replies together on the table. Do not send until we agree.' },
-  { cmd: '/business', title: 'Business', desc: 'Structure the offer and 14-day plan.', skill: 'plan', prompt: 'Structure the business: offer, who it is for, 14-day plan, and the next real action.' },
-  { cmd: '/web', title: 'Web', desc: 'Hosted Chrome task (web_act).', skill: 'multitask', prompt: 'Open the site in Chrome and complete the task. Use web_act. Confirm before money: ' },
-  { cmd: '/research', title: 'Research', desc: 'Cited web research brief.', skill: 'ask', prompt: 'Research this topic and give a concise cited brief: ' },
   { cmd: '/files', title: 'Files', desc: 'Attach a file.', action: 'files' },
   { cmd: '/model', title: 'Model', desc: 'Pick model and Browserless key.', action: 'model' },
   { cmd: '/connect', title: 'Connect', desc: 'Connect Gmail, GitHub, Slack.', action: 'connect' },

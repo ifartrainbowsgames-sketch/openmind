@@ -943,15 +943,23 @@ export function simulatedBrain(): AgentBrain {
       return steps.slice(0, 3)
     },
     respond: async (input, observations, employee) => {
-      const intro = `${employee.name} here — ${employee.role.toLowerCase()}.`
+      if (employee.role === 'Crew lead') {
+        const board = input.includes('Crew notes') ? input.split('Crew notes')[1] ?? input : input
+        const toolLines = observations.map((o) => `• ${toolName(o.tool)}: ${o.output}`)
+        const names = [...board.matchAll(/### ([^\n(]+)/g)].map((m) => m[1].trim())
+        const who = names.length ? names.join(', ') : 'the crew'
+        return (
+          `Merged answer from ${who}:\n\n${board.trim().slice(0, 2400)}\n\n` +
+          (toolLines.length ? `${toolLines.join('\n')}\n\n` : '') +
+          `(Simulated — add your model key for a polished single voice.)`
+        )
+      }
+      const intro = `${employee.name} (${employee.role}):`
       if (observations.length === 0) {
-        return `${intro} My instructions: "${employee.prompt}". I don't need tools for this one — ` +
-          `in live mode I'd reason it through with your configured provider. You asked: "${input}". ` +
-          `Give me a task that needs research, math, summaries or tone analysis and watch the graph fire.`
+        return `${intro} ${input.slice(0, 400)}`
       }
       const lines = observations.map((o) => `• ${toolName(o.tool)}: ${o.output}`)
-      return `${intro} Working per my instructions — "${employee.prompt}".\n\n${lines.join('\n')}\n\n` +
-        `That's what the graph came back with. In live mode I'd phrase this in my own voice via your provider.`
+      return `${intro}\n${lines.join('\n')}`
     },
   }
 }

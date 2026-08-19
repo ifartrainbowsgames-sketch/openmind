@@ -116,9 +116,10 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
     expect(seen.map((t) => t.node)).toEqual(['plan', 'act', 'respond'])
   })
 
-  it('carries the owner prompt into the answer', async () => {
+  it('returns tool output in a compact crew-friendly voice', async () => {
     const r = await runEmployee(simulatedBrain(), emp({ prompt: 'Always reply like a pirate.' }), 'Ahoy, what is 2+2?')
-    expect(r.answer).toContain('pirate')
+    expect(r.answer).toContain('Ada')
+    expect(r.answer).toMatch(/Calculator|4/)
   })
 
   it('routes GitHub workspace coding to github_write_file, not chat-only dumps', async () => {
