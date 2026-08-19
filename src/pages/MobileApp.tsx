@@ -69,6 +69,7 @@ import {
 import ConnectAppsSheet from '@/components/mobile/ConnectAppsSheet'
 import CommandSheet from '@/components/mobile/CommandSheet'
 import { FilesBrowserPanel } from '@/components/mobile/WorkbenchPanes'
+import { TaskLedgerPanel } from '@/components/mobile/TaskLedgerPanel'
 import ToolConfirmHost from '@/components/crew/ToolConfirmSheet'
 import { getSession } from '@/lib/auth'
 import { bootKernel, runTurn } from '@/lib/openmind-os'
@@ -589,6 +590,7 @@ export default function MobileApp() {
           employeeIds: result.employeeIds,
           memberNames: result.members.map((mem) => mem.name),
           artifacts: result.artifacts,
+          project: result.project,
         },
       }
       updateThread(threadId, (current) => ({
@@ -867,6 +869,7 @@ export default function MobileApp() {
                         )}
                       </div>
                       <div className="whitespace-pre-wrap text-[14px] leading-6 text-[#e8e6e1]">{message.content}</div>
+                      <TaskLedgerPanel project={message.crewRun?.project} />
                       {!!message.crewRun?.artifacts.length && (
                         <div className="mt-3 space-y-2">
                           {message.crewRun.artifacts.map((artifact) => (

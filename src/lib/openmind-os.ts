@@ -1,10 +1,14 @@
-// /app = one chat assistant (Claude/ChatGPT-shaped). Crew mode stays in WorkforceStudio.
+// /app = one chat assistant (Claude/ChatGPT-shaped). Substantive goals use artifact-first task graph.
 import { runCrew, withCrewTools, withGithubWorkspaceTools, type CrewRun, type RunCrewOptions } from './crew'
 import { runEmployee, type AgentBrain, type Employee } from './agent'
 import { setActiveCrewToolKeys } from './crew-tools'
 import { setMemoryOwner } from './memory'
 import { setNangoOwner } from './nango'
 import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
+import { isSimpleChat } from './task-ledger'
+import { needsTaskGraph } from './task-planner'
+import { runTaskGraph } from './task-runner'
+import { stripWorkspacePrompt } from './workspace'
 
 export type OsAppId = 'research' | 'developer' | 'browser' | 'office' | 'memory' | 'connect'
 
@@ -16,7 +20,7 @@ export interface OsApp {
 }
 
 export const OS_APPS: readonly OsApp[] = [
-  { id: 'research', name: 'Research', status: 'live', kernel: 'skill: search/browse when the task needs it' },
+  { id: 'research', name: 'Research', status: 'live', kernel: 'task graph → research/*.json artifacts' },
   { id: 'developer', name: 'Developer', status: 'partial', kernel: 'customer GitHub via Nango + E2B run_code' },
   { id: 'browser', name: 'Browser', status: 'partial', kernel: 'web_act hosted Chrome (Browserless); Jina fallback' },
   { id: 'office', name: 'Office', status: 'partial', kernel: 'business_plan + markdown artifacts' },
@@ -39,9 +43,11 @@ export type RunTurnOptions = RunCrewOptions & {
   lead?: Employee
   /** Explicit multi-agent crew (WorkforceStudio only). /app never sets this. */
   crew?: boolean
+  /** Force artifact-first task graph even for short prompts. */
+  taskGraph?: boolean
 }
 
-/** One chat turn — single assistant by default. */
+/** One chat turn — single assistant for small talk; task graph for real work. */
 export async function runTurn(
   task: string,
   brain: AgentBrain,
@@ -49,6 +55,11 @@ export async function runTurn(
 ): Promise<CrewRun> {
   if (options.crew || (options.employees?.length ?? 0) > 1) {
     return runCrew(task, brain, options)
+  }
+
+  const userGoal = stripWorkspacePrompt(task)
+  if (options.taskGraph || (!isSimpleChat(userGoal) && needsTaskGraph(userGoal))) {
+    return runTaskGraph(task, brain, options)
   }
 
   const lead = options.lead

@@ -36,6 +36,8 @@ export interface CrewRun {
   artifacts: CrewArtifact[]
   trace: TraceLine[]
   employeeIds: string[]
+  /** Task ledger snapshot when run via artifact-first graph. */
+  project?: import('./task-ledger').ProjectSnapshot
 }
 
 export interface RunCrewOptions {

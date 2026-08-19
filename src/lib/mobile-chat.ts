@@ -1,5 +1,6 @@
 import type { ToolCall, TraceLine } from './agent'
 import type { CrewArtifact } from './crew'
+import type { ProjectSnapshot } from './task-ledger'
 import { parseWorkspaceSpace, type WorkspaceSpace } from './workspace'
 
 export const MOBILE_THREADS_KEY = 'openmind-mobile-threads-v1'
@@ -8,6 +9,7 @@ export interface CrewRunSummary {
   employeeIds: string[]
   memberNames: string[]
   artifacts: CrewArtifact[]
+  project?: ProjectSnapshot
 }
 
 export interface MobileMessage {
@@ -41,16 +43,32 @@ export function isCrewArtifact(value: unknown): value is CrewArtifact {
   )
 }
 
+export function parseProjectSnapshot(value: unknown): ProjectSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const p = value as Partial<ProjectSnapshot>
+  if (typeof p.id !== 'string' || typeof p.goal !== 'string' || !Array.isArray(p.tasks) || !Array.isArray(p.artifacts)) return undefined
+  return {
+    id: p.id,
+    goal: p.goal,
+    tasks: p.tasks as ProjectSnapshot['tasks'],
+    artifacts: p.artifacts as ProjectSnapshot['artifacts'],
+    blockers: Array.isArray(p.blockers) ? p.blockers.filter((b): b is string => typeof b === 'string') : [],
+    finished: p.finished === true,
+  }
+}
+
 export function parseCrewRun(value: unknown): CrewRunSummary | undefined {
   if (!value || typeof value !== 'object') return undefined
   const run = value as Partial<CrewRunSummary>
   if (!Array.isArray(run.employeeIds) || !run.employeeIds.every((id) => typeof id === 'string')) return undefined
   if (!Array.isArray(run.memberNames) || !run.memberNames.every((name) => typeof name === 'string')) return undefined
   if (!Array.isArray(run.artifacts) || !run.artifacts.every(isCrewArtifact)) return undefined
+  const project = run.project ? parseProjectSnapshot(run.project) : undefined
   return {
     employeeIds: run.employeeIds,
     memberNames: run.memberNames,
     artifacts: run.artifacts,
+    project,
   }
 }
 
