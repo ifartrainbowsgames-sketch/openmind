@@ -429,10 +429,15 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
       await streamText(answer, (p) =>
         setMsgs((m) => [...m.slice(0, -1), { from: 'agent', text: p, trace, brainStamp: stamp }]),
       )
-      // report card — judge with the same brain when live, heuristics otherwise
+      // Report card. The judge here IS the worker's own model, so the card is
+      // flagged as a self-assessment rather than presented as review.
       setScoring(true)
       const judgeBrain = liveReady ? { providerId, apiKey: apiKey.trim() } : null
-      const score = await scoreRun({ employee: emp, input, trace, output: answer }, judgeBrain)
+      const score = await scoreRun(
+        { employee: emp, input, trace, output: answer },
+        judgeBrain,
+        { selfJudged: true },
+      )
       recordScore(emp.id, score)
       setScoresVersion((v) => v + 1)
       setMsgs((m) => {

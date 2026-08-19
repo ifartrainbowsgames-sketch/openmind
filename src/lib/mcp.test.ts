@@ -215,14 +215,14 @@ const empWith = (connections: string[]): Employee => ({
 })
 
 describe('resolveConnectionTools stamping', () => {
-  it('stamps canned data [MOCK · id] when nothing is configured', () => {
+  it('stamps canned data [MOCK · id] when nothing is configured', async () => {
     const tools = agent.resolveConnectionTools(empWith(['github']))
     const github = tools.find((t) => t.id === 'github')
     expect(github).toBeDefined()
-    const out = github!.run('pull requests')
-    expect(typeof out).toBe('string')
-    expect(out as string).toMatch(/^\[MOCK · github\] /)
-    expect(out as string).toContain('PR #12')
+    const out = agent.normalizeToolResult(await github!.run('pull requests'))
+    expect(out.source).toBe('mock')
+    expect(out.content).toMatch(/^\[MOCK · github\] /)
+    expect(out.content).toContain('PR #12')
   })
 
   it('stamps real MCP results [LIVE · id] and exposes server tools', async () => {
@@ -237,12 +237,13 @@ describe('resolveConnectionTools stamping', () => {
     }
     const tools = agent.resolveConnectionTools(empWith(['github']), [cfg])
     expect(tools.map((t) => t.id)).toContain('github__search_issues')
-    const out = await tools.find((t) => t.id === 'github__search_issues')!.run('open bugs')
-    expect(out).toMatch(/^\[LIVE · github\] /)
-    expect(out).toContain('REAL issue #87')
+    const out = agent.normalizeToolResult(await tools.find((t) => t.id === 'github__search_issues')!.run('open bugs'))
+    expect(out.content).toMatch(/^\[LIVE · github\] /)
+    expect(out.content).toContain('REAL issue #87')
+    expect(out.arguments).toEqual({ query: 'open bugs' })
     // dispatcher on the plain connection id also hits live data
-    const dispatched = await tools.find((t) => t.id === 'github')!.run('search issues please')
-    expect(dispatched).toMatch(/^\[LIVE · github\] /)
+    const dispatched = agent.normalizeToolResult(await tools.find((t) => t.id === 'github')!.run('search issues please'))
+    expect(dispatched.content).toMatch(/^\[LIVE · github\] /)
   })
 
   it('stamps live-call errors honestly instead of silently mocking', async () => {
@@ -250,9 +251,10 @@ describe('resolveConnectionTools stamping', () => {
     const cfg: LiveConnectionConfig = {
       connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: SERVER.url, toolNames: ['search_issues'],
     }
-    const out = await agent.resolveConnectionTools(empWith(['github']), [cfg])
-      .find((t) => t.id === 'github')!.run('anything')
-    expect(out).toMatch(/^\[LIVE · github\] error: /)
+    const out = agent.normalizeToolResult(await agent.resolveConnectionTools(empWith(['github']), [cfg])
+      .find((t) => t.id === 'github')!.run('anything'))
+    expect(out.content).toMatch(/^\[LIVE · github\] error: /)
+    expect(out.error?.kind).toBe('error')
   })
 })
 

@@ -6,6 +6,7 @@
 import { nangoLinked, customerConnectError } from './nango'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
 import { mockWebAct, parseWebActInput } from './web-act'
+import { blockedMessage, isStrict } from './execution-mode'
 
 export type CrewToolKind =
   | 'web_search'
@@ -20,6 +21,30 @@ export type CrewToolKind =
   | 'gmail_list'
   | 'gmail_read'
   | 'gdrive_list'
+  | 'workspace_run'
+  | 'workspace_write_file'
+  | 'workspace_read_file'
+  | 'workspace_ls'
+  | 'git_clone'
+  | 'run_checks'
+
+/** Tools that execute inside the project's sandbox — they share one machine. */
+export type WorkspaceToolKind =
+  | 'run_code'
+  | 'workspace_run'
+  | 'workspace_write_file'
+  | 'workspace_read_file'
+  | 'workspace_ls'
+  | 'git_clone'
+  | 'run_checks'
+
+const WORKSPACE_TOOL_KINDS: WorkspaceToolKind[] = [
+  'run_code', 'workspace_run', 'workspace_write_file', 'workspace_read_file', 'workspace_ls', 'git_clone', 'run_checks',
+]
+
+export function isWorkspaceTool(kind: CrewToolKind): kind is WorkspaceToolKind {
+  return (WORKSPACE_TOOL_KINDS as CrewToolKind[]).includes(kind)
+}
 
 export type GithubCrewToolKind = 'github_write_file' | 'github_create_branch' | 'github_open_pr'
 export type NangoAppToolKind = 'slack_post' | 'gmail_send' | 'gmail_list' | 'gmail_read' | 'gdrive_list'
@@ -65,7 +90,56 @@ let activeKeys: CrewToolKeys = {}
 let activeWorkspace: WorkspaceSpace | undefined
 let activeGuard: ((kind: CrewToolKind, summary: string) => Promise<boolean>) | undefined
 
+/**
+ * The sandbox every workspace tool in this run shares. Set once per project so
+ * a clone survives into the install, and the install into the test run.
+ */
+let activeSandboxId: string | undefined
+
+/**
+ * Sandbox work (npm install, a test suite) outlasts a web search, and the
+ * function itself allows up to 240s per command.
+ */
+const WORKSPACE_TIMEOUT_MS = 60_000
+
+export interface WorkspaceToolInput {
+  path?: string
+  content?: string
+  command?: string
+  repo?: string
+  branch?: string
+}
+
+/** Mirrors the edge function's parser: JSON when given, bare string otherwise. */
+export function parseWorkspaceToolInput(input: string): WorkspaceToolInput {
+  const trimmed = input.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed) as WorkspaceToolInput
+    } catch {
+      /* not JSON — treat as a bare command/path */
+    }
+  }
+  return { command: trimmed, path: trimmed, repo: trimmed }
+}
+
+export function setActiveSandbox(id?: string): void {
+  activeSandboxId = id?.trim() || undefined
+}
+
+export function getActiveSandbox(): string | undefined {
+  return activeSandboxId
+}
+
 const RISKY_BROWSE = /checkout|payment|pay\.|cart|billing|wallet|bank|unsubscribe|delete[-_ ]?account/i
+
+/**
+ * Shell that escapes the disposable sandbox: publishing (git push, npm publish,
+ * deploys), destructive paths outside the workdir, or piping the network
+ * straight into an interpreter.
+ */
+const DESTRUCTIVE_SHELL =
+  /\b(git\s+push|npm\s+publish|yarn\s+publish|pnpm\s+publish|docker\s+push|terraform\s+apply|kubectl\s+(apply|delete)|aws\s|gcloud\s|heroku\s|vercel\s+deploy|railway\s+up)\b|rm\s+-rf\s+\/(?!home\/user\/project)|\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(sh|bash|zsh|python3?)\b/i
 
 export function setCrewToolGuard(
   guard?: (kind: CrewToolKind, summary: string) => Promise<boolean>,
@@ -85,6 +159,10 @@ export function needsCrewToolConfirm(kind: CrewToolKind, input: string): boolean
   }
   if (kind === 'web_act') return true
   if (kind === 'browse_url') return RISKY_BROWSE.test(input)
+  // Sandbox writes are cheap to undo (the machine is disposable), but a command
+  // that pushes, deletes outside the workdir, or pipes the network into a shell
+  // reaches past it. Those get a confirm.
+  if (kind === 'workspace_run') return DESTRUCTIVE_SHELL.test(input)
   return false
 }
 
@@ -115,6 +193,9 @@ export function crewToolConfirmSummary(kind: CrewToolKind, input: string): strin
   }
   if (kind === 'browse_url') {
     return `Open a page that looks financial or destructive:\n${input.trim().slice(0, 240)}`
+  }
+  if (kind === 'workspace_run') {
+    return `Run in the sandbox — this command reaches outside it:\n${parseWorkspaceToolInput(input).command?.slice(0, 240) ?? input.slice(0, 240)}`
   }
   return `${kind}: ${input.trim().slice(0, 200)}`
 }
@@ -444,6 +525,12 @@ export function buildNangoGithubAction(
 
 export function mockCrewTool(kind: CrewToolKind, input: string, space = getActiveWorkspace()): string {
   const q = input.trim() || '(empty)'
+  if (isWorkspaceTool(kind) && kind !== 'run_code') {
+    const spec = parseWorkspaceToolInput(input)
+    const detail =
+      kind === 'git_clone' ? spec.repo : kind === 'workspace_run' ? spec.command : spec.path
+    return `[MOCK · ${kind}] No sandbox configured — add an E2B key in Settings to give workers a real machine. Requested: ${(detail ?? q).slice(0, 200)}`
+  }
   if (kind === 'web_search') {
     return `[MOCK · web_search] Top hits for "${q}":
 • Open-source agent stacks in 2026 cluster around role-based crews, sandboxed code, and web research.
@@ -520,14 +607,19 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
     ? buildNangoGithubAction(kind, input, getActiveWorkspace())
     : buildNangoAppAction(kind, input)
   if (!planned) {
-    if (isGithubCrewTool(kind)) {
-      return `[MOCK · ${kind}] No GitHub workspace on this thread. Pick GitHub · main so the crew can write to a repo.`
-    }
-    return `[MOCK · ${kind}] Connect this app first (Connect GitHub / Slack / Gmail), then try again.\n\n${mockCrewTool(kind, input)}`
+    const why = isGithubCrewTool(kind)
+      ? 'no GitHub workspace on this thread — pick GitHub · main first'
+      : 'app not connected — Connect GitHub / Slack / Gmail first'
+    if (isStrict()) return blockedMessage('capability_unavailable', kind, why)
+    if (isGithubCrewTool(kind)) return `[MOCK · ${kind}] ${why}.`
+    return `[MOCK · ${kind}] ${why}.\n\n${mockCrewTool(kind, input)}`
   }
 
   const url = supabaseFnUrl('nango-act')
-  if (!url) return mockCrewTool(kind, input)
+  if (!url) {
+    if (isStrict()) return blockedMessage('capability_unavailable', kind, 'nango-act backend not configured')
+    return mockCrewTool(kind, input)
+  }
 
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -542,6 +634,7 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
     const data = (await res.json()) as Record<string, unknown> & { error?: string }
     if (!res.ok) {
       const err = customerConnectError(typeof data.error === 'string' ? data.error : `HTTP ${res.status}`)
+      if (isStrict()) return blockedMessage('tool_error', kind, err)
       return `[LIVE FAILED → MOCK] ${err}\n\n${mockCrewTool(kind, input)}`
     }
     if (kind === 'github_write_file') {
@@ -579,8 +672,15 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
     return `[LIVE · gdrive_list] ${count} file(s): ${names}`
   } catch (err) {
     const msg = customerConnectError(err)
+    if (isStrict()) return blockedMessage('tool_error', kind, msg)
     return `[LIVE FAILED → MOCK] ${msg}\n\n${mockCrewTool(kind, input)}`
   }
+}
+
+/** Whether a real backend is reachable for this tool right now. */
+export function isCrewToolLive(kind: CrewToolKind): boolean {
+  if (isGithubCrewTool(kind) || isNangoAppTool(kind)) return !!supabaseFnUrl('nango-act')
+  return !!supabaseFnUrl('agent-tools')
 }
 
 export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = getActiveCrewToolKeys()): Promise<string> {
@@ -589,8 +689,19 @@ export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = g
     if (!allowed) return `[BLOCKED · ${kind}] You declined this action.`
   }
 
+  // Strict mode refuses canned data outright — a task that needed GitHub and
+  // got a plausible-looking mock is a failure wearing a success costume.
+  if (isStrict() && !isCrewToolLive(kind)) {
+    return blockedMessage('capability_unavailable', kind, 'no live backend configured for this tool')
+  }
+
   const env = (import.meta as { env?: Record<string, string | boolean | undefined> }).env ?? {}
-  if (env.MODE === 'test' || env.VITEST) return mockCrewTool(kind, input)
+  if (env.MODE === 'test' || env.VITEST) {
+    // The test environment has no live backend, so strict mode blocks here too
+    // rather than letting the harness hand back canned data.
+    if (isStrict()) return blockedMessage('capability_unavailable', kind, 'no live backend in the test environment')
+    return mockCrewTool(kind, input)
+  }
 
   if (isGithubCrewTool(kind) || isNangoAppTool(kind)) return invokeNangoCrewTool(kind, input)
 
@@ -603,15 +714,22 @@ export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = g
       const res = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ tool: kind, input, keys }),
-        signal: AbortSignal.timeout(28_000),
+        // sandboxId keeps successive workspace calls on the same machine.
+        body: JSON.stringify({ tool: kind, input, keys, sandboxId: activeSandboxId }),
+        signal: AbortSignal.timeout(WORKSPACE_TIMEOUT_MS),
       })
-      const data = (await res.json()) as Partial<CrewToolResponse> & { error?: string }
+      const data = (await res.json()) as Partial<CrewToolResponse> & { error?: string; sandboxId?: string }
+      // Adopt the sandbox the function used — it may have created or replaced one.
+      if (typeof data.sandboxId === 'string' && data.sandboxId) activeSandboxId = data.sandboxId
       if (res.ok && typeof data.output === 'string') return data.output
       if (typeof data.output === 'string') return data.output
-    } catch {
+    } catch (err) {
+      if (isStrict()) {
+        return blockedMessage('tool_error', kind, err instanceof Error ? err.message : String(err))
+      }
       /* fall through to mock */
     }
   }
+  if (isStrict()) return blockedMessage('capability_unavailable', kind, 'agent-tools backend returned no usable output')
   return mockCrewTool(kind, input)
 }

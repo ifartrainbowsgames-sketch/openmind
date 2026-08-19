@@ -1,6 +1,6 @@
 import type { ToolCall, TraceLine } from './agent'
 import type { CrewArtifact } from './crew'
-import type { ProjectSnapshot } from './task-ledger'
+import { DEFAULT_BUDGET, ZERO_SPEND, type ProjectSnapshot } from './task-ledger'
 import { parseWorkspaceSpace, type WorkspaceSpace } from './workspace'
 
 export const MOBILE_THREADS_KEY = 'openmind-mobile-threads-v1'
@@ -54,6 +54,11 @@ export function parseProjectSnapshot(value: unknown): ProjectSnapshot | undefine
     artifacts: p.artifacts as ProjectSnapshot['artifacts'],
     blockers: Array.isArray(p.blockers) ? p.blockers.filter((b): b is string => typeof b === 'string') : [],
     finished: p.finished === true,
+    handoffs: Array.isArray(p.handoffs) ? p.handoffs : [],
+    // Snapshots persisted before budgets existed carry neither field.
+    spend: p.spend ?? { ...ZERO_SPEND },
+    budget: p.budget ?? DEFAULT_BUDGET,
+    budgetBreach: p.budgetBreach,
   }
 }
 

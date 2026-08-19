@@ -8,7 +8,14 @@ import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { analyzeSentiment, retrievePassages, summarize } from './demo'
 import { draftBusinessPlan } from './business-plan'
 import { invokeCrewTool } from './crew-tools'
-import { callServerTool, listServerTools, restFetch, type McpServerSpec } from './mcp'
+import {
+  callServerToolDetailed,
+  listServerTools,
+  restFetch,
+  type McpServerSpec,
+  type McpToolInfo,
+} from './mcp'
+import { blockedMessage, isStrict } from './execution-mode'
 import { stripWorkspacePrompt } from './workspace'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -26,6 +33,11 @@ export interface Employee {
   accent: string
   tagline?: string
   preset?: boolean
+  /**
+   * Steps this employee may plan. Defaults to MAX_STEPS; workers with a
+   * sandbox need more, because clone/install/edit/test/fix is a sequence.
+   */
+  maxSteps?: number
 }
 
 export interface PlanStep {
@@ -33,10 +45,49 @@ export interface PlanStep {
   input: string
 }
 
+/** Why a tool call produced no usable result. */
+export interface ToolError {
+  kind: 'blocked' | 'error' | 'declined'
+  message: string
+}
+
+/** A file a tool produced directly, rather than describing in prose. */
+export interface ToolArtifact {
+  path: string
+  body: string
+}
+
+/**
+ * What a tool actually returns. `content` is the text a model reads; `data`
+ * is the structured half — MCP `structuredContent`, parsed rows, API objects —
+ * kept so a downstream worker can consume the object instead of re-parsing
+ * another model's description of it.
+ */
+export interface ToolResult {
+  content: string
+  data?: unknown
+  /** Structured arguments the tool was actually invoked with. */
+  arguments?: Record<string, unknown>
+  artifacts?: ToolArtifact[]
+  error?: ToolError
+  source?: 'live' | 'mock'
+}
+
 export interface ToolCall {
   tool: string
   input: string
   output: string
+  /** Structured arguments actually sent, when the tool took any. */
+  arguments?: Record<string, unknown>
+  data?: unknown
+  artifacts?: ToolArtifact[]
+  error?: ToolError
+  source?: 'live' | 'mock'
+}
+
+/** Tools may return a bare string; everything downstream sees a ToolResult. */
+export function normalizeToolResult(value: string | ToolResult): ToolResult {
+  return typeof value === 'string' ? { content: value } : value
 }
 
 export interface TraceLine {
@@ -54,6 +105,12 @@ export interface RunResult {
 export interface AgentBrain {
   plan: (input: string, tools: ToolSpec[]) => Promise<PlanStep[]>
   respond: (input: string, observations: ToolCall[], employee: Employee) => Promise<string>
+  /**
+   * Plan again after a round of tool calls came back useless. Optional — a
+   * brain without it gets the default: plan() over a prompt annotated with
+   * what already failed.
+   */
+  replan?: (input: string, observations: ToolCall[], tools: ToolSpec[]) => Promise<PlanStep[]>
 }
 
 // ── Knowledge base for the search_docs tool ──────────────────────────────────
@@ -82,7 +139,8 @@ export interface ToolSpec {
   id: string
   name: string
   desc: string
-  run: (input: string) => string | Promise<string>
+  /** A plain string is shorthand for `{ content }` — see normalizeToolResult. */
+  run: (input: string) => string | ToolResult | Promise<string | ToolResult>
 }
 
 export type AgentTool = ToolSpec
@@ -162,9 +220,16 @@ export function reviewCode(code: string): string {
 
 TOOL_REGISTRY.code_review = {
   id: 'code_review',
-  name: 'Code review',
-  desc: 'Static analysis of pasted code — bugs, smells, risks',
+  name: 'Code smell scan',
+  desc: 'Regex smell scan of a pasted snippet (console.log, var, eval). Not a substitute for run_checks on a real repo.',
   run: reviewCode,
+}
+
+TOOL_REGISTRY.run_checks = {
+  id: 'run_checks',
+  name: 'Run project checks',
+  desc: "Run the repo's OWN typecheck/lint/test/build in the sandbox and report real exit codes. Use this to verify code works.",
+  run: (q) => invokeCrewTool('run_checks', q),
 }
 
 TOOL_REGISTRY.web_search = {
@@ -184,8 +249,47 @@ TOOL_REGISTRY.browse_url = {
 TOOL_REGISTRY.run_code = {
   id: 'run_code',
   name: 'Run code',
-  desc: 'Execute Python in an E2B sandbox (mock if no key; no Docker on Edge Functions)',
+  desc: 'Execute Python in the project sandbox (mock if no E2B key)',
   run: (q) => invokeCrewTool('run_code', q),
+}
+
+// ── Workspace tools — one persistent sandbox per project ─────────────────────
+// These share a machine, so a clone survives into the install and the install
+// into the test run. That sequence is what a coding worker actually needs.
+
+TOOL_REGISTRY.workspace_run = {
+  id: 'workspace_run',
+  name: 'Run shell command',
+  desc: 'Run any shell command in the project sandbox — npm install, pytest, build. Input: the command, or {"command":"..."}',
+  run: (q) => invokeCrewTool('workspace_run', q),
+}
+
+TOOL_REGISTRY.workspace_write_file = {
+  id: 'workspace_write_file',
+  name: 'Write file',
+  desc: 'Write a file in the project sandbox. Input: {"path":"src/x.ts","content":"..."}',
+  run: (q) => invokeCrewTool('workspace_write_file', q),
+}
+
+TOOL_REGISTRY.workspace_read_file = {
+  id: 'workspace_read_file',
+  name: 'Read file',
+  desc: 'Read a file from the project sandbox. Input: the path, or {"path":"..."}',
+  run: (q) => invokeCrewTool('workspace_read_file', q),
+}
+
+TOOL_REGISTRY.workspace_ls = {
+  id: 'workspace_ls',
+  name: 'List files',
+  desc: 'List the project sandbox tree. Input: a path, or {"path":"."}',
+  run: (q) => invokeCrewTool('workspace_ls', q),
+}
+
+TOOL_REGISTRY.git_clone = {
+  id: 'git_clone',
+  name: 'Clone repo',
+  desc: 'Clone an https git repo into the project sandbox. Input: the URL, or {"repo":"...","branch":"main"}',
+  run: (q) => invokeCrewTool('git_clone', q),
 }
 
 TOOL_REGISTRY.github_write_file = {
@@ -408,7 +512,14 @@ export interface LiveConnectionConfig {
    */
   token?: string
   status: 'untested' | 'live' | 'error' | 'mock'
+  /** Tool names only — kept for persisted configs written before schemas were retained. */
   toolNames?: string[]
+  /**
+   * The full `tools/list` result, schemas included. `toolNames` used to be the
+   * only thing kept, which forced every live MCP call through a `{query: …}`
+   * guess; the schema is what lets arguments be built properly.
+   */
+  tools?: McpToolInfo[]
   lastError?: string
 }
 
@@ -615,34 +726,127 @@ export async function probeConnection(cfg: LiveConnectionConfig): Promise<LiveCo
       return { ...cfg, status: 'live', toolNames: [...ZENDESK_TOOLS], lastError: undefined }
     }
     const tools = await listServerTools(serverSpecFor(cfg), cfg.token)
-    return { ...cfg, status: 'live', toolNames: tools.map((t) => t.name), lastError: undefined }
+    return { ...cfg, status: 'live', tools, toolNames: tools.map((t) => t.name), lastError: undefined }
   } catch (err) {
     return { ...cfg, status: 'error', lastError: err instanceof Error ? err.message : String(err) }
   }
 }
 
-/** Map a free-text tool input onto the MCP tool's input schema (best effort). */
-function argsFromSchema(schema: unknown, input: string): Record<string, unknown> {
-  const s = schema as { properties?: Record<string, { type?: string }>; required?: string[] } | undefined
-  const props = s?.properties
-  if (!props) return input ? { query: input } : {}
-  const stringProps = Object.entries(props).filter(([, v]) => v?.type === 'string').map(([k]) => k)
-  const target = (s?.required ?? []).find((r) => stringProps.includes(r)) ?? stringProps[0]
-  return target ? { [target]: input } : {}
+/** Argument names that conventionally carry a free-text query. */
+const QUERY_HINTS = [
+  'query', 'q', 'search', 'searchquery', 'keywords', 'prompt', 'text',
+  'input', 'name', 'title', 'path', 'url', 'message', 'body', 'content',
+]
+
+export interface SchemaArgs {
+  args: Record<string, unknown>
+  /** Required properties nothing could fill — a call sent anyway would just 400. */
+  missing: string[]
 }
 
-/** Pick the live tool whose name best matches the input (search-ish wins ties). */
-function pickTool(toolNames: string[], input: string): string | undefined {
-  if (!toolNames.length) return undefined
+/**
+ * Map a free-text tool input onto the MCP tool's declared input schema.
+ * Reports what it could not fill rather than shipping a half-built call:
+ * `{query: <raw text>}` against a tool wanting `{owner, repo, query}` fails
+ * upstream in a way that reads like the tool having no results.
+ */
+export function argsFromSchema(schema: unknown, input: string): SchemaArgs {
+  const s = schema as
+    | { properties?: Record<string, { type?: string }>; required?: string[] }
+    | undefined
+  const props = s?.properties
+  if (!props || !Object.keys(props).length) {
+    return { args: input ? { query: input } : {}, missing: [] }
+  }
+
+  const required = s?.required ?? []
+  const stringProps = Object.entries(props)
+    .filter(([, v]) => v?.type === 'string' || v?.type === undefined)
+    .map(([k]) => k)
+  const requiredStrings = required.filter((r) => stringProps.includes(r))
+  const byHint = (names: string[]) => names.find((n) => QUERY_HINTS.includes(n.toLowerCase()))
+  const target = byHint(requiredStrings) ?? requiredStrings[0] ?? byHint(stringProps) ?? stringProps[0]
+
+  const args: Record<string, unknown> = {}
+  if (target && input) args[target] = input
+  return { args, missing: required.filter((r) => !(r in args)) }
+}
+
+/**
+ * Pick the live tool best matching the input, scoring name and description.
+ * Returns undefined when nothing matches at all — "no appropriate tool" is a
+ * real outcome, not a reason to fire the alphabetically luckiest candidate.
+ */
+export function pickTool(tools: McpToolInfo[], input: string): McpToolInfo | undefined {
+  if (!tools.length) return undefined
+  // One advertised tool is not a choice — routing to the server *is* the pick.
+  // Selection only needs evidence when there are candidates to choose between.
+  if (tools.length === 1) return tools[0]
   const words = input.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)
-  const scored = toolNames.map((n) => {
-    const name = n.toLowerCase()
-    let score = words.filter((w) => name.includes(w)).length
-    if (/search|list|find|get/.test(name)) score += 0.5
-    return { n, score }
+  if (!words.length) return undefined
+
+  const scored = tools.map((tool) => {
+    const name = tool.name.toLowerCase()
+    const desc = (tool.description ?? '').toLowerCase()
+    let score = 0
+    let matched = 0
+    for (const w of words) {
+      if (name.includes(w)) { score += 2; matched++ }
+      else if (desc.includes(w)) { score += 1; matched++ }
+    }
+    if (/search|list|find|get|read/.test(name)) score += 0.5
+    if (!argsFromSchema(tool.inputSchema, input).missing.length) score += 0.5
+    return { tool, score, matched }
   })
-  scored.sort((a, b) => b.score - a.score)
-  return scored[0].n
+
+  const viable = scored.filter((s) => s.matched > 0).sort((a, b) => b.score - a.score)
+  return viable[0]?.tool
+}
+
+/**
+ * MCP tools that change or destroy remote state. A server advertises whatever
+ * it likes — `delete_repo`, `merge_pull_request`, `send_message` — and nothing
+ * in the protocol marks which are destructive, so the name and description are
+ * the only signal available. Matching here is deliberately eager: a false
+ * positive costs one confirmation tap, a false negative costs a repository.
+ */
+const MCP_WRITE_RE =
+  /\b(delete|remove|destroy|drop|purge|erase|create|add|update|edit|write|put|patch|post|set|send|publish|merge|close|archive|transfer|revoke|grant|invite|assign|move|rename|upload|deploy|trigger|run|execute|cancel|approve|reject|pay|charge|refund)\b/i
+
+/** Read-only verbs that would otherwise trip the write matcher (get_run, list_deployments). */
+const MCP_READ_RE = /^(get|list|search|find|read|fetch|query|describe|show|view|count|check)[_\-.\s]/i
+
+/**
+ * Confirmation hook for live MCP writes. Mirrors setCrewToolGuard so the app
+ * can reuse one approval sheet for both. Unset means allow — the guard is the
+ * UI's job to install, and headless callers opt out by leaving it unset.
+ */
+let mcpGuard: ((connectionId: string, summary: string) => Promise<boolean>) | undefined
+
+export function setMcpToolGuard(
+  guard?: (connectionId: string, summary: string) => Promise<boolean>,
+): void {
+  mcpGuard = guard
+}
+
+export function isMcpWriteTool(tool: McpToolInfo): boolean {
+  if (MCP_READ_RE.test(tool.name)) return false
+  return MCP_WRITE_RE.test(normalizeToolName(tool.name)) || MCP_WRITE_RE.test(tool.description ?? '')
+}
+
+/**
+ * Tool names are snake_case, and `_` is a word character — so `\bdelete\b`
+ * does NOT match `delete_repo`. Separators become spaces before matching, or
+ * every destructive snake_case tool would score as safe.
+ */
+function normalizeToolName(name: string): string {
+  return name.replace(/[_\-.]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
+}
+
+/** Persisted configs predate schema retention — degrade to name-only entries. */
+function mcpToolsFor(cfg: LiveConnectionConfig): McpToolInfo[] {
+  if (cfg.tools?.length) return cfg.tools
+  return (cfg.toolNames ?? []).map((name) => ({ name }))
 }
 
 function normalizeConfigs(
@@ -700,47 +904,104 @@ export function resolveConnectionTools(
       continue
     }
 
-    if (cfg && cfg.status === 'live' && cfg.mode === 'mcp' && (cfg.toolNames?.length ?? 0) > 0) {
+    if (cfg && cfg.status === 'live' && cfg.mode === 'mcp' && mcpToolsFor(cfg).length > 0) {
       const server = serverSpecFor(cfg)
-      const names = cfg.toolNames ?? []
-      for (const name of names) {
-        out.push({
-          id: `${id}__${name}`,
-          name: `${conn.name}: ${name}`,
-          desc: `LIVE ${conn.name} MCP tool "${name}"`,
-          run: async (input: string) => {
-            try {
-              return stampToolResult('LIVE', id, await callServerTool(server, name, argsFromSchema(undefined, input), cfg.token))
-            } catch (err) {
-              return stampToolResult('LIVE', id, `error: ${err instanceof Error ? err.message : String(err)}`)
+      const mcpTools = mcpToolsFor(cfg)
+
+      const callMcp = async (tool: McpToolInfo, input: string): Promise<ToolResult> => {
+        // Live MCP calls hit the user's real GitHub / Notion / Linear. Writes
+        // wait for the same confirmation that crew-tool writes already do.
+        if (isMcpWriteTool(tool)) {
+          const summary = `${conn.name}: ${tool.name}${tool.description ? ` — ${tool.description}` : ''}\n${input.slice(0, 200)}`
+          const allowed = await (mcpGuard?.(id, summary) ?? Promise.resolve(true))
+          if (!allowed) {
+            return {
+              content: stampToolResult('LIVE', id, `[BLOCKED · ${tool.name}] You declined this action.`),
+              error: { kind: 'declined', message: 'user declined the write' },
+              source: 'live',
             }
-          },
+          }
+        }
+        const { args, missing } = argsFromSchema(tool.inputSchema, input)
+        if (missing.length) {
+          const detail = `"${tool.name}" needs ${missing.join(', ')} — not derivable from the request`
+          return {
+            content: stampToolResult('LIVE', id, blockedMessage('capability_unavailable', id, detail)),
+            arguments: args,
+            error: { kind: 'blocked', message: detail },
+            source: 'live',
+          }
+        }
+        try {
+          const { text, data } = await callServerToolDetailed(server, tool.name, args, cfg.token)
+          return { content: stampToolResult('LIVE', id, text), data, arguments: args, source: 'live' }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          return {
+            content: stampToolResult('LIVE', id, `error: ${message}`),
+            error: { kind: 'error', message },
+            source: 'live',
+          }
+        }
+      }
+
+      for (const tool of mcpTools) {
+        out.push({
+          id: `${id}__${tool.name}`,
+          name: `${conn.name}: ${tool.name}`,
+          desc: tool.description
+            ? `LIVE ${conn.name} MCP tool "${tool.name}" — ${tool.description}`
+            : `LIVE ${conn.name} MCP tool "${tool.name}"`,
+          run: (input: string) => callMcp(tool, input),
         })
       }
+
       // Plain-id dispatcher so keyword routing ("check github") hits live data too.
       out.push({
         id,
         name: conn.name,
-        desc: `LIVE ${conn.name} via MCP — ${names.length} real tools available`,
-        run: async (input: string) => {
-          const name = pickTool(names, input)
-          if (!name) return stampToolResult('LIVE', id, 'error: no live tools advertised by the server')
-          try {
-            return stampToolResult('LIVE', id, await callServerTool(server, name, argsFromSchema(undefined, input), cfg.token))
-          } catch (err) {
-            return stampToolResult('LIVE', id, `error: ${err instanceof Error ? err.message : String(err)}`)
+        desc: `LIVE ${conn.name} via MCP — ${mcpTools.length} real tools available`,
+        run: async (input: string): Promise<ToolResult> => {
+          const tool = pickTool(mcpTools, input)
+          if (!tool) {
+            const detail = `no tool among ${mcpTools.length} advertised matches this request`
+            return {
+              content: stampToolResult('LIVE', id, blockedMessage('no_matching_tool', id, detail)),
+              error: { kind: 'blocked', message: detail },
+              source: 'live',
+            }
           }
+          return callMcp(tool, input)
         },
       })
       continue
     }
 
-    // Mock fallback — same canned data as CONNECTION_TOOLS, honestly stamped.
+    // Nothing live for this connection. Demo mode serves canned data (honestly
+    // stamped); strict mode refuses — fake data that judges as success is worse
+    // than an outcome that says the capability is missing.
+    if (isStrict()) {
+      const detail = cfg?.lastError ?? 'no live connection configured'
+      out.push({
+        id,
+        name: conn.name,
+        desc: `${conn.name} — not connected (strict mode: no mock substitution)`,
+        run: (): ToolResult => ({
+          content: blockedMessage('capability_unavailable', id, detail),
+          error: { kind: 'blocked', message: detail },
+        }),
+      })
+      continue
+    }
+
     out.push({
       id,
       name: conn.name,
       desc: conn.desc,
-      run: (q: string) => stampToolResult('MOCK', id, mockLookup(id, q)),
+      run: (q: string): ToolResult => ({
+        content: stampToolResult('MOCK', id, mockLookup(id, q)),
+        source: 'mock',
+      }),
     })
   }
   return out
@@ -748,10 +1009,18 @@ export function resolveConnectionTools(
 
 // ── Plan parsing (live brain output) ─────────────────────────────────────────
 
-const MAX_STEPS = 4
+/** Default steps per plan. Employees can raise it — see Employee.maxSteps. */
+export const MAX_STEPS = 4
 
-/** Parse "TOOL: <id> | <input>" lines; tolerates noise, caps steps, drops unknown tools. */
-export function parsePlan(text: string, allowedTools: string[]): PlanStep[] {
+/**
+ * Hard ceiling on parsing, not policy. How many steps an employee may actually
+ * run is decided by the graph from Employee.maxSteps; parsePlan only refuses to
+ * build an unbounded list out of a runaway reply.
+ */
+export const PLAN_PARSE_CEILING = 12
+
+/** Parse "TOOL: <id> | <input>" lines; tolerates noise, drops unknown tools. */
+export function parsePlan(text: string, allowedTools: string[], cap = PLAN_PARSE_CEILING): PlanStep[] {
   const steps: PlanStep[] = []
   for (const line of text.split('\n')) {
     const m = line.match(/^\s*(?:[-*•]\s*)?TOOL:\s*([a-z_]+)\s*\|\s*(.+)$/i)
@@ -759,7 +1028,7 @@ export function parsePlan(text: string, allowedTools: string[]): PlanStep[] {
     const tool = m[1].toLowerCase()
     if (!allowedTools.includes(tool)) continue
     steps.push({ tool, input: m[2].trim() })
-    if (steps.length >= MAX_STEPS) break
+    if (steps.length >= cap) break
   }
   return steps
 }
@@ -772,8 +1041,75 @@ const AgentState = Annotation.Root({
   step: Annotation<number>({ reducer: (_a, b) => b, default: () => 0 }),
   observations: Annotation<ToolCall[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
   answer: Annotation<string>({ reducer: (_a, b) => b, default: () => '' }),
+  replans: Annotation<number>({ reducer: (_a, b) => b, default: () => 0 }),
   trace: Annotation<TraceLine[]>({ reducer: (a, b) => a.concat(b), default: () => [] }),
 })
+
+/**
+ * One replan is allowed per run. A plan is capped at MAX_STEPS tools, so this
+ * bounds worst-case tool calls at 2×MAX_STEPS — enough to recover from a bad
+ * search, cheap enough that a project of a dozen tasks still fits its budget.
+ */
+export const MAX_REPLANS = 1
+
+export type EvaluationVerdict = 'sufficient' | 'retry' | 'blocked'
+
+export interface Evaluation {
+  verdict: EvaluationVerdict
+  reason: string
+}
+
+/**
+ * Outputs that came back technically fine but carry no information. Kept broad
+ * on purpose: tools phrase this a dozen ways ("No matching passages found",
+ * "0 results", "nothing matched") and a missed phrasing means the graph
+ * composes an answer out of nothing.
+ */
+const EMPTY_RESULT_RE =
+  /\b(no\s+(matching|results?|matches|data|records|items|hits|passages)|not\s+found|nothing\s+(found|matched)|returned\s+nothing|empty\s+result|0\s+results)\b/i
+
+/**
+ * Decide what a round of tool calls actually achieved. This is the node the
+ * graph was missing: without it a search returning "No results found" flowed
+ * straight to the responder, which composed an answer anyway.
+ */
+export function evaluateObservations(observations: ToolCall[]): Evaluation {
+  if (!observations.length) return { verdict: 'sufficient', reason: 'no tools were needed' }
+
+  const blocked = observations.filter((o) => o.error?.kind === 'blocked')
+  if (blocked.length === observations.length) {
+    return { verdict: 'blocked', reason: blocked[0].error?.message ?? 'required capability unavailable' }
+  }
+
+  const failed = observations.filter((o) => o.error?.kind === 'error')
+  if (failed.length) {
+    return { verdict: 'retry', reason: `${failed.length} tool call(s) errored: ${failed[0].error?.message ?? 'unknown'}` }
+  }
+
+  // Short is not the same as useless — a calculator answering "42" is a
+  // complete result. Only genuinely empty or explicitly no-result output counts.
+  const useful = observations.filter(
+    (o) => !o.error && o.output.trim().length > 0 && !EMPTY_RESULT_RE.test(o.output),
+  )
+  if (!useful.length) {
+    return { verdict: 'retry', reason: 'every tool returned an empty or no-result response' }
+  }
+
+  return { verdict: 'sufficient', reason: `${useful.length} of ${observations.length} calls returned usable output` }
+}
+
+/** Annotate the original request with what already failed, for brains without replan(). */
+export function replanPrompt(input: string, observations: ToolCall[], reason: string): string {
+  const tried = observations
+    .map((o) => `- ${o.tool}("${o.input.slice(0, 80)}") → ${o.error ? `ERROR: ${o.error.message}` : o.output.slice(0, 160)}`)
+    .join('\n')
+  return (
+    `${input}\n\n` +
+    `PREVIOUS ATTEMPT DID NOT WORK — ${reason}\n` +
+    `Already tried:\n${tried}\n` +
+    `Plan different tool calls. Do not repeat a call that already failed.`
+  )
+}
 
 type S = typeof AgentState.State
 
@@ -791,7 +1127,7 @@ export function buildEmployeeGraph(
   const tools = Object.values(toolMap)
 
   const planNode = async (state: S): Promise<Partial<S>> => {
-    const plan = (await brain.plan(state.input, tools)).slice(0, MAX_STEPS)
+    const plan = (await brain.plan(state.input, tools)).slice(0, employee.maxSteps ?? MAX_STEPS)
     return {
       plan,
       trace: [{
@@ -806,10 +1142,22 @@ export function buildEmployeeGraph(
   const actNode = async (state: S): Promise<Partial<S>> => {
     const spec = state.plan[state.step]
     const tool = toolMap[spec.tool] ?? ALL_TOOLS[spec.tool]
-    const output = tool ? await tool.run(spec.input) : `error: unknown tool "${spec.tool}"`
+    const result: ToolResult = tool
+      ? normalizeToolResult(await tool.run(spec.input))
+      : { content: `error: unknown tool "${spec.tool}"`, error: { kind: 'error', message: `unknown tool "${spec.tool}"` } }
+    const output = result.content
     return {
       step: state.step + 1,
-      observations: [{ tool: spec.tool, input: spec.input, output }],
+      observations: [{
+        tool: spec.tool,
+        input: spec.input,
+        output,
+        arguments: result.arguments,
+        data: result.data,
+        artifacts: result.artifacts,
+        error: result.error,
+        source: result.source,
+      }],
       trace: [{ node: 'act', text: `${spec.tool}("${spec.input.length > 60 ? spec.input.slice(0, 57) + '…' : spec.input}") → ${output.length > 110 ? output.slice(0, 107) + '…' : output}` }],
     }
   }
@@ -827,13 +1175,52 @@ export function buildEmployeeGraph(
     }
   }
 
+  const evaluateNode = async (state: S): Promise<Partial<S>> => {
+    const evaluation = evaluateObservations(state.observations)
+    // Silent on the happy path — a trace line every run would be noise, and the
+    // interesting case is precisely when the evidence was not good enough.
+    if (evaluation.verdict === 'sufficient') return {}
+    return { trace: [{ node: 'act', text: `evaluate — ${evaluation.verdict}: ${evaluation.reason}` }] }
+  }
+
+  const replanNode = async (state: S): Promise<Partial<S>> => {
+    const { reason } = evaluateObservations(state.observations)
+    const steps = brain.replan
+      ? await brain.replan(state.input, state.observations, tools)
+      : await brain.plan(replanPrompt(state.input, state.observations, reason), tools)
+    const plan = steps.slice(0, employee.maxSteps ?? MAX_STEPS)
+    return {
+      plan,
+      step: 0,
+      replans: state.replans + 1,
+      trace: [{
+        node: 'plan',
+        text: plan.length
+          ? `replan ${state.replans + 1} — ${plan.map((p) => p.tool).join(' → ')}`
+          : 'replan produced no new steps — answering with what we have',
+      }],
+    }
+  }
+
+  // ACT → EVALUATE → (REPLAN | RESPOND). A blocked capability short-circuits to
+  // the responder: replanning cannot conjure a connection that is not there.
+  const routeAfterEvaluate = (state: S): 'replanner' | 'responder' => {
+    const { verdict } = evaluateObservations(state.observations)
+    if (verdict === 'retry' && state.replans < MAX_REPLANS) return 'replanner'
+    return 'responder'
+  }
+
   return new StateGraph(AgentState)
     .addNode('planner', planNode)
     .addNode('actor', actNode)
+    .addNode('evaluator', evaluateNode)
+    .addNode('replanner', replanNode)
     .addNode('responder', respondNode)
     .addEdge(START, 'planner')
     .addConditionalEdges('planner', (s) => (s.plan.length ? 'actor' : 'responder'), { actor: 'actor', responder: 'responder' })
-    .addConditionalEdges('actor', (s) => (s.step < s.plan.length ? 'actor' : 'responder'), { actor: 'actor', responder: 'responder' })
+    .addConditionalEdges('actor', (s) => (s.step < s.plan.length ? 'actor' : 'evaluator'), { actor: 'actor', evaluator: 'evaluator' })
+    .addConditionalEdges('evaluator', routeAfterEvaluate, { replanner: 'replanner', responder: 'responder' })
+    .addConditionalEdges('replanner', (s) => (s.plan.length ? 'actor' : 'responder'), { actor: 'actor', responder: 'responder' })
     .addEdge('responder', END)
     .compile()
 }
@@ -1018,7 +1405,51 @@ export async function chatComplete(
   })
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} — ${await res.text().then((t) => t.slice(0, 140))}`)
   const data = await res.json()
+  recordUsage(data?.usage)
   return data.choices?.[0]?.message?.content ?? ''
+}
+
+// ── Token accounting ─────────────────────────────────────────────────────────
+// OpenAI-compatible providers return a `usage` block. Collecting it here means
+// budgets are charged against tokens the provider actually billed, instead of
+// a character-count guess. Providers that omit usage leave the counter at zero
+// and the caller falls back to estimating — which it can then say plainly.
+
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  /** False when no provider in this window reported usage. */
+  measured: boolean
+}
+
+const ZERO_USAGE: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, measured: false }
+let usageAccumulator: TokenUsage = { ...ZERO_USAGE }
+
+function recordUsage(usage: unknown): void {
+  const u = usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined
+  if (!u || typeof u !== 'object') return
+  const prompt = typeof u.prompt_tokens === 'number' ? u.prompt_tokens : 0
+  const completion = typeof u.completion_tokens === 'number' ? u.completion_tokens : 0
+  const total = typeof u.total_tokens === 'number' ? u.total_tokens : prompt + completion
+  if (!prompt && !completion && !total) return
+  usageAccumulator = {
+    promptTokens: usageAccumulator.promptTokens + prompt,
+    completionTokens: usageAccumulator.completionTokens + completion,
+    totalTokens: usageAccumulator.totalTokens + total,
+    measured: true,
+  }
+}
+
+/** Read the tokens billed since the last reset, then start a fresh window. */
+export function takeTokenUsage(): TokenUsage {
+  const taken = usageAccumulator
+  usageAccumulator = { ...ZERO_USAGE }
+  return taken
+}
+
+export function resetTokenUsage(): void {
+  usageAccumulator = { ...ZERO_USAGE }
 }
 
 export function liveBrain(provider: LiveProvider & { fixedParams?: boolean }): AgentBrain {

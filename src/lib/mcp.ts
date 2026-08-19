@@ -265,6 +265,29 @@ export async function callServerTool(
   args: Record<string, unknown>,
   token?: string,
 ): Promise<string> {
+  return (await callServerToolDetailed(server, toolName, args, token)).text
+}
+
+/** One MCP tool call with the structured half kept intact. */
+export interface McpToolResult {
+  /** Joined text blocks — the flattened view older callers use. */
+  text: string
+  /** `structuredContent` verbatim, when the server sent any. */
+  data?: unknown
+}
+
+/**
+ * Same call as `callServerTool` but without discarding `structuredContent`.
+ * Servers that return both prose and structured data used to lose the
+ * structured half entirely; downstream workers need the parsed object, not a
+ * re-parse of another model's prose.
+ */
+export async function callServerToolDetailed(
+  server: McpServerSpec,
+  toolName: string,
+  args: Record<string, unknown>,
+  token?: string,
+): Promise<McpToolResult> {
   const sessionId = await handshake(server, token)
   const { result } = await rpc(server, 'tools/call', { name: toolName, arguments: args }, { token, sessionId })
   const out = (result ?? {}) as ToolCallResult
@@ -273,7 +296,9 @@ export async function callServerTool(
     .map((b) => b.text as string)
   const joined = texts.join('\n').trim()
   if (out.isError) throw new McpError('tool', joined || `Tool "${toolName}" reported an error`)
-  if (joined) return joined
-  if (out.structuredContent !== undefined) return JSON.stringify(out.structuredContent)
-  return ''
+  if (joined) return { text: joined, data: out.structuredContent }
+  if (out.structuredContent !== undefined) {
+    return { text: JSON.stringify(out.structuredContent), data: out.structuredContent }
+  }
+  return { text: '' }
 }

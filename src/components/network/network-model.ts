@@ -187,50 +187,67 @@ export function buildEdges(count: number): NetEdge[] {
 
 // ── Ambient life ─────────────────────────────────────────────────────────────
 
-const PACKET_SNIPPETS = [
-  'ticket #421',
-  'weekly report',
-  'standup notes',
-  'PR #88 review',
-  'inbox digest',
-  'escalation summary',
-  'metrics pull',
-  'handoff notes',
-]
-
-/** Caption riding with a message packet, e.g. "Mara → Rex: ticket #421". */
-export function packetCaption(a: Employee, b: Employee, seedIndex: number): string {
-  const snippet = PACKET_SNIPPETS[Math.floor(seeded(seedIndex, 11) * PACKET_SNIPPETS.length)]
-  return `${a.name} → ${b.name}: ${snippet}`
+/**
+ * A handoff that actually happened. Captions used to be drawn from a list of
+ * invented snippets ("ticket #421", "PR #88 review"), which made the topology
+ * animation read as live telemetry. An edge now only carries a caption when
+ * there is a real event to name.
+ */
+export interface NetworkEvent {
+  /** Employee ids, matching Employee.id. */
+  from: string
+  to: string
+  /** What moved — an artifact path, task id, or tool name. */
+  label: string
+  at: number
 }
 
+/** Caption for a real handoff, e.g. "Mara → Rex: research/competitors.json". */
+export function packetCaption(a: Employee, b: Employee, event: NetworkEvent): string {
+  return `${a.name} → ${b.name}: ${event.label}`
+}
+
+/** The most recent real event on an edge, or undefined when nothing has moved. */
+export function eventForEdge(
+  events: NetworkEvent[] | undefined,
+  from: Employee,
+  to: Employee,
+): NetworkEvent | undefined {
+  if (!events?.length) return undefined
+  return events
+    .filter((e) => e.from === from.id && e.to === to.id)
+    .sort((x, y) => y.at - x.at)[0]
+}
+
+/** Capability per connection — what the employee could do, not what it is doing. */
 const CONNECTION_TASKS: Record<string, string> = {
-  zendesk: 'triaging the ticket queue…',
-  gmail: 'clearing the inbox…',
-  outlook: 'clearing the inbox…',
-  gcal: 'scheduling follow-ups…',
-  gdrive: 'filing reports in Drive…',
-  notion: 'tidying the wiki…',
-  slack: 'catching up on channels…',
-  github: 'reviewing pull requests…',
-  linear: 'updating the cycle…',
-  jira: 'moving tickets along…',
-  hubspot: 'updating the pipeline…',
+  zendesk: 'triage the ticket queue',
+  gmail: 'clear the inbox',
+  outlook: 'clear the inbox',
+  gcal: 'schedule follow-ups',
+  gdrive: 'file reports in Drive',
+  notion: 'tidy the wiki',
+  slack: 'catch up on channels',
+  github: 'review pull requests',
+  linear: 'update the cycle',
+  jira: 'move tickets along',
+  hubspot: 'update the pipeline',
 }
 
-const GENERIC_TASKS = ['drafting a reply…', 'writing the summary…', 'cross-checking the docs…']
-
-/** 2–3 subtle status lines an employee node cycles through while "working". */
-export function taskLinesFor(employee: Employee): string[] {
+/**
+ * What an employee *can* do, phrased as capability rather than activity.
+ * These used to read "drafting a reply…" / "cross-checking the docs…" on an
+ * idle node, which asserts work that is not happening. A node with no live
+ * status now describes its remit instead of narrating imaginary progress.
+ */
+export function taskLinesFor(employee: Employee, live?: string): string[] {
+  if (live) return [live]
   const lines: string[] = []
   for (const id of employee.connections ?? []) {
     const t = CONNECTION_TASKS[id]
-    if (t && !lines.includes(t)) lines.push(t)
+    if (t && !lines.some((l) => l.endsWith(t))) lines.push(`can ${t}`)
   }
-  for (const g of GENERIC_TASKS) {
-    if (lines.length >= 3) break
-    lines.push(g)
-  }
+  if (!lines.length) lines.push('idle — no task assigned')
   return lines.slice(0, 3)
 }
 

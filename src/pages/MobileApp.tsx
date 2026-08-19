@@ -27,6 +27,7 @@ import {
   X,
 } from 'lucide-react'
 import {
+  LIVE_PROVIDERS,
   liveBrain,
   simulatedBrain,
   type Employee,
@@ -49,6 +50,7 @@ import {
   resolveMobileProviderSpec,
   saveMobileProvider,
   type MobileProviderConfig,
+  roleProvider,
 } from '@/lib/mobile-provider'
 import {
   MOBILE_THREADS_KEY,
@@ -73,6 +75,7 @@ import { TaskLedgerPanel } from '@/components/mobile/TaskLedgerPanel'
 import ToolConfirmHost from '@/components/crew/ToolConfirmSheet'
 import { getSession } from '@/lib/auth'
 import { bootKernel, runTurn } from '@/lib/openmind-os'
+import { withExecutionMode } from '@/lib/execution-mode'
 import { SKILLS, type SkillId } from '@/lib/skills'
 import {
   applySlashToDraft,
@@ -322,6 +325,50 @@ function VoiceSheet({
           className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
           autoComplete="off"
         />
+        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">
+          Planner model <span className="normal-case tracking-normal text-[#a8a49c]">(optional)</span>
+        </label>
+        <select
+          value={provider.plannerProviderId ?? ''}
+          onChange={(event) => onProviderChange({ ...provider, plannerProviderId: event.target.value || undefined })}
+          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+        >
+          <option value="">Same as worker model</option>
+          {LIVE_PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>{p.name} · {p.model}</option>
+          ))}
+        </select>
+        {provider.plannerProviderId ? (
+          <input
+            type="password"
+            value={provider.plannerApiKey ?? ''}
+            onChange={(event) => onProviderChange({ ...provider, plannerApiKey: event.target.value })}
+            placeholder="planner API key"
+            className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+            autoComplete="off"
+          />
+        ) : null}
+        <p className="mt-1 text-[11px] leading-snug text-[#8d8b84]">
+          One model that plans the work, does the work, and grades the work approves its own
+          output. A separate planner breaks that loop.
+        </p>
+
+        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Execution mode</label>
+        <label className="mt-1.5 flex items-start gap-2.5 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={provider.strictMode === true}
+            onChange={(event) => onProviderChange({ ...provider, strictMode: event.target.checked })}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#17140f]"
+          />
+          <span className="text-sm leading-snug">
+            Strict mode
+            <span className="mt-0.5 block text-[11px] leading-snug text-[#8d8b84]">
+              No mock data, no offline planner, no heuristic judge. A missing connection blocks the
+              task instead of returning something that looks like an answer.
+            </span>
+          </span>
+        </label>
         <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Voice</label>
         <select
           value={voice.voice}
@@ -386,6 +433,20 @@ export default function MobileApp() {
   const liveReady = mobileLiveReady(provider)
   const providerSpec = resolveMobileProviderSpec(provider)
   const openAiVoiceReady = provider.providerId === 'openai' && provider.apiKey.trim().length > 0
+
+  // A dedicated planner provider when one is configured, else the worker
+  // provider. Same model planning and executing is weaker, but it is what a
+  // single-key setup can honestly offer.
+  const plannerRole = roleProvider(provider, 'planner')
+  const plannerSpec = resolveMobileProviderSpec({ ...provider, providerId: plannerRole.providerId })
+  const plannerBrain = plannerRole.apiKey.trim()
+    ? {
+        baseUrl: plannerSpec.baseUrl,
+        model: plannerSpec.model,
+        key: plannerRole.apiKey.trim(),
+        fixedParams: plannerSpec.fixedParams,
+      }
+    : null
 
   const brain = () =>
     liveReady
@@ -567,18 +628,28 @@ export default function MobileApp() {
         updateThread(threadId, (current) => ({ ...current, workspace: space, updatedAt: Date.now() }))
       }
       const crewPrompt = workspacePrompt(space, runtimePrompt)
-      const result = await runTurn(crewPrompt, brain(), {
-        lead: employee,
-        skill: turnSkill,
-        workspace: space,
-        onTrace: (line) => setLiveTrace((trace) => [...trace, line]),
-        toolKeys: {
-          tavily: provider.tavilyKey,
-          firecrawl: provider.firecrawlKey,
-          e2b: provider.e2bKey,
-          browserless: provider.browserlessKey,
-        },
-      })
+      // A strict run is opt-in per the Settings toggle. Inside it nothing
+      // substitutes for a missing capability, so a task blocks rather than
+      // returning canned data that would judge as success.
+      const result = await withExecutionMode(provider.strictMode ? 'strict' : 'demo', () =>
+        runTurn(crewPrompt, brain(), {
+          lead: employee,
+          skill: turnSkill,
+          workspace: space,
+          onTrace: (line) => setLiveTrace((trace) => [...trace, line]),
+          // The planner gets its own call with its own prompt rather than
+          // reusing the worker brain's context — one model should not design a
+          // plan and then grade its own execution of it.
+          planner: plannerBrain,
+          persist: true,
+          toolKeys: {
+            tavily: provider.tavilyKey,
+            firecrawl: provider.firecrawlKey,
+            e2b: provider.e2bKey,
+            browserless: provider.browserlessKey,
+          },
+        }),
+      )
       const assistantMessage: MobileMessage = {
         id: makeId('message'),
         role: 'assistant',

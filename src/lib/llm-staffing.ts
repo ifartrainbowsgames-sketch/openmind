@@ -14,6 +14,7 @@ import {
   type LiveProviderSpec,
 } from './agent'
 import { generateStaff, MAX_HIRES } from './staffing'
+import { blockedMessage, isStrict } from './execution-mode'
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export interface StaffingResult {
   rationale?: string
 }
 
-export type StaffingErrorCode = 'NO_KEY'
+export type StaffingErrorCode = 'NO_KEY' | 'PLANNER_UNREACHABLE'
 
 /** The only thrown error from this module — UI-catchable, means "send user to Settings". */
 export class StaffingError extends Error {
@@ -262,6 +263,13 @@ function emitDone(count: number, source: 'llm' | 'fallback', note: string | unde
 }
 
 function fallbackResult(employerPrompt: string, note: string, onStage?: (s: StaffingStage) => void): StaffingResult {
+  // Strict mode will not let the offline planner stand in for a live one that
+  // failed: a team designed by regex is not the team the planner would design,
+  // and downstream nothing can tell the two apart.
+  if (isStrict()) {
+    onStage?.({ key: 'offline-planner', label: 'Planner unavailable', detail: note, status: 'error' })
+    throw new StaffingError('PLANNER_UNREACHABLE', blockedMessage('planner_unreachable', 'llm-planner', note))
+  }
   const employees = generateStaff(employerPrompt)
   onStage?.({ key: 'offline-planner', label: 'Offline planner', detail: note, status: 'active' })
   emitHires(employees, onStage)

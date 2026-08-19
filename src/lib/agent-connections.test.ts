@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CONNECTION_IDS, CONNECTION_TOOLS, reviewCode, runEmployee, simulatedBrain,
+  CONNECTION_IDS, CONNECTION_TOOLS, normalizeToolResult, reviewCode, runEmployee, simulatedBrain,
   type Employee,
 } from './agent'
 
@@ -18,13 +18,13 @@ const emp = (over: Partial<Employee> = {}): Employee => ({
 describe('connection tools', () => {
   it('every connection has a callable tool that returns data', async () => {
     for (const id of CONNECTION_IDS) {
-      const out = await Promise.resolve(CONNECTION_TOOLS[id].run('status'))
+      const out = normalizeToolResult(await CONNECTION_TOOLS[id].run('status')).content
       expect(out.length, id).toBeGreaterThan(0)
     }
   })
 
   it('filters by query keywords', async () => {
-    const out = await Promise.resolve(CONNECTION_TOOLS.gmail.run('any refund emails?'))
+    const out = normalizeToolResult(await CONNECTION_TOOLS.gmail.run('any refund emails?')).content
     expect(out.toLowerCase()).toContain('refund')
   })
 })

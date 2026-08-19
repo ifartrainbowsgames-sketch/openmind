@@ -20,7 +20,26 @@ const CORS: Record<string, string> = {
 const UPSTREAM_TIMEOUT_MS = 22_000
 const UA = 'OpenMind/1.0 (https://openmind.dev)'
 
-type ToolKind = 'web_search' | 'browse_url' | 'run_code' | 'web_act'
+type ToolKind =
+  | 'web_search'
+  | 'browse_url'
+  | 'run_code'
+  | 'web_act'
+  | 'workspace_run'
+  | 'workspace_write_file'
+  | 'workspace_read_file'
+  | 'workspace_ls'
+  | 'git_clone'
+  | 'run_checks'
+
+const WORKSPACE_TOOLS: ToolKind[] = [
+  'workspace_run', 'workspace_write_file', 'workspace_read_file', 'workspace_ls', 'git_clone', 'run_checks',
+]
+
+const ALL_TOOL_KINDS: ToolKind[] = ['web_search', 'browse_url', 'run_code', 'web_act', ...WORKSPACE_TOOLS]
+
+/** Everything runs under one root so paths are stable between calls. */
+const WORKDIR = '/home/user/project'
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -40,7 +59,10 @@ function mock(kind: ToolKind, input: string): string {
   if (kind === 'web_act') {
     return `[MOCK · web_act] Hosted Chrome not configured. Set BROWSERLESS_API_KEY. Task: ${q.slice(0, 240)}`
   }
-  return `[MOCK · run_code] Simulated sandbox for:\n${q.slice(0, 300)}\nAdd E2B_API_KEY for real execution.`
+  if (kind === 'run_code') {
+    return `[MOCK · run_code] Simulated sandbox for:\n${q.slice(0, 300)}\nAdd E2B_API_KEY for real execution.`
+  }
+  return `[MOCK · ${kind}] No sandbox configured — set E2B_API_KEY to give workers a real machine. Request: ${q.slice(0, 200)}`
 }
 
 async function tavilySearch(query: string, apiKey: string): Promise<string> {
@@ -137,34 +159,111 @@ async function fetchReadable(target: string): Promise<string> {
   return `[LIVE · browse_url · fetch] ${target}\n${text}`
 }
 
-async function e2bRun(code: string, apiKey: string): Promise<string> {
-  const create = await fetch('https://api.e2b.dev/sandboxes', {
+// ── Sandbox session ──────────────────────────────────────────────────────────
+// A sandbox used to be created, given one `python -c`, and destroyed inside a
+// `finally`. That makes clone → install → edit → test → fix impossible: every
+// call started from an empty machine. The sandbox is now a session keyed to the
+// project, created on first use and reused until the project ends.
+
+const E2B_BASE = 'https://api.e2b.dev'
+const E2B_TEMPLATE = Deno.env.get('E2B_TEMPLATE') || 'base'
+/** Sandboxes idle longer than this are reaped by E2B; we recreate transparently. */
+const SANDBOX_TTL_SECONDS = 900
+
+interface SandboxCommand {
+  exitCode: number
+  stdout: string
+  stderr: string
+}
+
+async function e2bCreate(apiKey: string): Promise<string> {
+  const res = await fetch(`${E2B_BASE}/sandboxes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-    body: JSON.stringify({ templateID: 'base' }),
+    body: JSON.stringify({ templateID: E2B_TEMPLATE, timeout: SANDBOX_TTL_SECONDS }),
     signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
   })
-  const createdText = await create.text()
-  if (!create.ok) throw new Error(`e2b create ${create.status}: ${createdText.slice(0, 180)}`)
-  const created = JSON.parse(createdText) as { sandboxID?: string; sandboxId?: string; id?: string }
-  const sandboxId = created.sandboxID ?? created.sandboxId ?? created.id
-  if (!sandboxId) throw new Error('e2b create: missing sandbox id')
+  const text = await res.text()
+  if (!res.ok) throw new Error(`e2b create ${res.status}: ${text.slice(0, 180)}`)
+  const created = JSON.parse(text) as { sandboxID?: string; sandboxId?: string; id?: string }
+  const id = created.sandboxID ?? created.sandboxId ?? created.id
+  if (!id) throw new Error('e2b create: missing sandbox id')
+  return id
+}
+
+/** Raised when the sandbox is gone (expired or reaped) so callers can recreate. */
+class SandboxGoneError extends Error {}
+
+async function e2bExec(
+  sandboxId: string,
+  cmd: string,
+  args: string[],
+  apiKey: string,
+  timeoutSeconds = 120,
+): Promise<SandboxCommand> {
+  const res = await fetch(`${E2B_BASE}/sandboxes/${sandboxId}/commands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+    body: JSON.stringify({ cmd, args, timeout: timeoutSeconds }),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  })
+  const text = await res.text()
+  if (res.status === 404) throw new SandboxGoneError(`sandbox ${sandboxId} no longer exists`)
+  if (!res.ok) throw new Error(`e2b exec ${res.status}: ${text.slice(0, 180)}`)
+
+  // The API has returned both a structured body and plain text across versions;
+  // accept either rather than depending on one shape.
   try {
-    const run = await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}/commands`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-      body: JSON.stringify({ cmd: 'python', args: ['-c', code], timeout: 15 }),
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-    })
-    const runText = await run.text()
-    if (!run.ok) throw new Error(`e2b run ${run.status}: ${runText.slice(0, 180)}`)
-    return `[LIVE · run_code]\n${runText.slice(0, 4000)}`
-  } finally {
-    await fetch(`https://api.e2b.dev/sandboxes/${sandboxId}`, {
-      method: 'DELETE',
-      headers: { 'X-API-Key': apiKey },
-    }).catch(() => undefined)
+    const parsed = JSON.parse(text) as Partial<SandboxCommand> & { output?: string; result?: string }
+    return {
+      exitCode: typeof parsed.exitCode === 'number' ? parsed.exitCode : 0,
+      stdout: parsed.stdout ?? parsed.output ?? parsed.result ?? '',
+      stderr: parsed.stderr ?? '',
+    }
+  } catch {
+    return { exitCode: 0, stdout: text, stderr: '' }
   }
+}
+
+/** Run a shell line, reusing `sandboxId` when it is still alive. */
+async function sandboxShell(
+  sandboxId: string | undefined,
+  script: string,
+  apiKey: string,
+  timeoutSeconds = 120,
+): Promise<{ result: SandboxCommand; sandboxId: string; recreated: boolean }> {
+  let id = sandboxId
+  let recreated = false
+  if (!id) {
+    id = await e2bCreate(apiKey)
+    recreated = true
+  }
+  try {
+    return { result: await e2bExec(id, 'sh', ['-lc', script], apiKey, timeoutSeconds), sandboxId: id, recreated }
+  } catch (err) {
+    if (!(err instanceof SandboxGoneError)) throw err
+    // Expired between calls — start a fresh one so the worker can continue.
+    id = await e2bCreate(apiKey)
+    return { result: await e2bExec(id, 'sh', ['-lc', script], apiKey, timeoutSeconds), sandboxId: id, recreated: true }
+  }
+}
+
+/** Base64 so arbitrary file content survives the shell without quoting games. */
+function writeFileScript(path: string, content: string): string {
+  const b64 = btoa(unescape(encodeURIComponent(content)))
+  const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.'
+  return `mkdir -p ${shellQuote(dir)} && printf %s ${shellQuote(b64)} | base64 -d > ${shellQuote(path)} && echo "wrote ${path} ($(wc -c < ${shellQuote(path)}) bytes)"`
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function formatCommand(label: string, result: SandboxCommand): string {
+  const parts = [`[LIVE · ${label}] exit=${result.exitCode}`]
+  if (result.stdout.trim()) parts.push(result.stdout.trim().slice(0, 6000))
+  if (result.stderr.trim()) parts.push(`stderr:\n${result.stderr.trim().slice(0, 2000)}`)
+  return parts.join('\n')
 }
 
 async function liveSearch(query: string, keys: Record<string, unknown>): Promise<string> {
@@ -286,24 +385,175 @@ async function liveWebAct(input: string, keys: Record<string, unknown>): Promise
   return `[LIVE · web_act · chrome] ${spec.url}\nGoal: ${spec.goal}\n${text.slice(0, 4000)}`
 }
 
+/**
+ * Run whatever checks the project actually defines, instead of guessing at
+ * quality from source text. Detects the ecosystem, installs if needed, and
+ * reports each check with its real exit code. POSIX sh only — no PIPESTATUS,
+ * no bashisms — because the sandbox shell is not guaranteed to be bash.
+ */
+const CHECKS_SCRIPT = `
+cd ${'${WORKDIR_PLACEHOLDER}'} 2>/dev/null || { echo "no workspace — clone or write files first"; exit 1; }
+FOUND=0
+run_check() {
+  label="$1"; shift
+  "$@" > /tmp/check.log 2>&1
+  code=$?
+  echo "--- $label (exit $code) ---"
+  tail -60 /tmp/check.log
+  return 0
+}
+has_script() { node -e "var s=require('./package.json').scripts||{};process.exit(s['$1']?0:1)" 2>/dev/null; }
+
+if [ -f package.json ]; then
+  FOUND=1
+  echo "== node project =="
+  if [ ! -d node_modules ]; then
+    echo "installing dependencies..."
+    npm ci > /tmp/install.log 2>&1 || npm install > /tmp/install.log 2>&1 || { echo "dependency install FAILED"; tail -30 /tmp/install.log; }
+  fi
+  has_script typecheck && run_check "npm run typecheck" npm run --silent typecheck
+  has_script lint && run_check "npm run lint" npm run --silent lint
+  has_script test && run_check "npm test" npm test --silent
+  has_script build && run_check "npm run build" npm run --silent build
+fi
+
+if [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; then
+  FOUND=1
+  echo "== python project =="
+  [ -f requirements.txt ] && (pip install -q -r requirements.txt > /tmp/pipinstall.log 2>&1 || echo "pip install failed")
+  command -v ruff >/dev/null 2>&1 && run_check "ruff" ruff check .
+  command -v pytest >/dev/null 2>&1 && run_check "pytest" pytest -q
+fi
+
+if [ -f go.mod ]; then
+  FOUND=1
+  echo "== go project =="
+  run_check "go vet" go vet ./...
+  run_check "go test" go test ./...
+fi
+
+if [ -f Cargo.toml ]; then
+  FOUND=1
+  echo "== rust project =="
+  run_check "cargo test" cargo test
+fi
+
+if [ "$FOUND" = "0" ] && [ -f Makefile ]; then
+  FOUND=1
+  echo "== makefile =="
+  run_check "make test" make test
+fi
+
+if [ "$FOUND" = "0" ]; then
+  echo "no recognised project manifest (package.json, pyproject.toml, go.mod, Cargo.toml, Makefile)"
+  echo "files present:"
+  ls -1 | head -30
+fi
+`.replace('${WORKDIR_PLACEHOLDER}', WORKDIR)
+
+interface WorkspaceInput {
+  path?: string
+  content?: string
+  command?: string
+  repo?: string
+  branch?: string
+}
+
+/** Tools accept either JSON or a bare string, matching the rest of the toolset. */
+function parseWorkspaceInput(raw: string): WorkspaceInput {
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed) as WorkspaceInput
+    } catch {
+      /* not JSON after all — fall through */
+    }
+  }
+  return { command: trimmed, path: trimmed, repo: trimmed }
+}
+
+async function runWorkspaceTool(
+  tool: ToolKind,
+  raw: string,
+  apiKey: string,
+  priorSandbox?: string,
+): Promise<{ output: string; sandboxId: string }> {
+  const spec = parseWorkspaceInput(raw)
+  const cd = `mkdir -p ${WORKDIR} && cd ${WORKDIR}`
+
+  if (tool === 'workspace_write_file') {
+    const path = spec.path?.trim()
+    if (!path) return { output: '[error] workspace_write_file needs {"path","content"}', sandboxId: priorSandbox ?? '' }
+    const script = `${cd} && ${writeFileScript(path, spec.content ?? '')}`
+    const { result, sandboxId } = await sandboxShell(priorSandbox, script, apiKey)
+    return { output: formatCommand('workspace_write_file', result), sandboxId }
+  }
+
+  if (tool === 'workspace_read_file') {
+    const path = spec.path?.trim()
+    if (!path) return { output: '[error] workspace_read_file needs {"path"}', sandboxId: priorSandbox ?? '' }
+    const { result, sandboxId } = await sandboxShell(priorSandbox, `${cd} && cat ${shellQuote(path)}`, apiKey)
+    return { output: formatCommand('workspace_read_file', result), sandboxId }
+  }
+
+  if (tool === 'workspace_ls') {
+    const path = spec.path?.trim() || '.'
+    const script = `${cd} && ls -la ${shellQuote(path)} 2>/dev/null || find ${shellQuote(path)} -maxdepth 2 -not -path '*/node_modules/*' -not -path '*/.git/*' | head -200`
+    const { result, sandboxId } = await sandboxShell(priorSandbox, script, apiKey)
+    return { output: formatCommand('workspace_ls', result), sandboxId }
+  }
+
+  if (tool === 'git_clone') {
+    const repo = spec.repo?.trim()
+    if (!repo) return { output: '[error] git_clone needs {"repo"}', sandboxId: priorSandbox ?? '' }
+    if (!/^https:\/\/[\w.-]+\/[\w./-]+$/.test(repo)) {
+      return { output: `[error] git_clone only accepts https repo URLs, got "${repo.slice(0, 80)}"`, sandboxId: priorSandbox ?? '' }
+    }
+    const branch = spec.branch?.trim()
+    const script =
+      `mkdir -p ${WORKDIR} && cd ${WORKDIR} && ` +
+      `git clone --depth 1 ${branch ? `--branch ${shellQuote(branch)} ` : ''}${shellQuote(repo)} . 2>&1 && ` +
+      `git log --oneline -1`
+    const { result, sandboxId } = await sandboxShell(priorSandbox, script, apiKey, 180)
+    return { output: formatCommand('git_clone', result), sandboxId }
+  }
+
+  if (tool === 'run_checks') {
+    const { result, sandboxId } = await sandboxShell(priorSandbox, CHECKS_SCRIPT, apiKey, 600)
+    return { output: formatCommand('run_checks', result), sandboxId }
+  }
+
+  // workspace_run and legacy run_code
+  const command =
+    tool === 'run_code'
+      ? `python3 -c ${shellQuote(raw)}`
+      : (spec.command ?? raw).trim()
+  if (!command) return { output: '[error] no command given', sandboxId: priorSandbox ?? '' }
+
+  const { result, sandboxId } = await sandboxShell(priorSandbox, `${cd} && ${command}`, apiKey, 240)
+  return { output: formatCommand(tool, result), sandboxId }
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
   if (req.method !== 'POST') return json(405, { error: 'POST only', ok: false, source: 'mock', output: '' })
 
-  let body: { tool?: unknown; input?: unknown; keys?: unknown }
+  let body: { tool?: unknown; input?: unknown; keys?: unknown; sandboxId?: unknown }
   try {
     body = JSON.parse(await req.text())
   } catch {
     return json(400, { error: 'body must be JSON', ok: false, source: 'mock', output: '' })
   }
 
-  const tool = body.tool
-  if (tool !== 'web_search' && tool !== 'browse_url' && tool !== 'run_code' && tool !== 'web_act') {
-    return json(400, { error: 'tool must be web_search | browse_url | run_code | web_act', ok: false, source: 'mock', output: '' })
+  const tool = body.tool as ToolKind
+  if (!ALL_TOOL_KINDS.includes(tool)) {
+    return json(400, { error: `tool must be one of ${ALL_TOOL_KINDS.join(' | ')}`, ok: false, source: 'mock', output: '' })
   }
   const input = typeof body.input === 'string' ? body.input : ''
   const keys = (body.keys && typeof body.keys === 'object' ? body.keys : {}) as Record<string, unknown>
   const e2b = (typeof keys.e2b === 'string' && keys.e2b) || Deno.env.get('E2B_API_KEY') || ''
+  // Sent by the client so successive calls land in the same machine.
+  const priorSandbox = typeof body.sandboxId === 'string' && body.sandboxId ? body.sandboxId : undefined
 
   try {
     if (tool === 'web_search') {
@@ -315,8 +565,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (tool === 'web_act') {
       return json(200, { ok: true, source: 'live', output: await liveWebAct(input, keys) })
     }
-    if (tool === 'run_code' && e2b) {
-      return json(200, { ok: true, source: 'live', output: await e2bRun(input, e2b) })
+    if ((tool === 'run_code' || WORKSPACE_TOOLS.includes(tool)) && e2b) {
+      const { output, sandboxId } = await runWorkspaceTool(tool, input, e2b, priorSandbox)
+      return json(200, { ok: true, source: 'live', output, sandboxId })
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)

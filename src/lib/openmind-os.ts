@@ -7,7 +7,8 @@ import { setNangoOwner } from './nango'
 import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
 import { isSimpleChat } from './task-ledger'
 import { needsTaskGraph } from './task-planner'
-import { runTaskGraph } from './task-runner'
+import { runTaskGraph, type RunTaskGraphOptions } from './task-runner'
+import { setProjectOwner } from './project-store'
 import { stripWorkspacePrompt } from './workspace'
 
 export type OsAppId = 'research' | 'developer' | 'browser' | 'office' | 'memory' | 'connect'
@@ -36,6 +37,7 @@ export function bootKernel(options: BootKernelOptions = {}): void {
   if (options.userId) {
     setNangoOwner(options.userId)
     setMemoryOwner(options.userId)
+    setProjectOwner(options.userId)
   }
 }
 
@@ -45,7 +47,7 @@ export type RunTurnOptions = RunCrewOptions & {
   crew?: boolean
   /** Force artifact-first task graph even for short prompts. */
   taskGraph?: boolean
-}
+} & Pick<RunTaskGraphOptions, 'planner' | 'persist' | 'budget'>
 
 /** One chat turn — single assistant for small talk; task graph for real work. */
 export async function runTurn(

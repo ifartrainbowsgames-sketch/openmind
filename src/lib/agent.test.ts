@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   calc,
+  normalizeToolResult,
   parsePlan,
+  PLAN_PARSE_CEILING,
   runEmployee,
   simulatedBrain,
   TOOL_REGISTRY,
@@ -50,9 +52,14 @@ describe('parsePlan', () => {
     expect(parsePlan('TOOL: sentiment | text', ['calculator'])).toEqual([])
   })
 
-  it('caps at 4 steps', () => {
+  it('caps at the parse ceiling, not the per-employee budget', () => {
+    const raw = Array(30).fill('TOOL: calculator | 1+1').join('\n')
+    expect(parsePlan(raw, ['calculator'])).toHaveLength(PLAN_PARSE_CEILING)
+  })
+
+  it('honours an explicit cap', () => {
     const raw = Array(8).fill('TOOL: calculator | 1+1').join('\n')
-    expect(parsePlan(raw, ['calculator'])).toHaveLength(4)
+    expect(parsePlan(raw, ['calculator'], 2)).toHaveLength(2)
   })
 
   it('returns empty for NONE', () => {
@@ -69,7 +76,7 @@ describe('tool registry', () => {
   })
   it('summarize condenses text', async () => {
     const t = 'Cats are mammals. Cats sleep most of the day. The weather is nice. Cats hunt mice.'
-    const out = await Promise.resolve(TOOL_REGISTRY.summarize.run(t))
+    const out = normalizeToolResult(await TOOL_REGISTRY.summarize.run(t)).content
     expect(out.length).toBeLessThan(t.length)
   })
 })
