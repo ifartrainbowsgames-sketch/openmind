@@ -83,7 +83,9 @@ describe('isMcpWriteTool', () => {
 describe('live MCP write confirmation', () => {
   const cfg: LiveConnectionConfig = {
     connectionId: 'github', mode: 'mcp', status: 'live', serverUrl: 'https://example.test/mcp',
-    tools: [{ name: 'delete_repo', description: 'Delete a repository', inputSchema: { properties: { q: { type: 'string' } } } }],
+    toolNames: ['delete_repo'],
+    toolDescriptions: { delete_repo: 'Delete a repository' },
+    toolSchemas: { delete_repo: { properties: { q: { type: 'string' } } } },
   }
 
   it('blocks the call when the guard declines', async () => {
@@ -108,7 +110,9 @@ describe('live MCP write confirmation', () => {
     setMcpToolGuard(async () => { called = true; return false })
     const readCfg: LiveConnectionConfig = {
       ...cfg,
-      tools: [{ name: 'get_repo', description: 'Read repo metadata', inputSchema: { properties: { q: { type: 'string' } } } }],
+      toolNames: ['get_repo'],
+      toolDescriptions: { get_repo: 'Read repo metadata' },
+      toolSchemas: { get_repo: { properties: { q: { type: 'string' } } } },
     }
     const tool = resolveConnectionTools(emp(['github']), [readCfg]).find((t) => t.id === 'github__get_repo')!
     await tool.run('acme/app')

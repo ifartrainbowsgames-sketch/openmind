@@ -9,8 +9,8 @@ const links = [
   { label: 'Mobile app', href: '/app' },
   { label: 'Employees', href: '/employees' },
   { label: 'Chatbot', href: '#capabilities' },
-  { label: 'Providers', href: '#providers' },
-  { label: 'Docs', href: '#integrate' },
+  { label: 'Automations', href: '#employees' },
+  { label: 'Security', href: '#security' },
   { label: 'Pricing', href: '#pricing' },
 ]
 
@@ -30,21 +30,12 @@ export default function Navbar() {
         scrolled ? 'border-border' : 'border-transparent'
       }`}
     >
-      {/* top spec strip */}
-      <div className="border-b border-border/40 bg-primary text-primary-foreground">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-1 font-mono-spec text-[10px] uppercase tracking-[0.18em]">
-          <span>v2.0 — BYOK release</span>
-          <span className="hidden sm:block">zero token markup · mit licensed</span>
-          <span className="text-accent">● all systems nominal</span>
-        </div>
-      </div>
-
       <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3.5">
         <a href="#top" className="flex items-baseline gap-2">
           <span className="font-serif-display text-2xl font-bold tracking-tight">
             OpenMind<span className="text-accent">.</span>
           </span>
-          <span className="spec-label hidden sm:inline">integration layer</span>
+          <span className="spec-label hidden sm:inline">customer support</span>
         </a>
 
         <div className="hidden items-center gap-6 lg:flex">
@@ -77,7 +68,7 @@ export default function Navbar() {
               asChild
               className="rounded-none border border-primary bg-primary font-mono-spec text-xs uppercase tracking-[0.14em] hard-shadow-sm hover:bg-accent hover:border-accent hover:text-white"
             >
-              <TransitionLink to="/dashboard">Open console</TransitionLink>
+              <TransitionLink to="/dashboard">Get started</TransitionLink>
             </Button>
           </Magnetic>
         </div>
@@ -113,7 +104,7 @@ export default function Navbar() {
               ),
             )}
             <Button asChild className="mt-2 rounded-none bg-primary font-mono-spec text-xs uppercase tracking-[0.14em]">
-              <TransitionLink to="/dashboard" onClick={() => setOpen(false)}>Open console</TransitionLink>
+              <TransitionLink to="/dashboard" onClick={() => setOpen(false)}>Get started</TransitionLink>
             </Button>
           </div>
         </div>

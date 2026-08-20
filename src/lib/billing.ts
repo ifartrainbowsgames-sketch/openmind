@@ -6,6 +6,7 @@
 //      Stripe dashboard (test mode first, then live when launching).
 //   2. Paste the URL below and wire it to the Upgrade button in
 //      src/pages/Dashboard.tsx.
-//   3. On successful checkout, set the user's row in the `subscriptions`
-//      table to plan = 'pro' (Supabase) — the console picks it up on load.
+//   3. A verified Stripe webhook updates `subscriptions` and mirrors the plan
+//      into `profiles` with the Supabase service role. Browser clients cannot
+//      update billing fields.
 export const PRO_CHECKOUT_URL: string | null = null

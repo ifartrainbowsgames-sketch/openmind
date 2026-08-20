@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-single
 dist-ssr
 *.local
 
@@ -23,6 +24,8 @@ dist-ssr
 *.sln
 *.sw?
 .env
+playwright-report
+test-results
 
 # build artifact
 manifest.json

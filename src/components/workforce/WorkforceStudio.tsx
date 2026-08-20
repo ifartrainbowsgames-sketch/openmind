@@ -11,20 +11,27 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   AlertTriangle, Bot, Check, ChevronDown, ChevronRight, ClipboardCheck, KeyRound, Link2,
-  Loader2, PenLine, Radio, ScanText, Send, ShieldCheck, Sparkles, Trash2, Users, Workflow, Wrench, X,
+  Loader2, PenLine, Plug, Radio, ScanText, Send, ShieldCheck, Sparkles, Trash2, Users, Workflow, Wrench, X,
 } from 'lucide-react'
 import {
-  ALL_TOOLS, LIVE_PROVIDERS, loadLiveConnections, resolveConnectionTools, runEmployee,
-  simulatedBrain, liveBrain, toolName,
+  ALL_TOOLS, CONNECTIONS, LIVE_PROVIDERS, loadLiveConnections, probeConnection, resolveConnectionTools, runEmployee,
+  saveLiveConnections, simulatedBrain, liveBrain, toolName,
   type AgentBrain, type Employee, type LiveConnectionConfig, type PlanStep, type TraceLine,
 } from '@/lib/agent'
 import { runCrew, type CrewArtifact } from '@/lib/crew'
 import { MAX_HIRES } from '@/lib/staffing'
 import { planWorkforce, StaffingError, type StaffingStage } from '@/lib/llm-staffing'
 import { generateStaff, provisionPlan, type ProvisionStage } from '@/lib/staffing'
-import { loadCustomEmployees, PRESET_EMPLOYEES, saveCustomEmployees } from '@/data/employees'
+import {
+  loadCustomEmployees,
+  loadEmployeeConnectionOverrides,
+  PRESET_EMPLOYEES,
+  saveCustomEmployees,
+  saveEmployeeConnectionOverrides,
+} from '@/data/employees'
 import { loadScorecards, recordScore, scoreRun, type RunScore } from '@/lib/reportcard'
 import { streamText } from '@/lib/demo'
+import { loadOAuthConnections, mergeConnectionConfigs } from '@/lib/oauth-connections'
 import { inputCls, ModeStamp, RunButton, textareaCls } from '@/components/demos/shared'
 import WorkforceMap from './WorkforceMap'
 import GraphFlow from './GraphFlow'
@@ -171,8 +178,10 @@ function AutonomyControl({ value, onChange }: { value: Autonomy; onChange: (a: A
 
 export default function WorkforceStudio({ embedded = false }: { embedded?: boolean }) {
   const [custom, setCustom] = useState<Employee[]>([])
+  const [connectionOverrides, setConnectionOverrides] = useState<Record<string, string[]>>({})
   const [selectedId, setSelectedId] = useState(PRESET_EMPLOYEES[0].id)
   const [liveConfigs, setLiveConfigs] = useState<LiveConnectionConfig[]>([])
+  const [connectionSyncError, setConnectionSyncError] = useState<string | null>(null)
   const [autonomyMap, setAutonomyMap] = useState<Record<string, Autonomy>>({})
   const [scoresVersion, setScoresVersion] = useState(0)
 
@@ -202,12 +211,22 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
   const [creatorError, setCreatorError] = useState<string | null>(null)
 
   // sections
-  const [tab, setTab] = useState<'studio' | 'connections'>('studio')
+  const [tab, setTab] = useState<'studio' | 'connections'>(() =>
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('connections') === '1'
+      ? 'connections'
+      : 'studio')
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const roster = [...PRESET_EMPLOYEES, ...custom]
+  const roster = [
+    ...PRESET_EMPLOYEES.map((item) =>
+      Object.prototype.hasOwnProperty.call(connectionOverrides, item.id)
+        ? { ...item, connections: connectionOverrides[item.id] }
+        : item,
+    ),
+    ...custom,
+  ]
   const employee = roster.find((e) => e.id === selectedId) ?? roster[0]
   const provider = LIVE_PROVIDERS.find((p) => p.id === providerId) ?? LIVE_PROVIDERS[0]
   const keyOk = provider.keyRequired === false || apiKey.trim().length > 0
@@ -216,7 +235,29 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
 
   useEffect(() => {
     setCustom(loadCustomEmployees())
-    setLiveConfigs(loadLiveConnections())
+    setConnectionOverrides(loadEmployeeConnectionOverrides())
+    const localConnections = loadLiveConnections()
+    setLiveConfigs(localConnections)
+    void loadOAuthConnections()
+      .then(async (oauthConnections) => {
+        const merged = mergeConnectionConfigs(localConnections, oauthConnections)
+        const checked = await Promise.all(
+          merged.map((config) =>
+            config.authSource === 'oauth' && config.status === 'ready'
+              ? probeConnection(config)
+              : Promise.resolve(config)),
+        )
+        saveLiveConnections(checked)
+        setLiveConfigs(checked)
+        setConnectionSyncError(null)
+      })
+      .catch((error) => {
+        setConnectionSyncError(
+          error instanceof Error
+            ? error.message
+            : 'Installed connectors could not be loaded. Manual connections remain available.',
+        )
+      })
     setAutonomyMap(loadAutonomy())
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [])
@@ -364,6 +405,27 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
     setCustom(next)
     saveCustomEmployees(next)
     if (selectedId === id) select(PRESET_EMPLOYEES[0].id)
+  }
+
+  const toggleEmployeeConnection = (connectionId: string) => {
+    const attached = employee.connections ?? []
+    const nextConnections = attached.includes(connectionId)
+      ? attached.filter((id) => id !== connectionId)
+      : [...attached, connectionId]
+    if (employee.preset) {
+      const next = { ...connectionOverrides, [employee.id]: nextConnections }
+      setConnectionOverrides(next)
+      saveEmployeeConnectionOverrides(next)
+    } else {
+      const next = custom.map((item) =>
+        item.id === employee.id ? { ...item, connections: nextConnections } : item,
+      )
+      setCustom(next)
+      saveCustomEmployees(next)
+    }
+    setMsgs([])
+    setLiveTrace([])
+    setApproval(null)
   }
 
   // ── run flow (trust-ladder gated) ──────────────────────────────────────────
@@ -515,7 +577,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
   }
 
   const activeTrace = running ? liveTrace : ([...msgs].reverse().find((m) => m.trace)?.trace ?? [])
-  const liveCount = liveConfigs.filter((c) => c.status === 'live').length
+  const configuredCount = liveConfigs.filter((c) => c.status === 'live' || c.status === 'ready').length
 
   // ── render ─────────────────────────────────────────────────────────────────
 
@@ -543,7 +605,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
           </div>
           {mode === 'live' && (
             <div className="flex flex-wrap items-center gap-2">
-              <select className={`${inputCls} w-auto`} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
+              <select aria-label="AI provider" className={`${inputCls} w-auto`} value={providerId} onChange={(e) => setProviderId(e.target.value)}>
                 {LIVE_PROVIDERS.map((p) => (
                   <option key={p.id} value={p.id}>{p.name} · {p.model}</option>
                 ))}
@@ -552,6 +614,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                 <input
                   className={`${inputCls} w-64`}
                   type="password"
+                  aria-label="Provider API key"
                   placeholder="Provider API key — stays in memory only"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
@@ -593,8 +656,8 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
           }`}
         >
           <Link2 className="h-3.5 w-3.5" /> Connections
-          <span className={`px-1.5 py-0.5 text-[9px] ${liveCount ? 'bg-emerald-700 text-white' : 'bg-secondary text-muted-foreground'}`}>
-            {liveCount} live
+          <span className={`px-1.5 py-0.5 text-[9px] ${configuredCount ? 'bg-emerald-700 text-white' : 'bg-secondary text-muted-foreground'}`}>
+            {configuredCount} ready
           </span>
         </button>
       </div>
@@ -607,7 +670,11 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
               Advanced
             </summary>
             <div className="border-t border-border/40">
-              <ConnectionsPanel configs={liveConfigs} onChange={setLiveConfigs} />
+              <ConnectionsPanel
+                configs={liveConfigs}
+                onChange={setLiveConfigs}
+                loadError={connectionSyncError}
+              />
             </div>
           </details>
         </div>
@@ -757,8 +824,14 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                   key={e.id}
                   role="button"
                   tabIndex={0}
+                  aria-pressed={selectedId === e.id}
                   onClick={() => select(e.id)}
-                  onKeyDown={(ev) => { if (ev.key === 'Enter') select(e.id) }}
+                  onKeyDown={(ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                      ev.preventDefault()
+                      select(e.id)
+                    }
+                  }}
                   style={{ '--dash-i': i } as CSSProperties}
                   className={`dash-cascade group relative cursor-pointer overflow-hidden border p-4 pl-5 text-left transition-colors ${
                     selectedId === e.id ? 'border-primary bg-card hard-shadow-sm' : 'border-border/60 bg-card/60 hover:bg-card'
@@ -778,6 +851,7 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                         onClick={(ev) => { ev.stopPropagation(); fire(e.id) }}
                         className="p-1 text-muted-foreground/50 hover:text-accent"
                         title="Fire this employee"
+                        aria-label={`Remove ${e.name} from the roster`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -797,6 +871,8 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                           className={`border px-1.5 py-0.5 font-mono-spec text-[9px] uppercase tracking-wider ${
                             st === 'live'
                               ? 'border-emerald-700/70 bg-emerald-50 text-emerald-800'
+                              : st === 'ready'
+                              ? 'border-sky-700/70 bg-sky-50 text-sky-800'
                               : st === 'error'
                               ? 'border-red-600/70 bg-red-50 text-red-700'
                               : 'border-amber-600/60 bg-amber-50 text-amber-800'
@@ -814,6 +890,56 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* ── employee plugin attachments ── */}
+          <div className="border border-border/60 bg-card p-5">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <span className="spec-label flex items-center gap-2">
+                <Plug className="h-3.5 w-3.5" /> {employee.name}'s plugins
+              </span>
+              <button
+                onClick={() => setTab('connections')}
+                className="font-mono-spec text-[9px] uppercase tracking-[0.14em] text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-accent"
+              >
+                Open connection marketplace
+              </button>
+            </div>
+            <p className="mb-3 max-w-2xl font-mono-spec text-[10px] leading-relaxed text-muted-foreground">
+              Attach only the capabilities this employee should be allowed to use. Unconfigured plugins remain visibly mocked;
+              configured MCP and webhook plugins execute live subject to the trust setting.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.values(CONNECTIONS).map((connection) => {
+                const attached = (employee.connections ?? []).includes(connection.id)
+                const status = connStatus(liveConfigs, connection.id)
+                return (
+                  <button
+                    key={connection.id}
+                    type="button"
+                    aria-pressed={attached}
+                    onClick={() => toggleEmployeeConnection(connection.id)}
+                    className={`flex items-center justify-between gap-2 border px-3 py-2 text-left transition-colors ${
+                      attached ? 'border-primary bg-secondary' : 'border-border/50 text-muted-foreground hover:border-primary/50'
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate font-mono-spec text-[10px] font-semibold uppercase tracking-[0.1em]">
+                        {connection.name}
+                      </span>
+                      <span className="block font-mono-spec text-[8px] uppercase tracking-[0.12em] text-muted-foreground/70">
+                        {status}
+                      </span>
+                    </span>
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center border ${
+                      attached ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+                    }`}>
+                      {attached && <Check className="h-3 w-3" />}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -941,7 +1067,13 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
                               <span className="truncate">{p.tool} — "{p.input.length > 60 ? p.input.slice(0, 57) + '…' : p.input}"</span>
                               {st && (
                                 <span className={`shrink-0 border px-1.5 py-0.5 text-[9px] uppercase ${
-                                  st === 'live' ? 'border-emerald-500/60 text-emerald-300' : st === 'error' ? 'border-red-500/60 text-red-300' : 'border-amber-500/60 text-amber-300'
+                                  st === 'live'
+                                    ? 'border-emerald-500/60 text-emerald-300'
+                                    : st === 'ready'
+                                    ? 'border-sky-500/60 text-sky-300'
+                                    : st === 'error'
+                                    ? 'border-red-500/60 text-red-300'
+                                    : 'border-amber-500/60 text-amber-300'
                                 }`}>
                                   {st}
                                 </span>

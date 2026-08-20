@@ -35,6 +35,10 @@ describe('detectConnections', () => {
     expect(conns).toEqual(expect.arrayContaining(['gmail', 'slack', 'github']))
     expect(conns.every((c) => CONNECTION_IDS.includes(c))).toBe(true)
   })
+
+  it('recognizes n8n and OpenClaw marketplace plugins', () => {
+    expect(detectConnections('an automation employee using n8n and OpenClaw')).toEqual(['n8n', 'openclaw'])
+  })
 })
 
 describe('generateStaff', () => {

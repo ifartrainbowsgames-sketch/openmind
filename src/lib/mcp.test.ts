@@ -7,6 +7,11 @@ const supaMock = vi.hoisted(() => ({
   isSupabaseConfigured: false,
   SUPABASE_URL: null as string | null,
   SUPABASE_KEY: null as string | null,
+  supabase: {
+    auth: {
+      getSession: vi.fn(async () => ({ data: { session: { access_token: 'user-jwt' } } })),
+    },
+  },
 }))
 vi.mock('./supabase', () => supaMock)
 
@@ -20,7 +25,9 @@ class MemStorage implements Storage {
   removeItem(k: string) { this.m.delete(k) }
 }
 const localStore = new MemStorage()
+const sessionStore = new MemStorage()
 Object.defineProperty(globalThis, 'localStorage', { value: localStore })
+Object.defineProperty(globalThis, 'sessionStorage', { value: sessionStore })
 
 import type { Employee, LiveConnectionConfig } from './agent'
 
@@ -66,8 +73,11 @@ const SERVER = { id: 'github', url: 'https://mcp.example.test/mcp' } as const
 beforeEach(() => {
   fetchMock.mockReset()
   localStore.clear()
+  sessionStore.clear()
+  mcp.clearMcpSessions()
   supaMock.isSupabaseConfigured = false
   supaMock.SUPABASE_URL = null
+  supaMock.SUPABASE_KEY = null
 })
 
 // ── (a) initialize + tools/list, plain JSON ──────────────────────────────────
@@ -144,6 +154,26 @@ describe('callServerTool', () => {
     fetchMock.mockImplementation(server.impl)
     await expect(mcp.callServerTool(SERVER, 'x', {})).rejects.toMatchObject({ name: 'McpError' })
   })
+
+  it('reuses an advertised MCP session across tool calls', async () => {
+    fetchMock.mockImplementation(async (_url, init) => {
+      const req = JSON.parse(init.body ?? '{}') as { id?: number; method: string }
+      if (req.id === undefined) return new Response('', { status: 202 })
+      if (req.method === 'initialize') {
+        return jsonRes({ jsonrpc: '2.0', id: req.id, result: {} }, 200, { 'mcp-session-id': 'session-1' })
+      }
+      return jsonRes({
+        jsonrpc: '2.0',
+        id: req.id,
+        result: { content: [{ type: 'text', text: 'ok' }] },
+      })
+    })
+    await mcp.callServerTool(SERVER, 'x', {})
+    await mcp.callServerTool(SERVER, 'x', {})
+    const methods = fetchMock.mock.calls.map(([, init]) =>
+      JSON.parse(init.body ?? '{}') as { method: string })
+    expect(methods.filter((request) => request.method === 'initialize')).toHaveLength(1)
+  })
 })
 
 // ── (d) HTTP errors → typed McpError ─────────────────────────────────────────
@@ -178,6 +208,7 @@ describe('transport', () => {
   it('posts { url, headers, payload } to the mcp-proxy when Supabase is configured', async () => {
     supaMock.isSupabaseConfigured = true
     supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
     const server = fakeMcpServer(handshake)
     fetchMock.mockImplementation(async (url, init) => {
       // unwrap the proxy envelope, then answer as the upstream server
@@ -185,10 +216,34 @@ describe('transport', () => {
       expect(url).toBe('https://proj.supabase.co/functions/v1/mcp-proxy')
       expect(wrapper.url).toBe(SERVER.url)
       expect(wrapper.headers.Authorization).toBe('Bearer tok')
+      expect(init.headers?.Authorization).toBe('Bearer user-jwt')
+      expect(init.headers?.apikey).toBe('publishable-key')
       return server.impl(SERVER.url, { ...init, body: JSON.stringify(wrapper.payload) })
     })
     const tools = await mcp.listServerTools(SERVER, 'tok')
     expect(tools).toEqual([])
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
+  it('uses an installation id without exposing its OAuth token', async () => {
+    supaMock.isSupabaseConfigured = true
+    supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
+    const server = fakeMcpServer(handshake)
+    fetchMock.mockImplementation(async (url, init) => {
+      const wrapper = JSON.parse(init.body ?? '{}') as {
+        url: string
+        headers: Record<string, string>
+        payload: unknown
+        installationId?: string
+      }
+      expect(url).toBe('https://proj.supabase.co/functions/v1/mcp-proxy')
+      expect(wrapper.installationId).toBe('install-123')
+      expect(wrapper.headers.Authorization).toBeUndefined()
+      expect(JSON.stringify(wrapper)).not.toContain('provider-secret')
+      return server.impl(SERVER.url, { ...init, body: JSON.stringify(wrapper.payload) })
+    })
+    await mcp.listServerTools({ ...SERVER, installationId: 'install-123' })
     expect(fetchMock).toHaveBeenCalled()
   })
 
@@ -203,6 +258,7 @@ describe('transport', () => {
     expect(await mcp.getTransport()).toEqual({ kind: 'direct' })
     supaMock.isSupabaseConfigured = true
     supaMock.SUPABASE_URL = 'https://proj.supabase.co'
+    supaMock.SUPABASE_KEY = 'publishable-key'
     expect(await mcp.getTransport()).toEqual({ kind: 'proxy', url: 'https://proj.supabase.co/functions/v1/mcp-proxy' })
   })
 })
@@ -246,6 +302,42 @@ describe('resolveConnectionTools stamping', () => {
     expect(dispatched.content).toMatch(/^\[LIVE · github\] /)
   })
 
+  it('forwards validated structured arguments to live MCP tools', async () => {
+    const server = fakeMcpServer({
+      initialize: () => ({}),
+      'tools/call': (params) => {
+        expect(params).toEqual({
+          name: 'search_issues',
+          arguments: { query: 'is:open label:bug', limit: 3 },
+        })
+        return { content: [{ type: 'text', text: 'three bugs' }] }
+      },
+    })
+    fetchMock.mockImplementation(server.impl)
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'live',
+      serverUrl: SERVER.url,
+      toolNames: ['search_issues'],
+      toolSchemas: {
+        search_issues: {
+          type: 'object',
+          properties: { query: { type: 'string' }, limit: { type: 'integer' } },
+          required: ['query', 'limit'],
+        },
+      },
+    }
+    const tool = agent.resolveConnectionTools(empWith(['github']), [cfg])
+      .find((candidate) => candidate.id === 'github__search_issues')!
+    const output = agent.normalizeToolResult(await tool.run('find open bugs', {
+      query: 'is:open label:bug',
+      limit: 3,
+      ignored: true,
+    })).content
+    expect(output).toContain('three bugs')
+  })
+
   it('stamps live-call errors honestly instead of silently mocking', async () => {
     fetchMock.mockResolvedValue(new Response('down', { status: 503 }))
     const cfg: LiveConnectionConfig = {
@@ -276,7 +368,7 @@ describe('zendesk REST mode', () => {
     fetchMock.mockImplementation(async () =>
       jsonRes({ results: [{ id: 3381, subject: 'Refund status?', status: 'pending', priority: 'high' }] }))
     const tools = agent.resolveConnectionTools(empWith(['zendesk']), [zendeskCfg])
-    const out = await tools.find((t) => t.id === 'zendesk__search_tickets')!.run('refund')
+    const out = agent.normalizeToolResult(await tools.find((t) => t.id === 'zendesk__search_tickets')!.run('refund')).content
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe('https://acme.zendesk.com/api/v2/search.json?query=type%3Aticket%20refund')
     expect((init.headers as Record<string, string>).Authorization).toBe(`Basic ${btoa('me@acme.com/token:abc123')}`)
@@ -290,15 +382,73 @@ describe('zendesk REST mode', () => {
       return jsonRes({ ticket: { id: 3381, subject: 'Refund status?', status: 'open', description: 'Where is my refund?' } })
     })
     const tools = agent.resolveConnectionTools(empWith(['zendesk']), [zendeskCfg])
-    const out = await tools.find((t) => t.id === 'zendesk__get_ticket')!.run('ticket 3381 please')
+    const out = agent.normalizeToolResult(await tools.find((t) => t.id === 'zendesk__get_ticket')!.run('ticket 3381 please')).content
     expect(out).toContain('Where is my refund?')
   })
 
   it('ticket_stats reads the queue count', async () => {
     fetchMock.mockImplementation(async () => jsonRes({ count: { value: 42, refreshed_at: 'now' } }))
     const tools = agent.resolveConnectionTools(empWith(['zendesk']), [zendeskCfg])
-    const out = await tools.find((t) => t.id === 'zendesk__ticket_stats')!.run('')
+    const out = agent.normalizeToolResult(await tools.find((t) => t.id === 'zendesk__ticket_stats')!.run('')).content
     expect(out).toContain('42')
+  })
+})
+
+// ── (h) n8n + OpenClaw marketplace plugins ─────────────────────────────────
+
+describe('marketplace webhook plugins', () => {
+  it('runs an n8n workflow webhook with structured task arguments', async () => {
+    fetchMock.mockImplementation(async (url, init) => {
+      expect(url).toBe('https://n8n.example.test/webhook/openmind')
+      expect(init.method).toBe('POST')
+      expect(init.headers?.Authorization).toBe('Bearer n8n-secret')
+      expect(JSON.parse(init.body ?? '{}')).toEqual({
+        task: 'qualify this lead',
+        arguments: { leadId: 'lead-42' },
+        source: 'openmind-ai-employee',
+      })
+      return jsonRes({ output: 'lead qualified' })
+    })
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'n8n',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://n8n.example.test/webhook/openmind',
+      token: 'n8n-secret',
+      toolNames: ['run_workflow'],
+    }
+    const tool = agent.resolveConnectionTools(empWith(['n8n']), [cfg])
+      .find((candidate) => candidate.id === 'n8n__run_workflow')!
+    const out = agent.normalizeToolResult(await tool.run('qualify this lead', { leadId: 'lead-42' })).content
+    expect(out).toBe('[LIVE · n8n] lead qualified')
+  })
+
+  it('delegates to an allowed OpenClaw agent without channel delivery', async () => {
+    fetchMock.mockImplementation(async (url, init) => {
+      expect(url).toBe('https://claw.example.test/hooks/agent')
+      expect(init.headers?.Authorization).toBe('Bearer hooks-secret')
+      expect(JSON.parse(init.body ?? '{}')).toEqual({
+        message: 'research this incident',
+        agentId: 'operations',
+        name: 'OpenMind AI employee',
+        deliver: false,
+      })
+      return jsonRes({ runId: 'run-123', status: 'accepted' }, 202)
+    })
+    const cfg: LiveConnectionConfig = {
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+      toolNames: ['delegate_task'],
+    }
+    const out = agent.normalizeToolResult(await agent.resolveConnectionTools(empWith(['openclaw']), [cfg])
+      .find((candidate) => candidate.id === 'openclaw__delegate_task')!
+      .run('research this incident')).content
+    expect(out).toContain('[LIVE · openclaw]')
+    expect(out).toContain('run-123')
   })
 })
 
@@ -314,7 +464,12 @@ describe('probeConnection', () => {
   it('mcp success → live with tool names', async () => {
     const server = fakeMcpServer({
       initialize: () => ({}),
-      'tools/list': () => ({ tools: [{ name: 'a' }, { name: 'b' }] }),
+      'tools/list': () => ({
+        tools: [
+          { name: 'a', inputSchema: { type: 'object', properties: { q: { type: 'string' } }, required: ['q'] } },
+          { name: 'b' },
+        ],
+      }),
     })
     fetchMock.mockImplementation(server.impl)
     const out = await agent.probeConnection({
@@ -322,6 +477,11 @@ describe('probeConnection', () => {
     })
     expect(out.status).toBe('live')
     expect(out.toolNames).toEqual(['a', 'b'])
+    expect(out.toolSchemas?.a).toEqual({
+      type: 'object',
+      properties: { q: { type: 'string' } },
+      required: ['q'],
+    })
     expect(out.lastError).toBeUndefined()
   })
 
@@ -346,6 +506,41 @@ describe('probeConnection', () => {
     expect(out.status).toBe('live')
     expect(out.toolNames).toEqual([...agent.ZENDESK_TOOLS])
   })
+
+  it('validates webhook plugins without executing them', async () => {
+    const out = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+    })
+    expect(out.status).toBe('ready')
+    expect(out.toolNames).toEqual(['delegate_task'])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects unsafe OpenClaw webhook configuration', async () => {
+    const missingToken = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+    })
+    expect(missingToken.status).toBe('error')
+    expect(missingToken.lastError).toContain('hooks token')
+
+    const wrongPath = await agent.probeConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'untested',
+      serverUrl: 'https://claw.example.test/api/run',
+      token: 'secret',
+    })
+    expect(wrongPath.status).toBe('error')
+    expect(wrongPath.lastError).toContain('/hooks/agent')
+  })
 })
 
 // ── persistence ──────────────────────────────────────────────────────────────
@@ -364,10 +559,65 @@ describe('live connection persistence', () => {
     expect(agent.loadLiveConnections().map((c) => c.connectionId)).toEqual(['zendesk'])
   })
 
+  it('keeps credentials session-only and out of persistent config JSON', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'live',
+      serverUrl: SERVER.url,
+      token: 'secret-token',
+    })
+    expect(localStore.getItem(agent.LIVE_CONNECTIONS_KEY)).not.toContain('secret-token')
+    expect(agent.loadLiveConnections()[0].token).toBe('secret-token')
+    sessionStore.clear()
+    expect(agent.loadLiveConnections()[0].token).toBeUndefined()
+  })
+
+  it('persists safe plugin options but keeps webhook tokens session-only', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      serverUrl: 'https://claw.example.test/hooks/agent',
+      token: 'hooks-secret',
+      options: { agentId: 'operations' },
+    })
+    const persisted = localStore.getItem(agent.LIVE_CONNECTIONS_KEY) ?? ''
+    expect(persisted).toContain('operations')
+    expect(persisted).not.toContain('hooks-secret')
+    expect(agent.loadLiveConnections()[0]).toMatchObject({
+      connectionId: 'openclaw',
+      mode: 'webhook',
+      status: 'ready',
+      options: { agentId: 'operations' },
+      token: 'hooks-secret',
+    })
+  })
+
+  it('persists only the non-secret reference for OAuth installations', () => {
+    agent.upsertLiveConnection({
+      connectionId: 'github',
+      mode: 'mcp',
+      status: 'ready',
+      serverUrl: SERVER.url,
+      installationId: 'install-123',
+      authSource: 'oauth',
+      accountLabel: 'octocat',
+    })
+    expect(agent.loadLiveConnections()[0]).toMatchObject({
+      installationId: 'install-123',
+      authSource: 'oauth',
+      accountLabel: 'octocat',
+    })
+    expect(localStore.getItem(agent.LIVE_CONNECTIONS_KEY)).not.toContain('provider-secret')
+  })
+
   it('falls back to presets for server URLs', () => {
     expect(agent.MCP_PRESETS.github.serverUrl).toBe('https://api.githubcopilot.com/mcp/')
     expect(agent.MCP_PRESETS.zendesk.mode).toBe('rest')
     expect(agent.MCP_PRESETS.gmail.mode).toBe('aggregator')
+    expect(agent.MCP_PRESETS.n8n.supportedModes).toEqual(['mcp', 'webhook'])
+    expect(agent.MCP_PRESETS.openclaw.mode).toBe('webhook')
   })
 })
 

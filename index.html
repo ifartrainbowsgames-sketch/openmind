@@ -3,10 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: http://localhost:11434; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="permissions-policy" content="camera=(), microphone=(), geolocation=()" />
     <title>OpenMind — Your Models. Your Keys. One Open Stack.</title>
     <meta
       name="description"
-      content="The open-source integration layer for AI. An embeddable chatbot — trained on your docs, answered by any model — that runs on your own API keys. Zero token markup. Self-hostable."
+      content="Build a customer chatbot that answers from your business knowledge and brings in your team when needed."
     />
     <meta name="theme-color" content="#fbfaf8" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -22,19 +28,19 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="OpenMind" />
     <meta property="og:url" content="https://openmind-8ha.pages.dev/" />
-    <meta property="og:title" content="OpenMind — Your Models. Your Keys. One Open Stack." />
+    <meta property="og:title" content="OpenMind — A Better Chatbot for Your Business" />
     <meta
       property="og:description"
-      content="An embeddable AI chatbot that runs on your own API keys. Zero token markup. MIT licensed."
+      content="Build a customer chatbot that answers from your business knowledge and brings in your team when needed."
     />
     <meta property="og:image" content="https://openmind-8ha.pages.dev/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="OpenMind — Your Models. Your Keys. One Open Stack." />
+    <meta name="twitter:title" content="OpenMind — A Better Chatbot for Your Business" />
     <meta
       name="twitter:description"
-      content="An embeddable AI chatbot that runs on your own API keys. Zero token markup. MIT licensed."
+      content="Build a customer chatbot that answers from your business knowledge and brings in your team when needed."
     />
     <meta name="twitter:image" content="https://openmind-8ha.pages.dev/og.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />

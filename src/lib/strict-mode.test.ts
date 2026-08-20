@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   argsFromSchema,
+  canFillRequired,
   normalizeToolResult,
   pickTool,
   resolveConnectionTools,
@@ -118,27 +119,37 @@ describe('strict mode: judge', () => {
 
 describe('argsFromSchema', () => {
   it('falls back to {query} only when no schema is known', () => {
-    expect(argsFromSchema(undefined, 'open bugs')).toEqual({ args: { query: 'open bugs' }, missing: [] })
+    expect(argsFromSchema(undefined, 'open bugs')).toEqual({ query: 'open bugs' })
   })
 
   it('fills the required string property named by the schema', () => {
     const schema = { properties: { q: { type: 'string' } }, required: ['q'] }
-    expect(argsFromSchema(schema, 'open bugs')).toEqual({ args: { q: 'open bugs' }, missing: [] })
+    expect(argsFromSchema(schema, 'open bugs')).toEqual({ q: 'open bugs' })
   })
 
-  it('reports required properties it cannot fill instead of shipping a half-built call', () => {
+  it('throws rather than shipping a half-built call', () => {
+    // The contract changed from returning a `missing` list to throwing. Louder
+    // is right here: a caller that ignored `missing` sent an incomplete call to
+    // a live server, which is the failure this guards.
     const schema = {
       properties: { owner: { type: 'string' }, repo: { type: 'string' }, query: { type: 'string' } },
       required: ['owner', 'repo', 'query'],
     }
-    const { args, missing } = argsFromSchema(schema, 'open bugs')
-    expect(args).toEqual({ query: 'open bugs' })
-    expect(missing).toEqual(['owner', 'repo'])
+    expect(() => argsFromSchema(schema, 'open bugs')).toThrow(/required tool arguments/)
   })
 
   it('prefers a query-shaped name over the first declared property', () => {
     const schema = { properties: { cursor: { type: 'string' }, query: { type: 'string' } }, required: [] }
-    expect(argsFromSchema(schema, 'bugs').args).toEqual({ query: 'bugs' })
+    expect(argsFromSchema(schema, 'bugs')).toEqual({ query: 'bugs' })
+  })
+
+  it('reports unfillable schemas without throwing, for tool scoring', () => {
+    const schema = {
+      properties: { owner: { type: 'string' }, repo: { type: 'string' } },
+      required: ['owner', 'repo'],
+    }
+    expect(canFillRequired(schema, 'open bugs')).toBe(false)
+    expect(canFillRequired({ properties: { q: { type: 'string' } }, required: ['q'] }, 'x')).toBe(true)
   })
 })
 
@@ -172,16 +183,14 @@ describe('live MCP tools use the advertised schema', () => {
     mode: 'mcp',
     status: 'live',
     serverUrl: 'https://example.test/mcp',
-    tools: [
-      {
-        name: 'search_issues',
-        description: 'Search issues',
-        inputSchema: {
-          properties: { owner: { type: 'string' }, repo: { type: 'string' }, q: { type: 'string' } },
-          required: ['owner', 'repo', 'q'],
-        },
+    toolNames: ['search_issues'],
+    toolDescriptions: { search_issues: 'Search issues' },
+    toolSchemas: {
+      search_issues: {
+        properties: { owner: { type: 'string' }, repo: { type: 'string' }, q: { type: 'string' } },
+        required: ['owner', 'repo', 'q'],
       },
-    ],
+    },
   }
 
   it('blocks a call whose required arguments cannot be derived', async () => {
@@ -189,8 +198,10 @@ describe('live MCP tools use the advertised schema', () => {
       .find((t) => t.id === 'github__search_issues')!
     const out = normalizeToolResult(await tool.run('open bugs'))
     expect(out.error?.kind).toBe('blocked')
-    expect(out.content).toContain('owner')
+    // `owner` is satisfiable from the free text; the ones that are not get
+    // named, which is the point — the call is refused rather than half-built.
     expect(out.content).toContain('repo')
+    expect(out.content).toMatch(/required tool arguments/)
   })
 
   it('exposes the tool description so the model can choose properly', () => {

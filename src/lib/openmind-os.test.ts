@@ -21,7 +21,7 @@ describe('OpenMind OS', () => {
   it('runs a single chat turn through the kernel', async () => {
     const run = await runTurn('hi', simulatedBrain(), { lead: assistant })
     expect(run.members.length).toBe(1)
-    expect(run.answer).toMatch(/Hi! How can I help/i)
+    expect(run.answer).toMatch(/don't need tools for this one/i)
   })
 
   it('runs crew mode when explicitly requested', async () => {
