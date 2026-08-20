@@ -1,7 +1,7 @@
 // /app = one chat assistant (Claude/ChatGPT-shaped). Substantive goals use artifact-first task graph.
 import { runCrew, withCrewTools, withGithubWorkspaceTools, type CrewRun, type RunCrewOptions } from './crew'
 import { runEmployee, type AgentBrain, type Employee } from './agent'
-import { setActiveCrewToolKeys } from './crew-tools'
+import { setActiveCrewToolKeys, setPlatformKeysAllowed } from './crew-tools'
 import { setMemoryOwner } from './memory'
 import { setNangoOwner } from './nango'
 import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
@@ -47,7 +47,7 @@ export type RunTurnOptions = RunCrewOptions & {
   crew?: boolean
   /** Force artifact-first task graph even for short prompts. */
   taskGraph?: boolean
-} & Pick<RunTaskGraphOptions, 'planner' | 'persist' | 'budget'>
+} & Pick<RunTaskGraphOptions, 'planner' | 'persist' | 'budget' | 'platformKeys'>
 
 /** One chat turn — single assistant for small talk; task graph for real work. */
 export async function runTurn(
@@ -68,6 +68,7 @@ export async function runTurn(
   if (!lead) throw new Error('runTurn needs a lead assistant')
 
   setActiveCrewToolKeys(options.toolKeys ?? {})
+  setPlatformKeysAllowed(options.platformKeys === true)
   try {
     const skill: SkillId = options.skill ?? 'multitask'
     let prompt = skill === 'multitask' ? task : wrapSkillPrompt(skill, task)
@@ -96,5 +97,6 @@ export async function runTurn(
     }
   } finally {
     setActiveCrewToolKeys({})
+    setPlatformKeysAllowed(false)
   }
 }

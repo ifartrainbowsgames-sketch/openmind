@@ -32,7 +32,7 @@ interface RunRow {
 }
 
 interface KeyRow {
-  role: 'worker' | 'planner' | 'judge'
+  role: 'worker' | 'planner' | 'judge' | 'tavily' | 'firecrawl' | 'e2b' | 'browserless'
   provider_id: string
   ciphertext: string
   iv: string
@@ -122,7 +122,10 @@ async function executeRun(run: RunRow): Promise<void> {
       persist: true,
       workspace: run.options.workspace as never,
       skill: run.options.skill as never,
-      toolKeys: (run.options.toolKeys ?? {}) as never,
+      // The vault holds the customer's model key only. Tools run on our
+      // credentials here exactly as they do for a foreground run, so a queued
+      // run and a live one have identical capabilities.
+      platformKeys: true,
       planner:
         planner && plannerSpec
           ? {

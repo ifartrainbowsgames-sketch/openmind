@@ -16,11 +16,19 @@ import type { CrewArtifact, CrewMemberResult, CrewRun } from './crew'
 import {
   getActiveSandbox,
   setActiveCrewToolKeys,
+  setPlatformKeysAllowed,
   setActiveSandbox,
   setActiveWorkspace,
   type CrewToolKeys,
 } from './crew-tools'
 import { judgeTask } from './task-judge'
+import {
+  CAPABILITY_WORKER, DELEGATION_PROMPT, emptyDelegationState, evaluateSpawn,
+  parseSpawnRequests, recordSpawn,
+} from './workforce/delegation'
+import { isWorkerCapability } from './workforce/capabilities'
+import { renderConstitution, withProjectRules } from './workforce/constitution'
+import { mergeAcceptance, renderSop, sopFor } from './workforce/sop'
 import { planProjectSmart, type PlannerBrain } from './task-planner-llm'
 import { saveProject } from './project-store'
 import {
@@ -53,6 +61,12 @@ export interface RunTaskGraphOptions {
   onTrace?: (line: TraceLine) => void
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>
   toolKeys?: CrewToolKeys
+  /**
+   * Let this run draw on the deployment's own tool credentials. Only true for
+   * platform-billed runs — a customer funding their own model must not have
+   * their search and sandbox calls billed to us.
+   */
+  platformKeys?: boolean
   workspace?: WorkspaceSpace
   skill?: SkillId
   /**
@@ -241,16 +255,47 @@ function buildWorkerPrompt(project: ProjectState, task: TaskRecord): string {
     .flatMap((id) => project.artifacts.filter((a) => a.taskId === id))
     .map((a) => `INPUT ${a.path}:\n${a.body.slice(0, 4000)}`)
     .join('\n\n')
+  const rules = renderConstitution(withProjectRules(project.rules))
+  const sop = sopFor(task.worker)
   return (
+    // Rules lead. What follows is a role description, and a role description
+    // was never the thing keeping a worker honest.
+    (rules ? `${rules}\n\n` : '') +
     `PROJECT GOAL: ${project.goal}\n\n` +
     `YOUR TASK ${task.id}: ${task.goal}\n\n` +
     `REQUIRED ARTIFACTS (write each as a fenced code block with path on first line):\n` +
     task.outputs.map((p) => `- ${p}`).join('\n') +
-    `\n\nRULES: Produce files only. Do not chat with other agents. Do not say "I think" without evidence.\n` +
+    `\n` +
     (inputs ? `\nREAD THESE INPUTS:\n${inputs}\n` : '') +
+    (sop ? `
+${renderSop(sop)}
+` : '') +
     buildSharedContext(project) +
+    // Only offered where it can be honoured. At max depth, or once the project
+    // has spent its delegation budget, describing the option would invite a
+    // request guaranteed to be refused — and a worker that asks and is denied
+    // has burned a step for nothing.
+    (canDelegate(project, task) ? `\n\n${DELEGATION_PROMPT}\n` : '') +
     buildRevisionBlock(project, task)
   )
+}
+
+/** Whether this task could still spawn a helper, given the limits so far. */
+function canDelegate(project: ProjectState, task: TaskRecord): boolean {
+  return evaluateSpawn(
+    {
+      parentTaskId: task.id,
+      capability: 'data_analysis',
+      goal: 'probe',
+      inputArtifacts: [],
+      expectedOutputs: [{ path: `__probe__/${task.id}.json`, kind: 'json' }],
+    },
+    {
+      tasks: project.tasks,
+      artifactPaths: project.artifacts.map((a) => a.path),
+      state: project.delegation ?? emptyDelegationState(),
+    },
+  ).allowed
 }
 
 /**
@@ -327,6 +372,80 @@ const TaskRunState = Annotation.Root({
 
 type TRS = typeof TaskRunState.State
 
+
+/**
+ * Adjudicate a worker's delegation requests and create the tasks it earned.
+ *
+ * The worker asked; the orchestrator decides. A refusal is written back as a
+ * ledger event rather than thrown away, so "I asked for help and was told no"
+ * appears in the trace instead of looking like the worker did nothing.
+ */
+export function applyDelegation(
+  project: ProjectState,
+  task: TaskRecord,
+  answer: string,
+): { project: ProjectState; created: number } {
+  const requests = parseSpawnRequests(answer, task.id)
+  if (!requests.length) return { project, created: 0 }
+
+  let next = project
+  let state = next.delegation ?? emptyDelegationState()
+  let created = 0
+
+  for (const request of requests) {
+    if (!isWorkerCapability(request.capability)) {
+      next = logEvent(next, {
+        action: 'request_subtask', taskId: task.id, worker: task.worker,
+        detail: `refused — unknown capability "${request.capability}"`,
+      })
+      continue
+    }
+
+    const decision = evaluateSpawn(request, {
+      tasks: next.tasks,
+      artifactPaths: next.artifacts.map((a) => a.path),
+      state,
+    })
+
+    if (!decision.allowed) {
+      next = logEvent(next, {
+        action: 'request_subtask', taskId: task.id, worker: task.worker,
+        detail: `refused (${decision.reason}) — ${decision.detail ?? ''}`.trim(),
+      })
+      continue
+    }
+
+    const worker = CAPABILITY_WORKER[request.capability]
+    const childId = `${task.id}-d${(state.children[task.id] ?? 0) + 1}`
+    const child: TaskRecord = {
+      id: childId,
+      type: worker,
+      goal: request.goal,
+      inputs: { from: task.id },
+      outputs: request.expectedOutputs.map((o: { path: string }) => o.path),
+      dependsOn: [],
+      status: 'pending',
+      worker,
+      parentTaskId: task.id,
+      limits: task.limits,
+      retries: 0,
+      stepsUsed: 0,
+      costUsd: 0,
+      artifactIds: [],
+    }
+
+    next = { ...next, tasks: [...next.tasks, child] }
+    state = recordSpawn(state, task.id, childId, decision.childDepth ?? 1)
+    created++
+    next = logEvent(next, {
+      action: 'request_subtask', taskId: task.id, worker: task.worker,
+      detail: `spawned ${childId} (${worker}) → ${child.outputs.join(', ')}`,
+    })
+  }
+
+  return { project: { ...next, delegation: state }, created }
+}
+
 async function executeBatch(
   brain: AgentBrain,
   project: ProjectState,
@@ -362,7 +481,7 @@ async function executeBatch(
       continue
     }
 
-    let employee = withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace)
+    const employee = withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace)
     const prompt = buildWorkerPrompt(next, task)
     next = logEvent(next, { action: 'request_tool', taskId: task.id, worker: task.worker, detail: task.goal })
 
@@ -405,6 +524,14 @@ async function executeBatch(
       next = { ...next, blockers: [...next.blockers, `${task.id}: ${reason}`] }
       next = logEvent(next, { action: 'report_blocker', taskId: task.id, worker: task.worker, detail: reason })
       continue
+    }
+
+    // Delegation is adjudicated before artifacts, so a worker that both asked
+    // for help and produced partial output still gets its helper queued.
+    const delegated = applyDelegation(next, task, result.answer)
+    next = delegated.project
+    if (delegated.created) {
+      trace.push({ node: 'act', text: `${task.id} delegated ${delegated.created} subtask(s)` })
     }
 
     const artifacts = parseWorkerArtifacts(task, result.answer, task.worker)
@@ -456,7 +583,14 @@ function judgeBatch(project: ProjectState): ProjectState {
   let next = project
   for (const task of next.tasks.filter((t) => t.status === 'running')) {
     const taskArtifacts = next.artifacts.filter((a) => a.taskId === task.id)
-    const verdict = judgeTask(task, taskArtifacts)
+    // The SOP's criteria are part of the contract, not advice. Judging against
+    // the merged set is what stops a procedure that says "cite your sources"
+    // from being a suggestion the worker can decline.
+    const contract: TaskRecord = {
+      ...task,
+      acceptance: mergeAcceptance(sopFor(task.worker), task.acceptance),
+    }
+    const verdict = judgeTask(contract, taskArtifacts)
     if (verdict.passed) {
       next = updateTask(next, task.id, { status: 'completed', verdict })
       next = recordDecision(next, `${task.id} accepted (${verdict.score}/100): ${task.goal} → ${task.outputs.join(', ')}`)
@@ -515,6 +649,7 @@ export async function runTaskGraph(
   options: RunTaskGraphOptions = {},
 ): Promise<CrewRun & { project: ProjectSnapshot }> {
   setActiveCrewToolKeys(options.toolKeys ?? {})
+  setPlatformKeysAllowed(options.platformKeys === true)
   setActiveWorkspace(options.workspace)
 
   const { project: initial } = await planProjectSmart(
@@ -523,7 +658,7 @@ export async function runTaskGraph(
     DEFAULT_LIMITS,
     options.budget ?? DEFAULT_BUDGET,
   )
-  let project = initial
+  const project = initial
   let allMembers: CrewMemberResult[] = []
   let allTrace: TraceLine[] = [{ node: 'plan', text: `Task graph — ${project.tasks.length} tasks` }]
 

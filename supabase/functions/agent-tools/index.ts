@@ -2,6 +2,9 @@
 // Defaults: DuckDuckGo / SearXNG search, Jina Reader + fetch/Readability browse.
 // Optional upgrades: Tavily, Firecrawl. Code still uses E2B when a key is set.
 
+// Pinned rather than floating: this runs unattended on a server, and a
+// version published hours ago has had no time to be caught being bad.
+import { Sandbox } from 'npm:e2b@2.39.0'
 import {
   firstHttpUrl,
   formatHits,
@@ -165,7 +168,6 @@ async function fetchReadable(target: string): Promise<string> {
 // call started from an empty machine. The sandbox is now a session keyed to the
 // project, created on first use and reused until the project ends.
 
-const E2B_BASE = 'https://api.e2b.dev'
 const E2B_TEMPLATE = Deno.env.get('E2B_TEMPLATE') || 'base'
 /** Sandboxes idle longer than this are reaped by E2B; we recreate transparently. */
 const SANDBOX_TTL_SECONDS = 900
@@ -176,52 +178,47 @@ interface SandboxCommand {
   stderr: string
 }
 
-async function e2bCreate(apiKey: string): Promise<string> {
-  const res = await fetch(`${E2B_BASE}/sandboxes`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-    body: JSON.stringify({ templateID: E2B_TEMPLATE, timeout: SANDBOX_TTL_SECONDS }),
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-  })
-  const text = await res.text()
-  if (!res.ok) throw new Error(`e2b create ${res.status}: ${text.slice(0, 180)}`)
-  const created = JSON.parse(text) as { sandboxID?: string; sandboxId?: string; id?: string }
-  const id = created.sandboxID ?? created.sandboxId ?? created.id
-  if (!id) throw new Error('e2b create: missing sandbox id')
-  return id
-}
+/**
+ * Sandbox transport.
+ *
+ * This used to POST to `api.e2b.dev/sandboxes/{id}/commands`, which does not
+ * exist — that route 404s, every call raised SandboxGoneError, and the tool
+ * silently degraded to mock output. Commands actually run on the sandbox's own
+ * envd daemon, reachable at `49983-{sandboxID}-{clientID}.e2b.app` over
+ * Connect-RPC with streaming framing. Rather than hand-roll that envelope
+ * format, use the official SDK, which also survives E2B changing it.
+ */
 
 /** Raised when the sandbox is gone (expired or reaped) so callers can recreate. */
 class SandboxGoneError extends Error {}
 
-async function e2bExec(
-  sandboxId: string,
-  cmd: string,
-  args: string[],
-  apiKey: string,
-  timeoutSeconds = 120,
-): Promise<SandboxCommand> {
-  const res = await fetch(`${E2B_BASE}/sandboxes/${sandboxId}/commands`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-    body: JSON.stringify({ cmd, args, timeout: timeoutSeconds }),
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
-  })
-  const text = await res.text()
-  if (res.status === 404) throw new SandboxGoneError(`sandbox ${sandboxId} no longer exists`)
-  if (!res.ok) throw new Error(`e2b exec ${res.status}: ${text.slice(0, 180)}`)
-
-  // The API has returned both a structured body and plain text across versions;
-  // accept either rather than depending on one shape.
-  try {
-    const parsed = JSON.parse(text) as Partial<SandboxCommand> & { output?: string; result?: string }
-    return {
-      exitCode: typeof parsed.exitCode === 'number' ? parsed.exitCode : 0,
-      stdout: parsed.stdout ?? parsed.output ?? parsed.result ?? '',
-      stderr: parsed.stderr ?? '',
+async function openSandbox(apiKey: string, sandboxId?: string): Promise<Sandbox> {
+  if (sandboxId) {
+    try {
+      return await Sandbox.connect(sandboxId, { apiKey })
+    } catch {
+      // Expired or reaped between calls; the caller decides whether to start over.
+      throw new SandboxGoneError(`sandbox ${sandboxId} no longer exists`)
     }
-  } catch {
-    return { exitCode: 0, stdout: text, stderr: '' }
+  }
+  return await Sandbox.create(E2B_TEMPLATE, { apiKey, timeoutMs: SANDBOX_TTL_SECONDS * 1000 })
+}
+
+/**
+ * Run one shell line. The SDK throws on a non-zero exit, but a failing build is
+ * a result the agent must see and react to, not an exception — so the exit code
+ * and both streams are returned either way.
+ */
+async function execIn(sandbox: Sandbox, script: string, timeoutSeconds: number): Promise<SandboxCommand> {
+  try {
+    const out = await sandbox.commands.run(script, { timeoutMs: timeoutSeconds * 1000 })
+    return { exitCode: out.exitCode ?? 0, stdout: out.stdout ?? '', stderr: out.stderr ?? '' }
+  } catch (err) {
+    const e = err as { exitCode?: number; stdout?: string; stderr?: string; message?: string }
+    if (typeof e.exitCode === 'number') {
+      return { exitCode: e.exitCode, stdout: e.stdout ?? '', stderr: e.stderr ?? '' }
+    }
+    throw err
   }
 }
 
@@ -232,19 +229,22 @@ async function sandboxShell(
   apiKey: string,
   timeoutSeconds = 120,
 ): Promise<{ result: SandboxCommand; sandboxId: string; recreated: boolean }> {
-  let id = sandboxId
-  let recreated = false
-  if (!id) {
-    id = await e2bCreate(apiKey)
-    recreated = true
-  }
   try {
-    return { result: await e2bExec(id, 'sh', ['-lc', script], apiKey, timeoutSeconds), sandboxId: id, recreated }
+    const sandbox = await openSandbox(apiKey, sandboxId)
+    return {
+      result: await execIn(sandbox, script, timeoutSeconds),
+      sandboxId: sandbox.sandboxId,
+      recreated: !sandboxId,
+    }
   } catch (err) {
     if (!(err instanceof SandboxGoneError)) throw err
-    // Expired between calls — start a fresh one so the worker can continue.
-    id = await e2bCreate(apiKey)
-    return { result: await e2bExec(id, 'sh', ['-lc', script], apiKey, timeoutSeconds), sandboxId: id, recreated: true }
+    // Expired between calls — start a fresh one so the run can continue.
+    const sandbox = await openSandbox(apiKey)
+    return {
+      result: await execIn(sandbox, script, timeoutSeconds),
+      sandboxId: sandbox.sandboxId,
+      recreated: true,
+    }
   }
 }
 
@@ -266,9 +266,9 @@ function formatCommand(label: string, result: SandboxCommand): string {
   return parts.join('\n')
 }
 
-async function liveSearch(query: string, keys: Record<string, unknown>): Promise<string> {
-  const tavily = (typeof keys.tavily === 'string' && keys.tavily) || Deno.env.get('TAVILY_API_KEY') || ''
-  const searx = (typeof keys.searxngUrl === 'string' && keys.searxngUrl) || Deno.env.get('SEARXNG_URL') || ''
+async function liveSearch(query: string, keys: Record<string, unknown>, allowPlatform = false): Promise<string> {
+  const tavily = (typeof keys.tavily === 'string' && keys.tavily) || (allowPlatform ? Deno.env.get('TAVILY_API_KEY') || '' : '')
+  const searx = (typeof keys.searxngUrl === 'string' && keys.searxngUrl) || (allowPlatform ? Deno.env.get('SEARXNG_URL') || '' : '')
   const errors: string[] = []
   if (tavily) {
     try {
@@ -292,9 +292,9 @@ async function liveSearch(query: string, keys: Record<string, unknown>): Promise
   throw new Error(errors.join(' · ') || 'search failed')
 }
 
-async function liveBrowse(input: string, keys: Record<string, unknown>): Promise<string> {
+async function liveBrowse(input: string, keys: Record<string, unknown>, allowPlatform = false): Promise<string> {
   const target = firstHttpUrl(input)
-  const firecrawl = (typeof keys.firecrawl === 'string' && keys.firecrawl) || Deno.env.get('FIRECRAWL_API_KEY') || ''
+  const firecrawl = (typeof keys.firecrawl === 'string' && keys.firecrawl) || (allowPlatform ? Deno.env.get('FIRECRAWL_API_KEY') || '' : '')
   const errors: string[] = []
   // No Playwright/Browserless farm here — Jina + fetch cover browse_url.
   if (firecrawl) {
@@ -347,9 +347,9 @@ function parseWebAct(input: string): { url: string; goal: string; steps: { click
   return { url, goal: input.replace(url, '').trim().slice(0, 500), steps: [] }
 }
 
-async function liveWebAct(input: string, keys: Record<string, unknown>): Promise<string> {
+async function liveWebAct(input: string, keys: Record<string, unknown>, allowPlatform = false): Promise<string> {
   const spec = parseWebAct(input)
-  const token = (typeof keys.browserless === 'string' && keys.browserless) || Deno.env.get('BROWSERLESS_API_KEY') || ''
+  const token = (typeof keys.browserless === 'string' && keys.browserless) || (allowPlatform ? Deno.env.get('BROWSERLESS_API_KEY') || '' : '')
   const base = (Deno.env.get('BROWSERLESS_URL') || 'https://production-sfo.browserless.io').replace(/\/$/, '')
   if (!token) throw new Error('no Browserless key — hosted Chrome is off')
   if (!spec.steps.length) {
@@ -394,12 +394,16 @@ async function liveWebAct(input: string, keys: Record<string, unknown>): Promise
 const CHECKS_SCRIPT = `
 cd ${'${WORKDIR_PLACEHOLDER}'} 2>/dev/null || { echo "no workspace — clone or write files first"; exit 1; }
 FOUND=0
+FAILED=0
 run_check() {
   label="$1"; shift
   "$@" > /tmp/check.log 2>&1
   code=$?
   echo "--- $label (exit $code) ---"
   tail -60 /tmp/check.log
+  # Record the failure but keep going: the agent needs every failing check in
+  # one pass, not just the first. The overall exit code is set at the end.
+  [ $code -ne 0 ] && FAILED=1
   return 0
 }
 has_script() { node -e "var s=require('./package.json').scripts||{};process.exit(s['$1']?0:1)" 2>/dev/null; }
@@ -449,6 +453,16 @@ if [ "$FOUND" = "0" ]; then
   echo "files present:"
   ls -1 | head -30
 fi
+
+# Propagate failure. Every run_check returned 0 so the suite would finish, which
+# left the script exiting 0 with failing tests in its output — a task could be
+# judged "checks passed" on a red build.
+if [ "$FAILED" = "1" ]; then
+  echo "CHECKS FAILED"
+  exit 1
+fi
+[ "$FOUND" = "1" ] && echo "ALL CHECKS PASSED"
+exit 0
 `.replace('${WORKDIR_PLACEHOLDER}', WORKDIR)
 
 interface WorkspaceInput {
@@ -510,9 +524,13 @@ async function runWorkspaceTool(
       return { output: `[error] git_clone only accepts https repo URLs, got "${repo.slice(0, 80)}"`, sandboxId: priorSandbox ?? '' }
     }
     const branch = spec.branch?.trim()
+    // GIT_TERMINAL_PROMPT=0: a private or misspelled repo returns 404, which
+    // makes git ask for a username. With no terminal that either hangs until
+    // the timeout or dies with a confusing "No such device" — both read as a
+    // sandbox fault rather than "that repo is not reachable".
     const script =
       `mkdir -p ${WORKDIR} && cd ${WORKDIR} && ` +
-      `git clone --depth 1 ${branch ? `--branch ${shellQuote(branch)} ` : ''}${shellQuote(repo)} . 2>&1 && ` +
+      `GIT_TERMINAL_PROMPT=0 git clone --depth 1 ${branch ? `--branch ${shellQuote(branch)} ` : ''}${shellQuote(repo)} . 2>&1 && ` +
       `git log --oneline -1`
     const { result, sandboxId } = await sandboxShell(priorSandbox, script, apiKey, 180)
     return { output: formatCommand('git_clone', result), sandboxId }
@@ -538,7 +556,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
   if (req.method !== 'POST') return json(405, { error: 'POST only', ok: false, source: 'mock', output: '' })
 
-  let body: { tool?: unknown; input?: unknown; keys?: unknown; sandboxId?: unknown }
+  let body: {
+    tool?: unknown; input?: unknown; keys?: unknown; sandboxId?: unknown
+    platformKeys?: unknown
+  }
   try {
     body = JSON.parse(await req.text())
   } catch {
@@ -551,19 +572,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   const input = typeof body.input === 'string' ? body.input : ''
   const keys = (body.keys && typeof body.keys === 'object' ? body.keys : {}) as Record<string, unknown>
-  const e2b = (typeof keys.e2b === 'string' && keys.e2b) || Deno.env.get('E2B_API_KEY') || ''
+  // Opt-in, not a fallback. A caller funding its own run must never draw on
+  // this deployment's credentials just because it forgot to send a key — that
+  // silently billed every customer's tool calls to the operator. Absent means
+  // "my keys only"; the caller says so explicitly when it wants platform ones.
+  const allowPlatform = body.platformKeys === true
+  const e2b = (typeof keys.e2b === 'string' && keys.e2b) || (allowPlatform ? Deno.env.get('E2B_API_KEY') || '' : '')
   // Sent by the client so successive calls land in the same machine.
   const priorSandbox = typeof body.sandboxId === 'string' && body.sandboxId ? body.sandboxId : undefined
 
   try {
     if (tool === 'web_search') {
-      return json(200, { ok: true, source: 'live', output: await liveSearch(input, keys) })
+      return json(200, { ok: true, source: 'live', output: await liveSearch(input, keys, allowPlatform) })
     }
     if (tool === 'browse_url') {
-      return json(200, { ok: true, source: 'live', output: await liveBrowse(input, keys) })
+      return json(200, { ok: true, source: 'live', output: await liveBrowse(input, keys, allowPlatform) })
     }
     if (tool === 'web_act') {
-      return json(200, { ok: true, source: 'live', output: await liveWebAct(input, keys) })
+      return json(200, { ok: true, source: 'live', output: await liveWebAct(input, keys, allowPlatform) })
     }
     if ((tool === 'run_code' || WORKSPACE_TOOLS.includes(tool)) && e2b) {
       const { output, sandboxId } = await runWorkspaceTool(tool, input, e2b, priorSandbox)

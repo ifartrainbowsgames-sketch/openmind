@@ -119,7 +119,7 @@ export const KNOWLEDGE = `
 The chatbot widget embeds on any site with two lines of code: a script tag with a data-service attribute.
 OpenMind is the open-source integration layer for AI. Its chatbot ships as an embeddable widget and one unified API.
 The chatbot runs on the customer's own provider keys — OpenMind never marks up tokens. You pay your provider directly.
-Key modes: Browser-direct keeps the visitor's key in their browser with zero servers. Vaulted keys are encrypted server-side with AES-256. Gateway mode adds rate limiting and caching.
+Key modes: one switch covers every credential, model and tools together. Bring-your-own-key sends the browser-held key straight to the provider for foreground runs; background runs need the same keys vaulted server-side, encrypted with AES-256-GCM and never readable back. Platform mode bills usage to OpenMind instead, where the deployment is configured for it.
 The playground lets visitors test the chatbot in the browser — it answers with real ChatGPT through a secure gateway.
 The console includes Data Studio for uploading and indexing company data, a Widget Builder with live preview, Inbox, Engage popups, Prompt Studio and service settings.
 Pro is ten dollars per month during early access. The free plan includes the chatbot and one hundred thousand tokens.

@@ -7,7 +7,21 @@
 // account that set it — the column grants in the migration enforce that even if
 // this file were wrong.
 
-export type VaultRole = 'worker' | 'planner' | 'judge'
+/**
+ * Model roles plus tool credentials. Tool keys live here too because a queued
+ * run has no browser to read them from — without this, background runs fell
+ * back to the deployment's own tool keys and billed them to us.
+ */
+export type VaultRole =
+  | 'worker' | 'planner' | 'judge'
+  | 'tavily' | 'firecrawl' | 'e2b' | 'browserless'
+
+export const MODEL_ROLES = ['worker', 'planner', 'judge'] as const
+export const TOOL_ROLES = ['tavily', 'firecrawl', 'e2b', 'browserless'] as const
+
+export function isToolRole(role: VaultRole): boolean {
+  return (TOOL_ROLES as readonly string[]).includes(role)
+}
 
 export interface StoredKey {
   role: VaultRole

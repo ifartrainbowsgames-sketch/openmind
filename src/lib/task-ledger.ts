@@ -1,5 +1,7 @@
 /** Shared blackboard — agents produce artifacts, not meetings. */
 
+import type { DelegationState } from './workforce/delegation'
+
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'needs_user'
 export type WorkerKind = 'planner' | 'research' | 'browser' | 'code' | 'analyst' | 'writer' | 'reviewer' | 'tester'
 
@@ -121,6 +123,7 @@ export interface ArtifactRecord {
 
 export interface TaskRecord {
   id: string
+  /** What kind of work this is. Set by the planner from the goal. */
   type: WorkerKind
   goal: string
   inputs: Record<string, string>
@@ -128,7 +131,17 @@ export interface TaskRecord {
   acceptance?: AcceptanceCriteria
   dependsOn: string[]
   status: TaskStatus
+  /**
+   * The worker kind that will run it. Chosen by capability matching, not
+   * copied from `type` — those were identical while the eight built-ins were
+   * the only workers, and separating them is what lets a custom employee be
+   * assigned work it is actually equipped for.
+   */
   worker: WorkerKind
+  /** A specific employee id, when one was matched rather than a built-in kind. */
+  assignedTo?: string
+  /** Set on tasks created by delegation, naming the task that asked. */
+  parentTaskId?: string
   limits: TaskLimits
   retries: number
   stepsUsed: number
@@ -154,6 +167,9 @@ export type AgentAction =
   | { type: 'request_tool'; taskId: string; tool: string; input: string }
   | { type: 'report_blocker'; taskId: string; reason: string }
   | { type: 'complete_task'; taskId: string; artifactPaths: string[]; sources?: number; confidence?: number }
+  // A worker asking for a capability it does not have. The orchestrator
+  // adjudicates; the worker never creates another worker itself.
+  | { type: 'request_subtask'; taskId: string; capability: string; goal: string; outputs: string[] }
 
 export interface LedgerEvent {
   id: string
@@ -179,6 +195,13 @@ export interface ProjectState {
   spend: BudgetSpend
   /** Sandbox shared by every workspace tool in this project, once one exists. */
   sandboxId?: string
+  /** Depth/sibling/total counters that bound delegation. */
+  delegation?: DelegationState
+  /**
+   * Owner-authored rules, one per line. Prepended to every worker prompt above
+   * the role description — see workforce/constitution.ts.
+   */
+  rules?: string
   finalOutput?: string
   startedAt: number
   finishedAt?: number
@@ -363,6 +386,16 @@ export function applyAction(project: ProjectState, action: AgentAction, worker?:
         detail: action.artifactPaths.join(', '),
       })
     }
+    case 'request_subtask':
+      // Logged only. Creating the child is the orchestrator's call, made in
+      // task-runner against the delegation limits — recording the ask here
+      // would let a worker spawn by writing to the ledger.
+      return logEvent(project, {
+        action: action.type,
+        taskId: action.taskId,
+        worker,
+        detail: `${action.capability}: ${action.goal}`,
+      })
     case 'read_artifact':
     case 'request_review':
     case 'request_tool':

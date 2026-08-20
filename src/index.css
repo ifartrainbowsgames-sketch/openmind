@@ -468,3 +468,16 @@ html.lenis body {
     transform: none;
   }
 }
+
+/* Highlights the row a settings search result landed on, so the destination is
+   obvious when a section has many similar-looking cards. */
+@keyframes settings-flash-fade {
+  from { box-shadow: 0 0 0 2px hsl(var(--ring)); }
+  to   { box-shadow: 0 0 0 2px transparent; }
+}
+.settings-flash {
+  animation: settings-flash-fade 1.2s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-flash { animation: none; box-shadow: 0 0 0 2px hsl(var(--ring)); }
+}

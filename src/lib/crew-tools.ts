@@ -213,6 +213,23 @@ export function getActiveCrewToolKeys(): CrewToolKeys {
   return { ...activeKeys }
 }
 
+/**
+ * Whether this run may draw on the deployment's own tool credentials.
+ *
+ * Off unless a platform-billed run turns it on. `agent-tools` used to fall
+ * back to its environment whenever a key was absent, so a customer funding
+ * their own model silently billed every search, scrape and sandbox to us.
+ */
+let platformKeysAllowed = false
+
+export function setPlatformKeysAllowed(allowed: boolean): void {
+  platformKeysAllowed = allowed
+}
+
+export function platformKeysAreAllowed(): boolean {
+  return platformKeysAllowed
+}
+
 export function setActiveWorkspace(space?: WorkspaceSpace): void {
   activeWorkspace = space
 }
@@ -715,7 +732,11 @@ export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = g
         method: 'POST',
         headers,
         // sandboxId keeps successive workspace calls on the same machine.
-        body: JSON.stringify({ tool: kind, input, keys, sandboxId: activeSandboxId }),
+        body: JSON.stringify({
+          tool: kind, input, keys,
+          sandboxId: activeSandboxId,
+          platformKeys: platformKeysAllowed,
+        }),
         signal: AbortSignal.timeout(WORKSPACE_TIMEOUT_MS),
       })
       const data = (await res.json()) as Partial<CrewToolResponse> & { error?: string; sandboxId?: string }

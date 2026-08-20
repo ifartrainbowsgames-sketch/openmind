@@ -4,11 +4,13 @@ export const MOBILE_PROVIDER_KEY = 'openmind-mobile-provider-v1'
 
 export interface MobileProviderConfig {
   providerId: string
+  /**
+   * The customer's model key. Tool credentials (search, browse, sandbox,
+   * hosted Chrome) are deliberately absent from this type: they belong to the
+   * platform and live in Edge Function secrets. A field here would be a field
+   * in the JS bundle, which is public.
+   */
   apiKey: string
-  tavilyKey?: string
-  firecrawlKey?: string
-  e2bKey?: string
-  browserlessKey?: string
   /**
    * Strict runs refuse mock data, offline planners and heuristic judges — a
    * missing capability becomes a blocked task instead of a plausible answer.
@@ -44,10 +46,6 @@ export function loadMobileProvider(): MobileProviderConfig {
     return {
       providerId,
       apiKey: parsed.apiKey?.trim() ?? '',
-      tavilyKey: parsed.tavilyKey?.trim() || undefined,
-      firecrawlKey: parsed.firecrawlKey?.trim() || undefined,
-      e2bKey: parsed.e2bKey?.trim() || undefined,
-      browserlessKey: parsed.browserlessKey?.trim() || undefined,
       strictMode: parsed.strictMode === true,
       backgroundRuns: parsed.backgroundRuns === true,
       plannerProviderId: parsed.plannerProviderId?.trim() || undefined,

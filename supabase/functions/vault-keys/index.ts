@@ -18,8 +18,17 @@ const CORS: Record<string, string> = {
   'Access-Control-Allow-Headers': 'authorization, content-type, apikey',
 }
 
-type Role = 'worker' | 'planner' | 'judge'
-const ROLES: Role[] = ['worker', 'planner', 'judge']
+// Model roles plus tool credentials. Tool keys are stored so a queued run is
+// funded by the customer who started it rather than by this deployment's own
+// environment variables. Must stay in step with the check constraint in
+// migration 20260820120000.
+type Role =
+  | 'worker' | 'planner' | 'judge'
+  | 'tavily' | 'firecrawl' | 'e2b' | 'browserless'
+const ROLES: Role[] = [
+  'worker', 'planner', 'judge',
+  'tavily', 'firecrawl', 'e2b', 'browserless',
+]
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {

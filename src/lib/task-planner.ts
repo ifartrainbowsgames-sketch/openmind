@@ -1,3 +1,4 @@
+import { assignWorker, builtInHolders } from './workforce/capabilities'
 import {
   createProject,
   DEFAULT_LIMITS,
@@ -21,6 +22,20 @@ export interface PlanResult {
 }
 
 /** Heuristic task DAG — replaces role-play hiring. LLM planner can plug in later. */
+/**
+ * The worker kind that should run a task of this type. Falls back to the task
+ * type when the pool cannot serve it, so planning never produces an
+ * unassignable task — the shortfall surfaces at execution as a real blocker
+ * with the missing capability named, which is more useful than a plan that
+ * quietly omits a step.
+ */
+function resolveWorker(type: WorkerKind): WorkerKind {
+  const match = assignWorker(type, BUILT_IN_POOL)
+  return (match.holder?.kind as WorkerKind | undefined) ?? type
+}
+
+const BUILT_IN_POOL = builtInHolders()
+
 export function planProject(rawGoal: string, limits = DEFAULT_LIMITS): PlanResult {
   const goal = stripWorkspacePrompt(rawGoal)
   let project = createProject(goal, limits)
@@ -44,7 +59,12 @@ export function planProject(rawGoal: string, limits = DEFAULT_LIMITS): PlanResul
       acceptance,
       dependsOn,
       status: 'pending',
-      worker: type,
+      // Routing is a decision, not an identity. With only the built-in pool
+      // this resolves to the same worker `type` always named — but it now goes
+      // through capability matching, so a custom employee with the right tools
+      // is eligible, and a task nobody can serve says so instead of silently
+      // never running.
+      worker: resolveWorker(type),
       limits,
       retries: 0,
       stepsUsed: 0,

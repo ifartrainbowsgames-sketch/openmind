@@ -27,7 +27,6 @@ import {
   X,
 } from 'lucide-react'
 import {
-  LIVE_PROVIDERS,
   liveBrain,
   simulatedBrain,
   type Employee,
@@ -48,7 +47,6 @@ import {
   loadMobileProvider,
   mobileLiveReady,
   resolveMobileProviderSpec,
-  saveMobileProvider,
   type MobileProviderConfig,
   roleProvider,
 } from '@/lib/mobile-provider'
@@ -77,7 +75,6 @@ import { getSession } from '@/lib/auth'
 import { bootKernel, runTurn } from '@/lib/openmind-os'
 import { withExecutionMode } from '@/lib/execution-mode'
 import { enqueueRun, isTerminal, listRuns, watchRun, type QueuedRun } from '@/lib/run-queue'
-import { deleteKey, listKeys, storeKey, type StoredKey, type VaultRole } from '@/lib/provider-vault'
 import { SKILLS, type SkillId } from '@/lib/skills'
 import {
   applySlashToDraft,
@@ -269,147 +266,23 @@ function ThreadList({
 }
 
 /**
- * Server-held keys. Write-only by design: the list shows a masked hint and the
- * provider, never a key — the column grants in the migration make sure that is
- * true even if this component asked for more.
+ * Voice only. Models, keys, tools and execution moved to /settings, where each
+ * one is a linkable route instead of a field buried in a sheet inside a sheet.
  */
-function VaultSection() {
-  const [keys, setKeys] = useState<StoredKey[]>([])
-  const [role, setRole] = useState<VaultRole>('worker')
-  const [providerId, setProviderId] = useState(LIVE_PROVIDERS[0]?.id ?? 'openai')
-  const [value, setValue] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<string | null>(null)
-
-  const refresh = () => {
-    listKeys()
-      .then(setKeys)
-      .catch((err: unknown) => setNote(err instanceof Error ? err.message : String(err)))
-  }
-  useEffect(refresh, [])
-
-  const save = async () => {
-    if (!value.trim()) return
-    setBusy(true)
-    setNote(null)
-    try {
-      await storeKey(role, providerId, value.trim())
-      setValue('')
-      setNote('Stored. The key left this browser once and cannot be read back.')
-      refresh()
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (target: VaultRole) => {
-    setBusy(true)
-    try {
-      await deleteKey(target)
-      refresh()
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">
-        Keys stored on the server
-      </label>
-      <p className="mt-1 text-[11px] leading-snug text-[#8d8b84]">
-        Needed only for background runs. Foreground runs still use the browser-held key above and
-        send nothing to our servers.
-      </p>
-
-      {keys.length ? (
-        <ul className="mt-2 space-y-1.5">
-          {keys.map((k) => (
-            <li
-              key={k.role}
-              className="flex items-center justify-between rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2"
-            >
-              <span className="text-sm">
-                <span className="font-medium capitalize">{k.role}</span>
-                <span className="ml-2 text-[#8d8b84]">{k.providerId} · {k.hint}</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => void remove(k.role)}
-                disabled={busy}
-                className="mobile-tap rounded-lg px-2 py-1 text-[12px] text-[#a34f36] hover:bg-black/5 disabled:opacity-40"
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <div className="mt-2 flex gap-1.5">
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value as VaultRole)}
-          className="rounded-xl border border-black/10 bg-[#faf9f6] px-2.5 py-2.5 text-sm outline-none focus:border-[#17140f]"
-        >
-          <option value="worker">Worker</option>
-          <option value="planner">Planner</option>
-          <option value="judge">Judge</option>
-        </select>
-        <select
-          value={providerId}
-          onChange={(e) => setProviderId(e.target.value)}
-          className="min-w-0 flex-1 rounded-xl border border-black/10 bg-[#faf9f6] px-2.5 py-2.5 text-sm outline-none focus:border-[#17140f]"
-        >
-          {LIVE_PROVIDERS.map((pv) => (
-            <option key={pv.id} value={pv.id}>{pv.name}</option>
-          ))}
-        </select>
-      </div>
-      <div className="mt-1.5 flex gap-1.5">
-        <input
-          type="password"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="API key — stored encrypted, never returned"
-          className="min-w-0 flex-1 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={busy || !value.trim()}
-          className="mobile-tap rounded-xl bg-[#17140f] px-3.5 py-2.5 text-sm font-medium text-white disabled:opacity-40"
-        >
-          {busy ? '…' : 'Store'}
-        </button>
-      </div>
-      {note ? <p className="mt-1.5 text-[11px] leading-snug text-[#8d8b84]">{note}</p> : null}
-    </>
-  )
-}
-
 function VoiceSheet({
   open,
   provider,
   voice,
   onClose,
-  onProviderChange,
   onVoiceChange,
 }: {
   open: boolean
   provider: MobileProviderConfig
   voice: MobileVoiceSettings
   onClose: () => void
-  onProviderChange: (next: MobileProviderConfig) => void
   onVoiceChange: (next: MobileVoiceSettings) => void
 }) {
   if (!open) return null
-  const spec = resolveMobileProviderSpec(provider)
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center lg:items-center" role="dialog" aria-modal="true" aria-label="Voice settings">
       <button className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={onClose} aria-label="Close voice settings" />
@@ -417,123 +290,25 @@ function VoiceSheet({
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-black/15 lg:hidden" />
         <div className="mb-4 flex items-center justify-between px-1">
           <div>
-            <h2 className="text-lg font-semibold tracking-[-0.02em]">Voice & model</h2>
-            <p className="mt-0.5 text-xs text-[#85827b]">OpenAI Whisper in · OpenAI voices out. Key stays on your device.</p>
+            <h2 className="text-lg font-semibold tracking-[-0.02em]">Voice</h2>
+            <p className="mt-0.5 text-xs text-[#85827b]">OpenAI Whisper in, OpenAI voices out.</p>
           </div>
           <button onClick={onClose} className="mobile-tap flex h-9 w-9 items-center justify-center rounded-full bg-[#f3f1ed]" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
-        <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">OpenAI API key</label>
-        <input
-          type="password"
-          value={provider.apiKey}
-          onChange={(event) => onProviderChange({ ...provider, apiKey: event.target.value })}
-          placeholder="sk-..."
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <p className="mt-1.5 text-[11px] text-[#aaa7a0]">
-          Chat uses {spec.model}. Search and browse are open-source by default (DuckDuckGo + Jina) once agent-tools is deployed. Keys below are optional upgrades.
-        </p>
-        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Tavily (optional search upgrade)</label>
-        <input
-          type="password"
-          value={provider.tavilyKey ?? ''}
-          onChange={(event) => onProviderChange({ ...provider, tavilyKey: event.target.value })}
-          placeholder="tvly-... leave empty to use DuckDuckGo"
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Firecrawl (optional browse upgrade)</label>
-        <input
-          type="password"
-          value={provider.firecrawlKey ?? ''}
-          onChange={(event) => onProviderChange({ ...provider, firecrawlKey: event.target.value })}
-          placeholder="fc-... leave empty to use Jina / fetch"
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">E2B (run code)</label>
-        <input
-          type="password"
-          value={provider.e2bKey ?? ''}
-          onChange={(event) => onProviderChange({ ...provider, e2bKey: event.target.value })}
-          placeholder="e2b_... (optional)"
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Browserless (hosted Chrome)</label>
-        <input
-          type="password"
-          value={provider.browserlessKey ?? ''}
-          onChange={(event) => onProviderChange({ ...provider, browserlessKey: event.target.value })}
-          placeholder="token — same as Cursor mini-Chrome, cloud browser"
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-          autoComplete="off"
-        />
-        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">
-          Planner model <span className="normal-case tracking-normal text-[#a8a49c]">(optional)</span>
-        </label>
-        <select
-          value={provider.plannerProviderId ?? ''}
-          onChange={(event) => onProviderChange({ ...provider, plannerProviderId: event.target.value || undefined })}
-          className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-        >
-          <option value="">Same as worker model</option>
-          {LIVE_PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>{p.name} · {p.model}</option>
-          ))}
-        </select>
-        {provider.plannerProviderId ? (
-          <input
-            type="password"
-            value={provider.plannerApiKey ?? ''}
-            onChange={(event) => onProviderChange({ ...provider, plannerApiKey: event.target.value })}
-            placeholder="planner API key"
-            className="mt-1.5 w-full rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
-            autoComplete="off"
-          />
+
+        {!provider.apiKey ? (
+          <p className="mb-4 rounded-xl bg-[#fff4ec] px-3 py-2 text-[12px] leading-snug text-[#8a3b00]">
+            Speech needs an OpenAI key.{' '}
+            <Link to="/settings/keys" className="font-medium underline" onClick={onClose}>
+              Add one in Settings
+            </Link>
+            .
+          </p>
         ) : null}
-        <p className="mt-1 text-[11px] leading-snug text-[#8d8b84]">
-          One model that plans the work, does the work, and grades the work approves its own
-          output. A separate planner breaks that loop.
-        </p>
 
-        <VaultSection />
-
-        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Execution mode</label>
-        <label className="mt-1.5 flex items-start gap-2.5 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5">
-          <input
-            type="checkbox"
-            checked={provider.backgroundRuns === true}
-            onChange={(event) => onProviderChange({ ...provider, backgroundRuns: event.target.checked })}
-            className="mt-0.5 h-4 w-4 shrink-0 accent-[#17140f]"
-          />
-          <span className="text-sm leading-snug">
-            Run in background
-            <span className="mt-0.5 block text-[11px] leading-snug text-[#8d8b84]">
-              A worker runs the task instead of this tab, so you can close it. Needs a key stored
-              on the server above — the worker has no browser to ask.
-            </span>
-          </span>
-        </label>
-        <label className="mt-1.5 flex items-start gap-2.5 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5">
-          <input
-            type="checkbox"
-            checked={provider.strictMode === true}
-            onChange={(event) => onProviderChange({ ...provider, strictMode: event.target.checked })}
-            className="mt-0.5 h-4 w-4 shrink-0 accent-[#17140f]"
-          />
-          <span className="text-sm leading-snug">
-            Strict mode
-            <span className="mt-0.5 block text-[11px] leading-snug text-[#8d8b84]">
-              No mock data, no offline planner, no heuristic judge. A missing connection blocks the
-              task instead of returning something that looks like an answer.
-            </span>
-          </span>
-        </label>
-        <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Voice</label>
+        <label className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Voice</label>
         <select
           value={voice.voice}
           onChange={(event) => onVoiceChange({ ...voice, voice: event.target.value as OpenAiTtsVoice })}
@@ -559,7 +334,7 @@ function VoiceSheet({
           onClick={onClose}
           className="mobile-tap mt-5 w-full rounded-xl bg-[#17140f] py-3 text-sm font-medium text-white"
         >
-          Save
+          Done
         </button>
       </div>
     </div>
@@ -585,7 +360,9 @@ export default function MobileApp() {
   const [accountEmail, setAccountEmail] = useState<string | null>(null)
   const [browserUrl, setBrowserUrl] = useState('')
   const [openFileBody, setOpenFileBody] = useState('')
-  const [provider, setProvider] = useState<MobileProviderConfig>(() => loadMobileProvider())
+  // Read-only here: /settings owns writes, and returning from that route
+  // remounts this page, so the fresh config is picked up on mount.
+  const [provider] = useState<MobileProviderConfig>(() => loadMobileProvider())
   const [voice, setVoice] = useState<MobileVoiceSettings>(() => loadMobileVoiceSettings())
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -627,11 +404,6 @@ export default function MobileApp() {
           fixedParams: providerSpec.fixedParams,
         })
       : simulatedBrain()
-
-  const persistProvider = (next: MobileProviderConfig) => {
-    setProvider(next)
-    saveMobileProvider(next)
-  }
 
   const persistVoice = (next: MobileVoiceSettings) => {
     setVoice(next)
@@ -902,12 +674,10 @@ export default function MobileApp() {
           // plan and then grade its own execution of it.
           planner: plannerBrain,
           persist: true,
-          toolKeys: {
-            tavily: provider.tavilyKey,
-            firecrawl: provider.firecrawlKey,
-            e2b: provider.e2bKey,
-            browserless: provider.browserlessKey,
-          },
+          // No toolKeys: search, browse, sandbox and hosted Chrome run on our
+          // credentials, held in Edge Function secrets. The browser never has
+          // one to send, which is the point — a bundle is public.
+          platformKeys: true,
         }),
       )
       const assistantMessage: MobileMessage = {
@@ -1439,12 +1209,19 @@ export default function MobileApp() {
                 Sign in
               </Link>
             )}
+            <Link
+              to="/settings/general"
+              onClick={() => setSettingsOpen(false)}
+              className="mt-5 block w-full rounded-xl bg-white/10 py-3 text-center text-sm"
+            >
+              Settings
+            </Link>
             <button
               type="button"
               onClick={() => { setSettingsOpen(false); setVoiceOpen(true) }}
-              className="mt-5 w-full rounded-xl bg-white/10 py-3 text-sm"
+              className="mt-2 w-full rounded-xl bg-white/10 py-3 text-sm"
             >
-              Model, Browserless, voice
+              Voice
             </button>
             <button
               type="button"
@@ -1462,7 +1239,6 @@ export default function MobileApp() {
         provider={provider}
         voice={voice}
         onClose={() => setVoiceOpen(false)}
-        onProviderChange={persistProvider}
         onVoiceChange={persistVoice}
       />
     </div>

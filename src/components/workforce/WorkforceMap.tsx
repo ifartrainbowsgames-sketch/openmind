@@ -4,6 +4,8 @@
 import { CONNECTIONS, toolName, type Employee, type LiveConnectionConfig } from '@/lib/agent'
 import { Bot, Building2, Link2, Wrench } from 'lucide-react'
 import type { CSSProperties } from 'react'
+import { STATUS_COLOR, buildOverlay } from '@/lib/workforce/map-overlay'
+import type { ProjectSnapshot } from '@/lib/task-ledger'
 
 interface Props {
   employees: Employee[]
@@ -11,6 +13,12 @@ interface Props {
   onSelect: (id: string) => void
   /** Live connection configs — connection chips tint emerald/red when live/error. */
   configs?: LiveConnectionConfig[]
+  /**
+   * The running project. Supplied, each employee shows its real task state and
+   * artifact count; omitted, the map renders exactly as it always has. There is
+   * no invented activity in between — an idle map means idle.
+   */
+  project?: ProjectSnapshot
 }
 
 type ConnTint = 'live' | 'error' | 'mock'
@@ -38,7 +46,8 @@ const ROW = 74
 const CHIP_H = 24
 const CHIP_GAP = 6
 
-export default function WorkforceMap({ employees, selectedId, onSelect, configs }: Props) {
+export default function WorkforceMap({ employees, selectedId, onSelect, configs, project }: Props) {
+  const overlay = buildOverlay(project, employees)
   // Row height adapts to the tallest chip stack so tools/connections never
   // overlap the next employee (previously a fixed ROW caused collisions).
   const maxChips = employees.reduce((n, e) => Math.max(n, e.tools.length + (e.connections?.length ?? 0)), 0)
@@ -83,13 +92,20 @@ export default function WorkforceMap({ employees, selectedId, onSelect, configs 
           const chipsH = chips.length * (CHIP_H + CHIP_GAP) - CHIP_GAP
           const chipTop = cy - chipsH / 2
           const selected = e.id === selectedId
+          const state = overlay[e.id]
 
           return (
             <g key={e.id} className="dash-node-pop" style={{ '--dash-i': i } as CSSProperties}>
               {/* edge HQ → employee */}
-              <path d={bezier(210, midY, empX, cy)} fill="none" strokeWidth={selected ? 2.5 : 1.5}
-                pathLength={1} className={`dash-edge-draw ${selected ? 'stroke-accent' : 'stroke-border'}`}
-                style={{ '--dash-i': i } as CSSProperties} />
+              <path
+                d={bezier(210, midY, empX, cy)}
+                fill="none"
+                strokeWidth={state?.status === 'running' ? 3 : selected ? 2.5 : 1.5}
+                stroke={state && state.status !== 'idle' ? STATUS_COLOR[state.status] : undefined}
+                pathLength={1}
+                className={`dash-edge-draw ${state && state.status !== 'idle' ? '' : selected ? 'stroke-accent' : 'stroke-border'}`}
+                style={{ '--dash-i': i } as CSSProperties}
+              />
               {/* employee node */}
               <g onClick={() => onSelect(e.id)} className="cursor-pointer">
                 <rect x={empX} y={y} width={empW} height={empH} fill={e.accent} />
@@ -97,10 +113,24 @@ export default function WorkforceMap({ employees, selectedId, onSelect, configs 
                 <foreignObject x={empX} y={y} width={empW} height={empH}>
                   <div className="flex h-full items-center gap-2 px-3 text-white">
                     <Bot className="h-4 w-4 shrink-0" />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="truncate font-serif-display text-[15px] font-semibold leading-tight">{e.name}</div>
-                      <div className="truncate font-mono-spec text-[9px] uppercase tracking-[0.14em] opacity-75">{e.role}</div>
+                      <div className="truncate font-mono-spec text-[9px] uppercase tracking-[0.14em] opacity-75">
+                        {state ? (state.taskGoal ?? e.role) : e.role}
+                      </div>
                     </div>
+                    {state ? (
+                      <span className="flex shrink-0 items-center gap-1">
+                        {state.artifactCount > 0 && (
+                          <span className="font-mono-spec text-[10px] opacity-90">{state.artifactCount}</span>
+                        )}
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${state.status === 'running' ? 'animate-pulse' : ''}`}
+                          style={{ background: STATUS_COLOR[state.status] }}
+                          aria-label={state.status}
+                        />
+                      </span>
+                    ) : null}
                   </div>
                 </foreignObject>
               </g>
