@@ -1,29 +1,69 @@
 # OpenMind
 
-OpenMind is an open-source customer-chat workspace. It combines a customizable website chatbot, team handoff, knowledge, notifications, and optional business automations.
+An AI agent workspace. Agents plan work into tasks, use real tools, produce
+artifacts, and validate each other's output before anything counts as done.
+
+The customer chatbot is one service on top of that runtime, not the whole
+product.
+
+## Services
+
+| Service | What it does | Status |
+| --- | --- | --- |
+| **Chat** (`/app`) | Single assistant with live tools, voice, and connected apps | Real |
+| **Workforce** | Task DAG, capability-matched workers, artifacts, acceptance criteria, delegation | Real |
+| **Build** | E2B sandbox: clone, edit, run the repo's own checks, read real exit codes | Real |
+| **Research** | Search and browse with citations; sources counted, not asserted | Real |
+| **Chatbot** | Embeddable customer widget, designer, conversations, staff handoff | Real |
+| **Knowledge** | Stores files and pasted text | Partial — no extraction, crawling, chunking or embedding yet |
+| **Automations** | n8n and OpenClaw plugins per employee | Real |
+| **Apps** | MCP and REST connections, OAuth installations | Real |
+
+## How a run works
+
+```
+USER GOAL → PLANNER → TASK DAG → WORKERS → TOOLS → ARTIFACTS
+                                     ↓
+                          SHARED PROJECT LEDGER
+                                     ↓
+                       VALIDATOR → pass / replan → RESULT
+```
+
+Workers do not talk to each other. They communicate through structured tasks,
+artifacts, and the project ledger. A worker needing a capability it lacks files
+a delegation request naming the artifact it will produce; the orchestrator
+decides, within a depth and count budget. A request that cannot name an output
+is a conversation, and is refused.
+
+Every task ends in one of four outcomes — **completed**, **failed**,
+**blocked**, or **needs user**. Never "still discussing".
+
+## Real, simulated, blocked
+
+The app distinguishes these everywhere, and so does this README:
+
+- **Real** — actually ran. Tool output is stamped `[LIVE · id]`.
+- **Simulated** — canned. Stamped `[MOCK · id]`, and never presented as real.
+- **Blocked** — a capability is missing. Reported as a blocker, not substituted
+  with something that looks like an answer.
+
+Strict mode removes the middle option: a missing connection blocks the task
+instead of returning mock data that would pass validation.
 
 ## Current status
 
-## What's inside
+Honest about what is not finished:
 
-- **Marketing site** — spec-sheet editorial design, live request log, provider matrix
-- **Playground** — the chatbot testable in the browser via a secure gateway (zero keys on the page)
-- **Console** (`/dashboard`) — Data Studio (upload/index company data), Widget Builder (design + live preview: voice/video calls, image drop, Fix-with-AI), Inbox, Engage popups, Prompt Studio, per-service settings
-- **Super Agent** (`/app`) — customer product: LangGraph crew, Connect your GitHub/Slack/Gmail, GitHub · main workspace. Stack plan: [docs/super-agent.md](docs/super-agent.md)
-- **Auth** — Supabase Auth (email/password), route-guarded console
-- **Database** — Supabase Postgres with row-level security (profiles, sources, conversations, messages, subscriptions)
-- **Billing** — Stripe checkout (Pro $29/mo)
-- The public chat demo calls the `openmind-chat` Edge Function when configured and visibly falls back to canned local responses.
-- Published customer widgets use a workspace key, persist conversations, and run with the selected AI employee prompt.
-- The customer workspace is organized around Home, Conversations, Chatbot, Knowledge, Team, Apps, and Settings. Technical automation tools are kept in a collapsed Advanced section.
-- The chatbot designer supports editable color tokens, typography, spacing, corner radii, launcher placement, responsive previews, drafts, publishing, version history, and draft rollback.
-- Available staff routing surfaces owner-dashboard popups and can deliver individual Telegram or WhatsApp alerts when the required server credentials are configured.
-- AI Employees can run with a deterministic local brain or a browser-direct OpenAI-compatible provider.
-- Marketplace plugins can be attached per employee. n8n supports MCP or workflow webhooks; OpenClaw supports secure `/hooks/agent` delegation.
-- Live connection traffic uses an authenticated Supabase proxy. Connection tokens are session-only and are not persisted to `localStorage`.
-- Knowledge stores files and pasted text. Automatic file extraction, crawling, chunking, and embedding are not implemented yet.
-- Billing is not live. Pro is planned at $10/month; plan fields are server-controlled.
-- A server-managed provider-key vault is planned and is not represented as implemented.
+- Knowledge stores files and pasted text. Automatic extraction, crawling,
+  chunking and embedding are **not implemented**.
+- Billing is **not live**. Plan fields are server-controlled.
+- Live audio and video calls in the widget designer are **preview only**.
+- Worktrees, external coding-agent adapters (Claude Code, Codex, ACP) and the
+  browser-worker provider are **interfaces with tests, not live integrations**.
+- The provider-key vault **is** implemented: keys are sealed with AES-256-GCM
+  server-side and are not readable back, including by their owner.
+- Model keys are yours. Search, browsing, the sandbox and hosted Chrome run on
+  OpenMind's credentials and need no key from you.
 
 ## Stack
 
@@ -127,9 +167,12 @@ npm test
 npm run test:agents
 npm run build
 npm run test:e2e
+npx tsx scripts/verify-mcp.ts
 ```
 
 CI runs all checks and Chromium smoke tests. Install the browser locally with `npx playwright install chromium`.
+
+`npx tsx scripts/verify-mcp.ts` drives the MCP transport against a real HTTP server and asserts the URL guard — typechecking alone has already missed a transport endpoint that did not exist.
 
 `npm run test:agents` executes the curated AI employee benchmark. It covers more than 30 knowledge, analysis, code, connection, multi-tool and direct-answer tasks, and scores tool selection, execution, answer content and graph traces separately.
 
@@ -140,7 +183,9 @@ CI runs all checks and Chromium smoke tests. Install the browser locally with `n
 - Vaulted connector calls are bound to the installation owner and a provider-specific upstream host; browser-supplied authorization headers are ignored for OAuth installations.
 - Public widget keys are identifiers, not secrets. Embedding-site origins are policy-checked, requests consume database-backed tenant/visitor quotas, and conversation resumption additionally requires an unguessable visitor token. Origin headers are not treated as authentication.
 - Widget API CORS is restricted to deployment-owned app origins. The iframe derives the customer origin from the browser referrer and fails closed when it is unavailable; add the widget host to `ALLOWED_ORIGINS` and do not embed it under a `no-referrer` policy.
-- Browser-direct provider keys remain visible to JavaScript for the current tab. Use only scoped keys until the server-managed vault exists.
+- Browser-held provider keys remain visible to JavaScript for the current tab. Foreground runs use them; background runs use the server-side vault instead.
+- Vaulted keys are sealed with AES-256-GCM before reaching Postgres, and column grants deny `authenticated` any access to the ciphertext — a `select` on it fails even with a valid session on your own row.
+- Tool credentials (search, browse, sandbox, hosted Chrome) live only in Edge Function secrets. `scripts/verify-mcp.ts` and the client key-mode tests assert they never reach the JS bundle.
 
 ## License
 
