@@ -50,9 +50,13 @@ export function sandboxRuntime(): Runtime {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
-        // `ls -l` output: the name is the last field, and . / .. are noise.
+        // Drop `ls -l`'s size header BEFORE taking the last field. Filtering
+        // afterwards checked the *name*, and the name of "total 5" is "5" — so
+        // every listing carried a phantom numeric file.
+        .filter((line) => !/^total\s+\d+$/.test(line))
+        // The name is the last field, and . / .. are noise.
         .map((line) => line.split(/\s+/).pop() ?? '')
-        .filter((name) => name && name !== '.' && name !== '..' && !name.startsWith('total'))
+        .filter((name) => name && name !== '.' && name !== '..')
     },
 
     async exec(command: string, options: ExecOptions = {}): Promise<ExecResult> {

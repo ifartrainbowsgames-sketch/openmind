@@ -604,19 +604,39 @@ stdout:
 (simulated) ran in a throwaway VM — no side effects. Deploy agent-tools with E2B_API_KEY for real execution. Edge Functions cannot run Docker.`
 }
 
+/**
+ * Environment, from wherever this is running.
+ *
+ * `import.meta.env` is a Vite construct and is `undefined` under plain Node —
+ * which is where the background worker runs. Reading only it meant the worker
+ * resolved no function URL and silently used mock tools for every queued run:
+ * a whole execution path quietly simulated, with nothing in the logs saying so.
+ *
+ * Deliberately does not import `./supabase`; that module builds a client that
+ * reaches for localStorage and breaks Node.
+ */
+function envVar(name: string): string | undefined {
+  const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).env
+  const fromVite = viteEnv?.[name]
+  if (fromVite) return fromVite
+  // `process` is absent in the browser and untyped in the app tsconfig, so it
+  // is reached through globalThis rather than the Node global.
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  return proc?.env?.[name]
+}
+
 function supabaseFnUrl(name: string): string | null {
-  // Read Vite env directly — do not import `./supabase` here. That module
-  // constructs a client (localStorage) and would break Node test runs.
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {}
-  const url = env.VITE_SUPABASE_URL
-  const key = env.VITE_SUPABASE_KEY ?? env.VITE_SUPABASE_PUBLISHABLE_KEY
+  const url = envVar('VITE_SUPABASE_URL') ?? envVar('SUPABASE_URL')
+  const key = anonKey()
   if (url && key) return `${url.replace(/\/$/, '')}/functions/v1/${name}`
   return null
 }
 
 function anonKey(): string | null {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {}
-  return env.VITE_SUPABASE_KEY ?? env.VITE_SUPABASE_PUBLISHABLE_KEY ?? null
+  return envVar('VITE_SUPABASE_KEY')
+    ?? envVar('VITE_SUPABASE_PUBLISHABLE_KEY')
+    ?? envVar('SUPABASE_ANON_KEY')
+    ?? null
 }
 
 async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, input: string): Promise<string> {
