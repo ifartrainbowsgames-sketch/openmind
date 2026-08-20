@@ -83,3 +83,5 @@ create policy "agent_artifacts_rw_own" on public.agent_artifacts
 grant select, insert, update, delete on public.agent_projects to authenticated;
 grant select, insert, update, delete on public.agent_tasks to authenticated;
 grant select, insert, update, delete on public.agent_artifacts to authenticated;
+
+-- anon is never a consumer of these tables; see 20260820000000 for the revoke.

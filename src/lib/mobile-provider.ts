@@ -16,6 +16,11 @@ export interface MobileProviderConfig {
    */
   strictMode?: boolean
   /**
+   * Queue runs on the worker instead of executing in the tab. Requires a
+   * server-held key, because a worker has no browser to ask for one.
+   */
+  backgroundRuns?: boolean
+  /**
    * Optional distinct models for planning and judging. One model that designs
    * the plan, executes every task in it, and then grades the result approves
    * its own work — correlated failure, not independent review. Blank means
@@ -44,6 +49,7 @@ export function loadMobileProvider(): MobileProviderConfig {
       e2bKey: parsed.e2bKey?.trim() || undefined,
       browserlessKey: parsed.browserlessKey?.trim() || undefined,
       strictMode: parsed.strictMode === true,
+      backgroundRuns: parsed.backgroundRuns === true,
       plannerProviderId: parsed.plannerProviderId?.trim() || undefined,
       plannerApiKey: parsed.plannerApiKey?.trim() || undefined,
       judgeProviderId: parsed.judgeProviderId?.trim() || undefined,

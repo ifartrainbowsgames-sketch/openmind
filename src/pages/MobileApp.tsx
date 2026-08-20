@@ -76,6 +76,8 @@ import ToolConfirmHost from '@/components/crew/ToolConfirmSheet'
 import { getSession } from '@/lib/auth'
 import { bootKernel, runTurn } from '@/lib/openmind-os'
 import { withExecutionMode } from '@/lib/execution-mode'
+import { enqueueRun, isTerminal, listRuns, watchRun, type QueuedRun } from '@/lib/run-queue'
+import { deleteKey, listKeys, storeKey, type StoredKey, type VaultRole } from '@/lib/provider-vault'
 import { SKILLS, type SkillId } from '@/lib/skills'
 import {
   applySlashToDraft,
@@ -130,6 +132,26 @@ interface PendingAttachment {
 
 function formatTime(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(timestamp)
+}
+
+/** What to show in the bubble while a queued run is still in flight. */
+function describeRun(run: QueuedRun): string {
+  switch (run.status) {
+    case 'queued':
+      return 'Queued — a worker will pick this up. You can close the tab.'
+    case 'running':
+      return run.snapshot
+        ? `Running — ${run.snapshot.tasks.filter((t) => t.status === 'completed').length}/${run.snapshot.tasks.length} tasks done.`
+        : 'Running on the worker…'
+    case 'needs_user':
+      return run.error ?? 'Blocked — something needs your input before this can continue.'
+    case 'failed':
+      return `Failed — ${run.error ?? 'no reason reported'}`
+    case 'cancelled':
+      return 'Cancelled.'
+    default:
+      return run.answer ?? 'Done.'
+  }
 }
 
 function getStoredThreads(): MobileThread[] {
@@ -246,6 +268,131 @@ function ThreadList({
   )
 }
 
+/**
+ * Server-held keys. Write-only by design: the list shows a masked hint and the
+ * provider, never a key — the column grants in the migration make sure that is
+ * true even if this component asked for more.
+ */
+function VaultSection() {
+  const [keys, setKeys] = useState<StoredKey[]>([])
+  const [role, setRole] = useState<VaultRole>('worker')
+  const [providerId, setProviderId] = useState(LIVE_PROVIDERS[0]?.id ?? 'openai')
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const refresh = () => {
+    listKeys()
+      .then(setKeys)
+      .catch((err: unknown) => setNote(err instanceof Error ? err.message : String(err)))
+  }
+  useEffect(refresh, [])
+
+  const save = async () => {
+    if (!value.trim()) return
+    setBusy(true)
+    setNote(null)
+    try {
+      await storeKey(role, providerId, value.trim())
+      setValue('')
+      setNote('Stored. The key left this browser once and cannot be read back.')
+      refresh()
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (target: VaultRole) => {
+    setBusy(true)
+    try {
+      await deleteKey(target)
+      refresh()
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">
+        Keys stored on the server
+      </label>
+      <p className="mt-1 text-[11px] leading-snug text-[#8d8b84]">
+        Needed only for background runs. Foreground runs still use the browser-held key above and
+        send nothing to our servers.
+      </p>
+
+      {keys.length ? (
+        <ul className="mt-2 space-y-1.5">
+          {keys.map((k) => (
+            <li
+              key={k.role}
+              className="flex items-center justify-between rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2"
+            >
+              <span className="text-sm">
+                <span className="font-medium capitalize">{k.role}</span>
+                <span className="ml-2 text-[#8d8b84]">{k.providerId} · {k.hint}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => void remove(k.role)}
+                disabled={busy}
+                className="mobile-tap rounded-lg px-2 py-1 text-[12px] text-[#a34f36] hover:bg-black/5 disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-2 flex gap-1.5">
+        <select
+          value={role}
+          onChange={(e) => setRole(e.target.value as VaultRole)}
+          className="rounded-xl border border-black/10 bg-[#faf9f6] px-2.5 py-2.5 text-sm outline-none focus:border-[#17140f]"
+        >
+          <option value="worker">Worker</option>
+          <option value="planner">Planner</option>
+          <option value="judge">Judge</option>
+        </select>
+        <select
+          value={providerId}
+          onChange={(e) => setProviderId(e.target.value)}
+          className="min-w-0 flex-1 rounded-xl border border-black/10 bg-[#faf9f6] px-2.5 py-2.5 text-sm outline-none focus:border-[#17140f]"
+        >
+          {LIVE_PROVIDERS.map((pv) => (
+            <option key={pv.id} value={pv.id}>{pv.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="mt-1.5 flex gap-1.5">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="API key — stored encrypted, never returned"
+          className="min-w-0 flex-1 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5 text-sm outline-none focus:border-[#17140f]"
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy || !value.trim()}
+          className="mobile-tap rounded-xl bg-[#17140f] px-3.5 py-2.5 text-sm font-medium text-white disabled:opacity-40"
+        >
+          {busy ? '…' : 'Store'}
+        </button>
+      </div>
+      {note ? <p className="mt-1.5 text-[11px] leading-snug text-[#8d8b84]">{note}</p> : null}
+    </>
+  )
+}
+
 function VoiceSheet({
   open,
   provider,
@@ -353,7 +500,24 @@ function VoiceSheet({
           output. A separate planner breaks that loop.
         </p>
 
+        <VaultSection />
+
         <label className="mt-5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#8d8b84]">Execution mode</label>
+        <label className="mt-1.5 flex items-start gap-2.5 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={provider.backgroundRuns === true}
+            onChange={(event) => onProviderChange({ ...provider, backgroundRuns: event.target.checked })}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-[#17140f]"
+          />
+          <span className="text-sm leading-snug">
+            Run in background
+            <span className="mt-0.5 block text-[11px] leading-snug text-[#8d8b84]">
+              A worker runs the task instead of this tab, so you can close it. Needs a key stored
+              on the server above — the worker has no browser to ask.
+            </span>
+          </span>
+        </label>
         <label className="mt-1.5 flex items-start gap-2.5 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2.5">
           <input
             type="checkbox"
@@ -404,6 +568,12 @@ function VoiceSheet({
 
 export default function MobileApp() {
   const [threads, setThreads] = useState<MobileThread[]>(getStoredThreads)
+  // Mirrors `threads` for the mount-time reconnect, which must not re-run
+  // every time a thread changes.
+  const threadsRef = useRef(threads)
+  useEffect(() => {
+    threadsRef.current = threads
+  }, [threads])
   const [activeId, setActiveId] = useState(() => threads[0].id)
   const [draft, setDraft] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -557,6 +727,81 @@ export default function MobileApp() {
     })
   }
 
+  // Live subscriptions for queued runs, plus the ids that already finished —
+  // a run can reach a terminal state before its subscription resolves.
+  const runWatchers = useRef(new Map<string, () => void>())
+  const finishedRuns = useRef(new Set<string>())
+
+  useEffect(() => {
+    const watchers = runWatchers.current
+    return () => {
+      for (const stop of watchers.values()) stop()
+      watchers.clear()
+    }
+  }, [])
+
+
+  /** One assistant message per queued run, updated in place as it progresses. */
+  const appendRunMessage = (threadId: string, run: QueuedRun) => {
+    updateThread(threadId, (current) => {
+      const existing = current.messages.find((m) => m.runId === run.id)
+      const rendered: MobileMessage = {
+        id: existing?.id ?? makeId('message'),
+        role: 'assistant',
+        runId: run.id,
+        content: run.answer ?? describeRun(run),
+        createdAt: existing?.createdAt ?? Date.now(),
+        crewRun: run.snapshot
+          ? { employeeIds: [], memberNames: [], artifacts: [], project: run.snapshot }
+          : existing?.crewRun,
+      }
+      return {
+        ...current,
+        messages: existing
+          ? current.messages.map((m) => (m.runId === run.id ? rendered : m))
+          : [...current.messages, rendered],
+        updatedAt: Date.now(),
+      }
+    })
+  }
+
+  const watchQueuedRun = (threadId: string, runId: string) => {
+    void watchRun(runId, (run) => {
+      appendRunMessage(threadId, run)
+      if (!isTerminal(run.status)) return
+      // Mark finished first: the run can reach a terminal state before
+      // subscribe() resolves, in which case there is no stop function yet.
+      finishedRuns.current.add(runId)
+      const stop = runWatchers.current.get(runId)
+      if (stop) {
+        stop()
+        runWatchers.current.delete(runId)
+      }
+    }).then((stop) => {
+      if (finishedRuns.current.has(runId)) stop()
+      else runWatchers.current.set(runId, stop)
+    })
+  }
+
+  // Reattach to runs still in flight from a previous visit. Without this,
+  // "close the tab and come back" shows a run frozen at whatever the last
+  // snapshot said — which would make background runs look broken.
+  const reconnected = useRef(false)
+  useEffect(() => {
+    if (reconnected.current) return
+    reconnected.current = true
+    void (async () => {
+      const runs = await listRuns(20).catch(() => [])
+      for (const run of runs) {
+        if (isTerminal(run.status)) continue
+        const owner = threadsRef.current.find((t) => t.messages.some((m) => m.runId === run.id))
+        if (owner) watchQueuedRun(owner.id, run.id)
+      }
+    })()
+    // Runs once on mount; threadsRef keeps it reading current threads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const sendPrompt = async (override?: string) => {
     let text = (override ?? draft).trim()
     const taken = consumeSlash(text)
@@ -628,6 +873,21 @@ export default function MobileApp() {
         updateThread(threadId, (current) => ({ ...current, workspace: space, updatedAt: Date.now() }))
       }
       const crewPrompt = workspacePrompt(space, runtimePrompt)
+
+      // Background: hand the goal to the worker and stop holding the run here.
+      // The tab becomes a viewer, so closing it no longer kills the work.
+      if (provider.backgroundRuns) {
+        const queued = await enqueueRun(crewPrompt, {
+          workspace: space,
+          skill: turnSkill,
+          strictMode: provider.strictMode === true,
+        })
+        appendRunMessage(threadId, queued)
+        watchQueuedRun(threadId, queued.id)
+        setPendingThreadId(null)
+        return
+      }
+
       // A strict run is opt-in per the Settings toggle. Inside it nothing
       // substitutes for a missing capability, so a task blocks rather than
       // returning canned data that would judge as success.

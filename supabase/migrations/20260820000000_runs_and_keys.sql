@@ -123,3 +123,20 @@ $$;
 revoke all on function public.claim_agent_run(text, interval) from public, authenticated;
 
 alter publication supabase_realtime add table public.agent_runs;
+
+-- ── Grant hardening (applied 2026-08-20) ────────────────────────────────────
+-- `revoke ... from public` does NOT remove Supabase's default EXECUTE grant to
+-- `anon`, so claim_agent_run was reachable unauthenticated via /rest/v1/rpc as
+-- a SECURITY DEFINER returning any user's run rows. Revoke each API role by
+-- name. Likewise, anon holds default table grants that only RLS was blocking —
+-- these tables are never anon-facing and one holds encrypted API keys.
+revoke execute on function public.claim_agent_run(text, interval) from public;
+revoke execute on function public.claim_agent_run(text, interval) from anon;
+revoke execute on function public.claim_agent_run(text, interval) from authenticated;
+grant  execute on function public.claim_agent_run(text, interval) to service_role;
+
+revoke all on public.provider_keys   from anon;
+revoke all on public.agent_runs      from anon;
+revoke all on public.agent_projects  from anon;
+revoke all on public.agent_tasks     from anon;
+revoke all on public.agent_artifacts from anon;

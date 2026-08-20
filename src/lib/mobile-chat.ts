@@ -21,6 +21,8 @@ export interface MobileMessage {
   trace?: TraceLine[]
   toolCalls?: ToolCall[]
   crewRun?: CrewRunSummary
+  /** Set when this message tracks a queued background run, so it updates in place. */
+  runId?: string
 }
 
 export interface MobileThread {
