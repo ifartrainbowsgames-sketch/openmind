@@ -26,3 +26,10 @@ dist-ssr
 
 # build artifact
 manifest.json
+
+# Supabase CLI scratch
+supabase/.temp/
+
+# Byproduct of running `deno check` against the edge functions — it
+# resolves the whole app npm tree, and nothing reads it back.
+deno.lock

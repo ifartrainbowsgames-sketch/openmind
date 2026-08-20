@@ -9,6 +9,7 @@
 
 import { extractJson, resolveProvider } from './llm-staffing'
 import type { Employee, LiveProviderSpec, TraceLine } from './agent'
+import { blockedMessage, isStrict } from './execution-mode'
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -26,9 +27,14 @@ export interface RunScore {
   axes: ScoreAxis[]
   /** One or two honest sentences — what earned the verdict. */
   note: string
-  source: 'llm-judge' | 'heuristic'
+  source: 'llm-judge' | 'heuristic' | 'unavailable'
   /** "Kimi (Moonshot) · kimi-k3" when an LLM judged; undefined for heuristic. */
   judge?: string
+  /**
+   * True when the judging model is the same one that produced the work. Not
+   * an error, but the reader deserves to know a grade is a self-assessment.
+   */
+  selfJudged?: boolean
   at: number
 }
 
@@ -194,11 +200,23 @@ export function heuristicScore(run: ScoredRun): RunScore {
  * second LLM call judges the run and must return strict JSON (one repair
  * retry); any failure falls back to the heuristic scorer. Never throws.
  */
-export async function scoreRun(run: ScoredRun, brain?: JudgeBrain | null): Promise<RunScore> {
+export async function scoreRun(
+  run: ScoredRun,
+  brain?: JudgeBrain | null,
+  options: { selfJudged?: boolean } = {},
+): Promise<RunScore> {
+  const mark = (score: RunScore): RunScore =>
+    score.source === 'llm-judge' && options.selfJudged ? { ...score, selfJudged: true } : score
+  // In strict mode a broken evaluation pipeline must not look like a healthy
+  // one. Heuristic surface checks are a different measurement, not a cheaper
+  // version of the same one — reporting them as a card hides the outage.
+  const degrade = (reason: string): RunScore =>
+    isStrict() ? unavailableScore(reason) : heuristicScore(run)
+
   const spec = brain ? resolveProvider(brain.providerId) : null
   const apiKey = brain?.apiKey?.trim() ?? ''
   const usable = !!spec && (spec.keyRequired === false || apiKey.length > 0)
-  if (!spec || !usable) return heuristicScore(run)
+  if (!spec || !usable) return degrade('no judge provider configured')
 
   const judge = `${spec.name} · ${spec.model}`
   const messages: ChatMessage[] = [
@@ -209,8 +227,8 @@ export async function scoreRun(run: ScoredRun, brain?: JudgeBrain | null): Promi
   let raw: string
   try {
     raw = await chatComplete(spec, apiKey, messages)
-  } catch {
-    return heuristicScore(run)
+  } catch (err) {
+    return degrade(`judge unreachable: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   let parsed: unknown | null = null
@@ -226,12 +244,23 @@ export async function scoreRun(run: ScoredRun, brain?: JudgeBrain | null): Promi
       ])
       parsed = extractJson(repaired)
     } catch {
-      return heuristicScore(run)
+      return degrade('judge returned unparseable JSON twice')
     }
   }
 
   const score = normalizeJudgeScore(parsed, judge)
-  return score ?? heuristicScore(run)
+  return score ? mark(score) : degrade('judge returned no usable verdict')
+}
+
+/** No card, and honest about why — strict mode's answer to a dead judge. */
+export function unavailableScore(reason: string): RunScore {
+  return {
+    verdict: 'unsure',
+    axes: [],
+    note: blockedMessage('judge_unavailable', 'llm-judge', reason),
+    source: 'unavailable',
+    at: Date.now(),
+  }
 }
 
 // ── Persistence — last N cards per employee (localStorage) ──────────────────

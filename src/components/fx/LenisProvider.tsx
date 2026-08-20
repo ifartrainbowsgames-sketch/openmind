@@ -9,6 +9,7 @@
  *   ticker integration needed — gsap animations are time-based, not scroll-tied).
  * - Respects `prefers-reduced-motion`: Lenis is never created and the page
  *   keeps native scrolling.
+ * - Keeps native momentum scrolling on coarse-pointer touch devices.
  * - SSR/test-safe: no-op when `window`/`matchMedia` are unavailable.
  * - Destroyed on unmount (StrictMode double-mount safe).
  *
@@ -46,6 +47,7 @@ export function LenisProvider({ children, options }: LenisProviderProps) {
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (prefersReducedMotion()) return // keep native scroll
+    if (window.matchMedia?.('(pointer: coarse)').matches) return // touch devices need native momentum + keyboard behavior
 
     let cancelled = false
     let instance: Lenis | null = null

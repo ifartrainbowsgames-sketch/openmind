@@ -29,8 +29,8 @@ const ROLE_SPECS: RoleSpec[] = [
   {
     keys: /cod(e|ing)|develop|engineer|programm|software|bug ?fix|review/i,
     role: 'Code Copilot',
-    promptBase: 'Review code for bugs, smells and security risks. Suggest precise fixes and explain the trade-offs.',
-    tools: ['code_review', 'calculator'],
+    promptBase: 'Review code for bugs, smells and security risks. When the workspace is GitHub, commit with github_write_file instead of dumping fake files in chat.',
+    tools: ['code_review', 'calculator', 'run_code', 'github_write_file', 'github_create_branch', 'github_open_pr'],
     connections: ['github', 'linear'],
   },
   {
@@ -43,15 +43,15 @@ const ROLE_SPECS: RoleSpec[] = [
   {
     keys: /research|librarian|knowledge|wiki/i,
     role: 'Researcher',
-    promptBase: 'Find evidence, cite sources, and compress findings into tight briefs.',
-    tools: ['search_docs', 'summarize'],
+    promptBase: 'Find evidence, cite sources, and compress findings into tight briefs. Prefer the research dossier URLs over invented links.',
+    tools: ['search_docs', 'summarize', 'web_search', 'browse_url', 'memory_search'],
     connections: ['notion', 'gdrive'],
   },
   {
     keys: /writ|content|copy|marketing|social|blog|newsletter/i,
     role: 'Content Writer',
     promptBase: 'Write on-brand copy — short, vivid, no filler. Repurpose long material into posts.',
-    tools: ['summarize'],
+    tools: ['summarize', 'web_search'],
     connections: ['notion'],
   },
   {
@@ -79,7 +79,7 @@ const ROLE_SPECS: RoleSpec[] = [
     keys: /assistant|secretary|admin|schedul|inbox|calendar|email/i,
     role: 'Executive Assistant',
     promptBase: 'Triage the inbox, watch the calendar, and draft crisp replies for sign-off.',
-    tools: ['summarize', 'search_docs'],
+    tools: ['summarize', 'search_docs', 'gmail_list', 'gmail_read', 'gmail_send'],
     connections: ['gmail', 'gcal', 'slack'],
   },
   {
@@ -95,7 +95,7 @@ const GENERALIST: RoleSpec = {
   keys: /.*/,
   role: 'Generalist',
   promptBase: 'Help with whatever the owner asks, using the tools on your desk.',
-  tools: ['search_docs', 'summarize'],
+  tools: ['search_docs', 'summarize', 'web_search'],
   connections: ['gmail'],
 }
 

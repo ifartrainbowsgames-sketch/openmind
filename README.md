@@ -9,6 +9,7 @@ The open-source integration layer for AI: an embeddable chatbot (trained on your
 - **Marketing site** — spec-sheet editorial design, live request log, provider matrix
 - **Playground** — the chatbot testable in the browser via a secure gateway (zero keys on the page)
 - **Console** (`/dashboard`) — Data Studio (upload/index company data), Widget Builder (design + live preview: voice/video calls, image drop, Fix-with-AI), Inbox, Engage popups, Prompt Studio, per-service settings
+- **Super Agent** (`/app`) — customer product: LangGraph crew, Connect your GitHub/Slack/Gmail, GitHub · main workspace. Stack plan: [docs/super-agent.md](docs/super-agent.md)
 - **Auth** — Supabase Auth (email/password), route-guarded console
 - **Database** — Supabase Postgres with row-level security (profiles, sources, conversations, messages, subscriptions)
 - **Billing** — Stripe checkout (Pro $29/mo)

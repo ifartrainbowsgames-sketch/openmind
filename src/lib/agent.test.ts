@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   calc,
+  normalizeToolResult,
   parsePlan,
+  PLAN_PARSE_CEILING,
   runEmployee,
   simulatedBrain,
   TOOL_REGISTRY,
@@ -50,9 +52,14 @@ describe('parsePlan', () => {
     expect(parsePlan('TOOL: sentiment | text', ['calculator'])).toEqual([])
   })
 
-  it('caps at 4 steps', () => {
+  it('caps at the parse ceiling, not the per-employee budget', () => {
+    const raw = Array(30).fill('TOOL: calculator | 1+1').join('\n')
+    expect(parsePlan(raw, ['calculator'])).toHaveLength(PLAN_PARSE_CEILING)
+  })
+
+  it('honours an explicit cap', () => {
     const raw = Array(8).fill('TOOL: calculator | 1+1').join('\n')
-    expect(parsePlan(raw, ['calculator'])).toHaveLength(4)
+    expect(parsePlan(raw, ['calculator'], 2)).toHaveLength(2)
   })
 
   it('returns empty for NONE', () => {
@@ -67,9 +74,10 @@ describe('tool registry', () => {
   it('sentiment scores feedback', () => {
     expect(TOOL_REGISTRY.sentiment.run('I love it, excellent work')).toMatch(/Positive/)
   })
-  it('summarize condenses text', () => {
+  it('summarize condenses text', async () => {
     const t = 'Cats are mammals. Cats sleep most of the day. The weather is nice. Cats hunt mice.'
-    expect(TOOL_REGISTRY.summarize.run(t).length).toBeLessThan(t.length)
+    const out = normalizeToolResult(await TOOL_REGISTRY.summarize.run(t)).content
+    expect(out.length).toBeLessThan(t.length)
   })
 })
 
@@ -100,7 +108,7 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
     expect(r.plan).toEqual([])
     expect(r.toolCalls).toEqual([])
     expect(r.trace.map((t) => t.node)).toEqual(['plan', 'respond'])
-    expect(r.answer).toContain('Ada')
+    expect(r.answer).toMatch(/Hi! How can I help/i)
   })
 
   it('an employee with no tools always answers directly', async () => {
@@ -115,8 +123,30 @@ describe('runEmployee (simulated brain, real LangGraph)', () => {
     expect(seen.map((t) => t.node)).toEqual(['plan', 'act', 'respond'])
   })
 
-  it('carries the owner prompt into the answer', async () => {
+  it('returns tool output in a compact crew-friendly voice', async () => {
     const r = await runEmployee(simulatedBrain(), emp({ prompt: 'Always reply like a pirate.' }), 'Ahoy, what is 2+2?')
-    expect(r.answer).toContain('pirate')
+    expect(r.answer).toMatch(/Calculator|4/)
+  })
+
+  it('routes GitHub workspace coding to github_write_file, not chat-only dumps', async () => {
+    const prompt = 'Coding space: GitHub repo me/weather-app (default branch main). Use github_write_file.\n\nUser request:\nAdd a home screen'
+    const r = await runEmployee(
+      simulatedBrain(),
+      emp({ tools: ['github_write_file', 'github_open_pr', 'code_review'] }),
+      prompt,
+    )
+    expect(r.plan.map((p) => p.tool)).toContain('github_write_file')
+    expect(r.plan.map((p) => p.tool)).not.toContain('github_create_branch')
+    expect(r.plan.find((p) => p.tool === 'github_write_file')?.input).not.toMatch(/^Coding space:/)
+    expect(r.toolCalls.find((c) => c.tool === 'github_write_file')?.output).toMatch(/\[MOCK · github_write_file\]/)
+    expect(r.toolCalls.find((c) => c.tool === 'github_write_file')?.output).not.toMatch(/Coding space/)
+  })
+
+  it('parses a github_write_file plan line', () => {
+    const out = parsePlan(
+      'TOOL: github_write_file | {"path":"src/a.ts","message":"add","content":"x"}',
+      ['github_write_file'],
+    )
+    expect(out).toEqual([{ tool: 'github_write_file', input: '{"path":"src/a.ts","message":"add","content":"x"}' }])
   })
 })

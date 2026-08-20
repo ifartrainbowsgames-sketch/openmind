@@ -14,16 +14,25 @@ import {
   NODE_W,
   buildEdges,
   computeLayout,
+  eventForEdge,
   packetCaption,
   satelliteOffsets,
   seeded,
   taskLinesFor,
   type NetPoint,
+  type NetworkEvent,
 } from './network-model'
 
 interface Props {
   team: Employee[]
   isDemo: boolean
+  /**
+   * Real handoffs to visualise. Omitted or empty means nothing has moved, and
+   * the graph renders topology only — no captions, no invented traffic.
+   */
+  events?: NetworkEvent[]
+  /** Live status per employee id, for nodes actually running right now. */
+  liveStatus?: Record<string, string>
 }
 
 const MAX_PACKETS = 6
@@ -32,7 +41,7 @@ const MAX_CAPTIONS = 3
 const sameTeam = (a: Employee[], b: Employee[]) =>
   a.length === b.length && a.every((e, i) => e.id === b[i].id)
 
-export default function EmployeeNetwork({ team, isDemo }: Props) {
+export default function EmployeeNetwork({ team, isDemo, events, liveStatus }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [shown, setShown] = useState(team)
@@ -192,19 +201,26 @@ export default function EmployeeNetwork({ team, isDemo }: Props) {
         })
       })
 
-      // floating handoff captions — occasional, riding above a packet's edge
+      // Handoff captions ride an edge ONLY when a real event says something
+      // moved across it. No event, no caption — the animation shows topology,
+      // it does not narrate work that did not happen.
       captionRefs.current.slice(0, edges.length).forEach((el, i) => {
         if (!el) return
         const e = edges[i]
         const from = shown[e.from]
         const to = shown[e.to]
         if (!from || !to) return
+        const event = eventForEdge(events, from, to)
+        if (!event) {
+          el.style.opacity = '0'
+          return
+        }
         let cycle = 0
         const tl = gsap.timeline({ repeat: -1, repeatDelay: 5 + i * 1.7, delay: 1.6 + i * 1.3 })
         tl.call(() => {
           cycle += 1
           const text = el.firstElementChild
-          if (text) text.textContent = packetCaption(from, to, i * 7 + cycle)
+          if (text) text.textContent = packetCaption(from, to, event)
           const pts = layoutRef.current
           const a = pts[e.from]
           const b = pts[e.to]
@@ -219,7 +235,7 @@ export default function EmployeeNetwork({ team, isDemo }: Props) {
 
       // task statuses — each node cycles what it's working on
       root.querySelectorAll<HTMLElement>('.en-status').forEach((el, i) => {
-        const lines = taskLinesFor(shown[i])
+        const lines = taskLinesFor(shown[i], liveStatus?.[shown[i]?.id])
         if (lines.length < 2) return
         let idx = 0
         const tl = gsap.timeline({ repeat: -1, delay: i * 0.9, repeatDelay: 2.8 + seeded(i, 51) })
@@ -231,7 +247,7 @@ export default function EmployeeNetwork({ team, isDemo }: Props) {
         tl.to(el, { opacity: 1, duration: 0.28, ease: 'power1.out' })
       })
     },
-    [shown, compact],
+    [shown, compact, events, liveStatus],
   )
 
   const point = (i: number): NetPoint => layout[i] ?? { x: size.w / 2, y: size.h / 2 }
@@ -359,7 +375,7 @@ export default function EmployeeNetwork({ team, isDemo }: Props) {
                         </div>
                         <div className="spec-label mt-0.5 !text-[9px]">{emp.role}</div>
                         <div className="en-status mt-1.5 truncate font-mono-spec text-[9px] text-accent">
-                          {taskLinesFor(emp)[0]}
+                          {taskLinesFor(emp, liveStatus?.[emp.id])[0]}
                         </div>
                       </div>
                     </div>

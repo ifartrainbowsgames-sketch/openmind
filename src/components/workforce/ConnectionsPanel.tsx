@@ -114,16 +114,15 @@ export default function ConnectionsPanel({ configs, onChange }: Props) {
     <div className="border border-border/60 bg-card p-5">
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <span className="spec-label flex items-center gap-2">
-          <Link2 className="h-3.5 w-3.5" /> Connections — plug employees into real apps
+          <Link2 className="h-3.5 w-3.5" /> Advanced MCP / REST
         </span>
         <span className="font-mono-spec text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {liveCount} live · {Object.keys(CONNECTIONS).length} total
         </span>
       </div>
       <p className="mb-4 max-w-2xl font-mono-spec text-[11px] leading-relaxed text-muted-foreground">
-        Mock data until you connect — no fake integrations. Test a connection and its employees
-        start reading real data, stamped <span className="text-emerald-700">[LIVE]</span> on every tool call.
-        Tokens stay in this browser (localStorage) — the same BYOK tradeoff as provider keys.
+        Advanced — paste an MCP URL or Zendesk token if you are not using Connect apps.
+        Mock data until you connect. Tokens stay in this browser.
       </p>
 
       <div className="grid gap-3 md:grid-cols-2">

@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+graphify-out
+kortix-suna
+suna-backend-migrate
+.cursor
+*.md
+.env
+.env.*

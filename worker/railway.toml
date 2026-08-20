@@ -1,0 +1,10 @@
+# Second Railway service, alongside the web app. Deploy from the repo root with
+# this file selected as the config so the build context includes src/.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "worker/Dockerfile"
+
+[deploy]
+# No healthcheck: this is a poller, not an HTTP server.
+restartPolicyType = "ALWAYS"
+numReplicas = 1

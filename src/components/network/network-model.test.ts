@@ -6,6 +6,7 @@ import {
   NODE_W,
   buildEdges,
   computeLayout,
+  eventForEdge,
   packetCaption,
   satelliteOffsets,
   seeded,
@@ -120,19 +121,36 @@ describe('buildEdges', () => {
   })
 })
 
-describe('ambient copy', () => {
-  it('packetCaption names both employees', () => {
-    const cap = packetCaption(DEMO_TEAM[0], DEMO_TEAM[1], 3)
-    expect(cap).toContain('Mara → Rex: ')
-    expect(packetCaption(DEMO_TEAM[0], DEMO_TEAM[1], 3)).toBe(cap)
+describe('handoff captions', () => {
+  const event = { from: DEMO_TEAM[0].id, to: DEMO_TEAM[1].id, label: 'research/competitors.json', at: 10 }
+
+  it('names both employees and the artifact that actually moved', () => {
+    expect(packetCaption(DEMO_TEAM[0], DEMO_TEAM[1], event)).toBe('Mara → Rex: research/competitors.json')
   })
 
-  it('taskLinesFor derives lines from connections and always has fallbacks', () => {
+  it('finds no event for an edge nothing crossed', () => {
+    expect(eventForEdge([], DEMO_TEAM[0], DEMO_TEAM[1])).toBeUndefined()
+    expect(eventForEdge(undefined, DEMO_TEAM[0], DEMO_TEAM[1])).toBeUndefined()
+    expect(eventForEdge([event], DEMO_TEAM[1], DEMO_TEAM[0])).toBeUndefined()
+  })
+
+  it('picks the most recent event on an edge', () => {
+    const older = { ...event, label: 'old.json', at: 1 }
+    const newer = { ...event, label: 'new.json', at: 99 }
+    expect(eventForEdge([older, newer], DEMO_TEAM[0], DEMO_TEAM[1])?.label).toBe('new.json')
+  })
+
+  it('describes capability when idle, never invented activity', () => {
     const mara = taskLinesFor(DEMO_TEAM[0])
-    expect(mara.length).toBeGreaterThanOrEqual(2)
+    expect(mara.every((l) => l.startsWith('can ') || l.startsWith('idle'))).toBe(true)
     expect(mara.some((l) => l.includes('ticket queue'))).toBe(true)
+
     const bare = taskLinesFor({ ...DEMO_TEAM[0], connections: [] })
-    expect(bare.length).toBeGreaterThanOrEqual(2)
+    expect(bare).toEqual(['idle — no task assigned'])
+  })
+
+  it('shows the live status verbatim when a task really is running', () => {
+    expect(taskLinesFor(DEMO_TEAM[0], 'TASK-002 running — web_search')).toEqual(['TASK-002 running — web_search'])
   })
 
   it('worksWithLine joins connection labels', () => {

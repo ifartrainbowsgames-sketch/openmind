@@ -1,0 +1,14 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[build.buildArgs]
+VITE_SUPABASE_URL = "${{VITE_SUPABASE_URL}}"
+VITE_SUPABASE_KEY = "${{VITE_SUPABASE_KEY}}"
+VITE_ROUTER = "browser"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+numReplicas = 1

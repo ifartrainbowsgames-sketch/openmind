@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useNavigate, Link } from 'react-router'
+import { useNavigate, Link, useSearchParams } from 'react-router'
 import {
   ArrowLeft, Apple, Github, Loader2, Lock, Mail,
 } from 'lucide-react'
@@ -50,6 +50,8 @@ export default function Login() {
   const [notice, setNotice] = useState('')
   const [oauthAvail, setOauthAvail] = useState<OAuthAvailability | null>(null)
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const afterAuth = params.get('next')?.startsWith('/') ? params.get('next')! : '/dashboard'
 
   useEffect(() => {
     getOAuthAvailability().then(setOauthAvail)
@@ -64,7 +66,7 @@ export default function Login() {
     if (r.error) return setError(r.error)
     if (r.notice) setNotice(r.notice)
     // signed in (demo always; live when a session exists or signup auto-confirms)
-    if (await getSession()) return navigate('/dashboard')
+    if (await getSession()) return navigate(afterAuth)
     if (mode === 'signup') setMode('signin')
   }
 
@@ -76,7 +78,7 @@ export default function Login() {
     setBusy(false)
     if (r.error) return setError(r.error)
     if (r.notice) setNotice(r.notice)
-    if (await getSession()) navigate('/dashboard')
+    if (await getSession()) navigate(afterAuth)
     // live mode: browser is redirected to the provider — nothing else to do
   }
 

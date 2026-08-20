@@ -1,0 +1,26 @@
+{
+  "name": "OpenMind Mobile",
+  "short_name": "OpenMind",
+  "description": "A mobile-first workspace for open AI agents.",
+  "start_url": "./app",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fbfaf8",
+  "theme_color": "#fbfaf8",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
