@@ -11,7 +11,11 @@ import {
   type TraceLine,
 } from './agent'
 import { generateStaff, MAX_HIRES } from './staffing'
-import { setActiveCrewToolKeys, setActiveWorkspace, type CrewToolKeys } from './crew-tools'
+import {
+  platformKeysAreAllowed, setActiveCrewToolKeys, setActiveWorkspace, type CrewToolKeys,
+} from './crew-tools'
+import { conversationContext } from './workforce/conversation-context'
+import { getMemoryOwner } from './memory'
 import { needsDeepResearch, runDeepResearch } from './deep-research'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
 import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
@@ -262,6 +266,13 @@ export async function runCrew(
     const brief = state.dossier
       ? `${state.task}\n\nUse this research dossier. Cite the listed URLs.\n${state.dossier}`
       : state.task
+    // The crew has no task session, but it does run tools that reach a machine.
+    // Without its own identity it would inherit whatever sandbox the last task
+    // run left bound — and answer from that task's files.
+    const context = conversationContext({
+      conversationId: getMemoryOwner(),
+      permissions: { platformKeys: platformKeysAreAllowed() },
+    })
     const members = await Promise.all(
       state.employees.map(async (employee) => {
         const result = await runEmployee(
@@ -270,6 +281,7 @@ export async function runCrew(
           brief,
           (line) => options.onTrace?.({ ...line, text: `${employee.name}: ${line.text}` }),
           options.configs,
+          context,
         )
         return { employeeId: employee.id, name: employee.name, role: employee.role, result }
       }),

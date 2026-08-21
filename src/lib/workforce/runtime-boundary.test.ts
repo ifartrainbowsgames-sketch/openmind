@@ -115,10 +115,24 @@ const SANDBOX_BINDERS = [
   // Binds it once per run, from the session, for the context-free tools that
   // share the transport.
   '/src/lib/workforce/builtin-runtime.ts',
-  // Sessionless surfaces: no ExecutionContext exists to carry the machine.
-  '/src/lib/crew.ts',
-  '/src/lib/openmind-os.ts',
 ]
+
+/**
+ * Every surface that runs an employee outside the task graph, and what it is.
+ *
+ * The classification matters because "sessionless" was doing too much work as
+ * an excuse. Three of these are production: a user action runs a real employee
+ * with real tools, including `run_code`, which reaches E2B. Having no session
+ * did not mean having no machine — it meant inheriting whichever machine the
+ * last task run left bound. They now open a conversation session instead.
+ */
+const SESSIONLESS_SURFACES: Record<string, 'production' | 'benchmark'> = {
+  '/src/lib/crew.ts': 'production',
+  '/src/lib/openmind-os.ts': 'production',
+  '/src/components/workforce/WorkforceStudio.tsx': 'production',
+  // Offline scoring. No user, no machine, no continuity to lose.
+  '/src/lib/agent/evaluation.ts': 'benchmark',
+}
 
 describe('the machine a tool uses comes from its context', () => {
   it('nothing new writes the module-level sandbox binding', () => {
@@ -133,6 +147,43 @@ describe('the machine a tool uses comes from its context', () => {
       'and the session can resolve different sandboxes — which looks entirely ' +
       'live and is entirely wrong. Take an ExecutionContext instead.',
     ).toEqual([])
+  })
+
+  it('every allowlisted binder still binds', () => {
+    // The allowlist must shrink on its own. Two entries here named files that
+    // had stopped calling it, which is permanent permission for nothing —
+    // exactly the rot the runEmployee allowlist has a test against.
+    for (const path of SANDBOX_BINDERS) {
+      expect(sources[path], `${path} is allowlisted but does not exist`).toBeDefined()
+      expect(
+        /\bsetActiveSandbox\s*\(/.test(sources[path]),
+        `${path} no longer calls setActiveSandbox — remove it from SANDBOX_BINDERS`,
+      ).toBe(true)
+    }
+  })
+
+  it('every production surface outside the task graph has its own identity', () => {
+    for (const [path, kind] of Object.entries(SESSIONLESS_SURFACES)) {
+      const text = sources[path]
+      expect(text, `${path} is classified but does not exist`).toBeDefined()
+      if (kind !== 'production') continue
+      expect(
+        text,
+        `${path} runs employees with machine-capable tools. Without a context it ` +
+        'inherits whatever sandbox the last task run left bound and answers from ' +
+        "that task's files.",
+      ).toMatch(/conversationContext\(/)
+    }
+  })
+
+  it('the benchmark is the only surface left without one', () => {
+    // Stated as an assertion so promoting it to a product surface fails here
+    // rather than silently shipping a run with no workspace identity.
+    const benchmarks = Object.entries(SESSIONLESS_SURFACES)
+      .filter(([, kind]) => kind === 'benchmark')
+      .map(([path]) => path)
+    expect(benchmarks).toEqual(['/src/lib/agent/evaluation.ts'])
+    expect(sources[benchmarks[0]]).not.toMatch(/conversationContext\(/)
   })
 
   it('the workspace tools take a context', () => {

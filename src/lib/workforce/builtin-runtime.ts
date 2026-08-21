@@ -35,7 +35,7 @@ import {
   type SessionStore,
 } from './sessions'
 
-const CAPABILITIES: RuntimeCapabilities = runtimeCapabilities(
+export const BUILTIN_CAPABILITIES: RuntimeCapabilities = runtimeCapabilities(
   // Every skill, because this runtime executes arbitrary employees with
   // arbitrary tools. A capability is not a credential: a missing Slack
   // connection is reported as a blocked tool call, not as a runtime that
@@ -97,7 +97,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       session,
       runtime: (self) => sandboxRuntime(self),
       workspace,
-      capabilities: CAPABILITIES,
+      capabilities: BUILTIN_CAPABILITIES,
       permissions,
       eventSink: NULL_SINK,
     })
@@ -107,7 +107,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
     id: 'builtin',
 
     async capabilities() {
-      return CAPABILITIES
+      return BUILTIN_CAPABILITIES
     },
 
     async createSession(input: CreateSessionInput): Promise<AgentSession> {
@@ -184,7 +184,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         session,
         runtime: (self) => sandboxRuntime(self),
         workspace: session.workspace ?? makeWorkspace(session.projectId),
-        capabilities: CAPABILITIES,
+        capabilities: BUILTIN_CAPABILITIES,
         permissions,
         eventSink: { emit: (e) => push({ ...ctx, ...e }) },
         memory: deps.memory,

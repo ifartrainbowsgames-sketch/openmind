@@ -19,6 +19,7 @@ import {
   type AgentBrain, type Employee, type LiveConnectionConfig, type PlanStep, type TraceLine,
 } from '@/lib/agent'
 import { runCrew, type CrewArtifact } from '@/lib/crew'
+import { conversationContext } from '@/lib/workforce/conversation-context'
 import { MAX_HIRES } from '@/lib/staffing'
 import { planWorkforce, StaffingError, type StaffingStage } from '@/lib/llm-staffing'
 import { generateStaff, provisionPlan, type ProvisionStage } from '@/lib/staffing'
@@ -470,12 +471,18 @@ export default function WorkforceStudio({ embedded = false }: { embedded?: boole
     // connection stamps are rewritten as "[DRAFT · app] would use:" previews.
     const configs = draftMode ? [] : liveConfigs
     try {
+      // The Studio is a real run with real tools, so it gets its own workspace
+      // identity rather than inheriting whatever machine a task run left bound.
       const result = await runEmployee(
         b,
         emp,
         input,
         (line) => setLiveTrace((t) => [...t, draftMode ? { ...line, text: draftify(line.text) } : line]),
         configs,
+        conversationContext({
+          conversationId: `studio:${emp.id}`,
+          permissions: { platformKeys: false },
+        }),
       )
       let trace = result.trace
       let answer = result.answer

@@ -102,6 +102,16 @@ export interface ExecutionContextInput {
   eventSink: EventSink
   memory?: MemoryReader
   abortSignal?: AbortSignal
+  /**
+   * Called when a tool creates a machine and the context adopts it.
+   *
+   * Without this the adoption lives only in a closure, so it survives the run
+   * and nothing else. A caller that needs it to outlive the context — a
+   * conversation that should keep its sandbox between turns — would have to
+   * remember to read it back afterwards, which is the "remember to" pattern
+   * this whole file exists to remove.
+   */
+  onAdopt?: (workspace: Workspace) => void
 }
 
 export function createExecutionContext(input: ExecutionContextInput): ExecutionContext {
@@ -125,6 +135,7 @@ export function createExecutionContext(input: ExecutionContextInput): ExecutionC
       const id = sandboxId.trim()
       if (!id || id === workspace.sandboxId) return
       workspace = { ...workspace, sandboxId: id }
+      input.onAdopt?.(workspace)
     },
   }
 

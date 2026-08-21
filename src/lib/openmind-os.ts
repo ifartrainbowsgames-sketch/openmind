@@ -2,13 +2,14 @@
 import { runCrew, withCrewTools, withGithubWorkspaceTools, type CrewRun, type RunCrewOptions } from './crew'
 import { runEmployee, type AgentBrain, type Employee } from './agent'
 import { setActiveCrewToolKeys, setPlatformKeysAllowed } from './crew-tools'
-import { setMemoryOwner } from './memory'
+import { getMemoryOwner, setMemoryOwner } from './memory'
 import { setNangoOwner } from './nango'
 import { toolsForSkill, wrapSkillPrompt, type SkillId } from './skills'
 import { isSimpleChat } from './task-ledger'
 import { needsTaskGraph } from './task-planner'
 import { runTaskGraph, type RunTaskGraphOptions } from './task-runner'
 import { setProjectOwner } from './project-store'
+import { conversationContext } from './workforce/conversation-context'
 import { stripWorkspacePrompt } from './workspace'
 
 export type OsAppId = 'research' | 'developer' | 'browser' | 'office' | 'memory' | 'connect'
@@ -75,12 +76,21 @@ export async function runTurn(
     let employee = withGithubWorkspaceTools(withCrewTools(lead), options.workspace)
     employee = { ...employee, tools: toolsForSkill(employee.tools, skill) }
 
+    // A chat turn is sessionless but not machine-free: `run_code` reaches E2B.
+    // Its own conversation identity keeps it off whatever sandbox the last
+    // task run left bound, which it would otherwise inherit silently.
+    const context = conversationContext({
+      conversationId: getMemoryOwner(),
+      permissions: { platformKeys: options.platformKeys === true },
+    })
+
     const result = await runEmployee(
       brain,
       employee,
       prompt,
       options.onTrace,
       options.configs,
+      context,
     )
 
     return {
