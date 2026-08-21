@@ -38,6 +38,15 @@ export interface Workspace {
   branch?: string
   /** True when this is a git worktree rather than the primary checkout. */
   worktree?: boolean
+  /**
+   * The machine this workspace lives on.
+   *
+   * This is the identity that makes "one session, one workspace" true. The
+   * agent's own tools resolve their sandbox from the same value, so a coder
+   * cannot be editing one machine while inspectWorkspace() reads another —
+   * which would look entirely live and be entirely wrong.
+   */
+  sandboxId?: string
 }
 
 export interface Runtime {

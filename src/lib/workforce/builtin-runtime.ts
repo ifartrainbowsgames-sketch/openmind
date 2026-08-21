@@ -18,7 +18,10 @@ import {
   type CreateSessionInput, type SessionCheckpoint, type WorkspaceState,
 } from './agent-runtime'
 import { event, type OpenMindEvent, type RunOutcome } from './events'
-import { makeWorkspace } from './runtime'
+import { getActiveSandbox, setActiveSandbox } from '../crew-tools'
+import { makeWorkspace, type Workspace } from './runtime'
+import { sandboxRuntime } from './sandbox-runtime'
+import { ensureWorktree } from './worktrees'
 import {
   closeSession, emptySessionStore, openSession, recordActivity,
   type SessionStore,
@@ -34,6 +37,9 @@ const CAPABILITIES: CapabilitySet = {
   runsCommands: true,
   checkpointable: false,
 }
+
+/** Workers that get their own branch, so two coders never share a directory. */
+const ISOLATED_WORKERS: readonly string[] = ['code', 'tester']
 
 export interface BuiltinRuntimeDeps {
   /** The model. Supplied per run by the orchestrator. */
@@ -64,7 +70,30 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         workspace: input.workspace ?? makeWorkspace(input.projectId),
       })
       store = opened.store
-      return opened.session
+      let session = opened.session
+
+      // A coding worker gets its own worktree so parallel coders cannot edit
+      // the same directory. Best-effort by design: a project with no repo (or
+      // no sandbox yet) simply keeps the shared workspace rather than failing
+      // to start — isolation is an improvement on the default, not a
+      // precondition for running at all.
+      if (
+        !opened.resumed
+        && ISOLATED_WORKERS.includes(input.worker)
+        && session.workspace?.sandboxId
+        && !session.workspace.worktree
+      ) {
+        setActiveSandbox(session.workspace.sandboxId)
+        try {
+          const { workspace } = await ensureWorktree(sandboxRuntime(), input.projectId, input.worker)
+          const isolated: Workspace = { ...workspace, sandboxId: session.workspace.sandboxId }
+          store = recordActivity(store, session.id, { workspace: isolated })
+          session = { ...session, workspace: isolated }
+        } catch {
+          // No repo to branch from. The shared workspace is still correct.
+        }
+      }
+      return session
     },
 
     async resumeSession(sessionId: string): Promise<AgentSession | null> {
@@ -81,6 +110,12 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       }
 
       yield event('task_started', task.goal, ctx)
+
+      // ONE workspace identity. The agent's own tools resolve their sandbox
+      // from this same value, so the machine the coder edits is the machine
+      // inspectWorkspace() reads. Without this the two drift apart silently and
+      // everything still looks live.
+      setActiveSandbox(session.workspace?.sandboxId)
 
       // The employee graph reports progress through a callback while it runs,
       // but this is a generator — so trace lines land in a queue that the loop
@@ -130,6 +165,20 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         return
       }
 
+      // The tools may have created or replaced the sandbox; adopt whatever they
+      // ended on so the session and the machine stay the same thing.
+      const sandboxAfter = getActiveSandbox()
+      if (sandboxAfter && sandboxAfter !== session.workspace?.sandboxId) {
+        const workspace: Workspace = {
+          ...(session.workspace ?? makeWorkspace(session.projectId)),
+          sandboxId: sandboxAfter,
+        }
+        store = recordActivity(store, session.id, { workspace })
+        yield event('session_opened', `workspace on sandbox ${sandboxAfter}`, {
+          ...ctx, sessionId: session.id,
+        })
+      }
+
       for (const call of result.toolCalls) {
         yield event('tool_started', call.tool, { ...ctx, tool: call.tool })
         yield event(
@@ -165,9 +214,28 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
 
     async inspectWorkspace(sessionId: string): Promise<WorkspaceState> {
       const session = store.sessions[sessionId]
-      // `inspected: false` means "unknown", not "clean" — the builtin runtime
-      // does not diff the workspace.
-      return { workspace: session?.workspace, changedFiles: [], inspected: false }
+      const workspace = session?.workspace
+      if (!workspace?.sandboxId) {
+        // No machine yet. `inspected: false` means "unknown", never "clean" —
+        // a caller must not read an empty list as a clean tree.
+        return { workspace, changedFiles: [], inspected: false }
+      }
+      // Read the same sandbox the session owns, not a fresh one.
+      setActiveSandbox(workspace.sandboxId)
+      try {
+        const changed = await sandboxRuntime().exec(
+          `cd '${workspace.path}' && git status --porcelain 2>/dev/null || true`,
+        )
+        if (!changed.ran) return { workspace, changedFiles: [], inspected: false }
+        const files = changed.stdout
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => line.replace(/^\S+\s+/, ''))
+        return { workspace, changedFiles: files, inspected: true }
+      } catch {
+        return { workspace, changedFiles: [], inspected: false }
+      }
     },
 
     async cancel(sessionId: string): Promise<void> {

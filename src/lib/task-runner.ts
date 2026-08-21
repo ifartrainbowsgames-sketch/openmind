@@ -13,10 +13,8 @@ import {
 } from './agent'
 import type { CrewArtifact, CrewMemberResult, CrewRun } from './crew'
 import {
-  getActiveSandbox,
   setActiveCrewToolKeys,
   setPlatformKeysAllowed,
-  setActiveSandbox,
   setActiveWorkspace,
   type CrewToolKeys,
 } from './crew-tools'
@@ -98,7 +96,9 @@ export interface RunTaskGraphOptions {
 
 /** The workspace a session runs in. One per project for now; worktrees later. */
 function sessionWorkspace(project: ProjectState) {
-  return makeWorkspace(project.id)
+  // Carry the project's machine in, so a resumed project keeps its sandbox
+  // instead of silently starting a fresh one.
+  return { ...makeWorkspace(project.id), sandboxId: project.sandboxId }
 }
 
 const WORKER_TOOLS: Record<WorkerKind, string[]> = {
@@ -526,7 +526,10 @@ async function executeBatch(
 
     // Hand this run the project's sandbox, then take back whatever it ended
     // with — the function may have created or replaced one.
-    setActiveSandbox(next.sandboxId)
+    // The sandbox belongs to the session, not to this loop. The runtime binds
+    // it before the worker runs and adopts whatever it ends on — one workspace
+    // identity per session. Setting it here too would give the agent's tools
+    // one machine and inspectWorkspace() another.
     takeTokenUsage() // start a clean accounting window for this worker
 
     // Execution goes through the runtime, never through runEmployee directly.
@@ -569,9 +572,10 @@ async function executeBatch(
       continue
     }
 
-    const sandboxAfter = getActiveSandbox()
-    if (sandboxAfter && sandboxAfter !== next.sandboxId) {
-      next = { ...next, sandboxId: sandboxAfter }
+    // Mirror the session's machine onto the project so a reload can find it.
+    const sessionSandbox = (await runtime.resumeSession(session.id))?.workspace?.sandboxId
+    if (sessionSandbox && sessionSandbox !== next.sandboxId) {
+      next = { ...next, sandboxId: sessionSandbox }
     }
 
     members.push({ employeeId: employee.id, name: employee.name, role: employee.role, result })
