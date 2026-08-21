@@ -20,7 +20,7 @@
  */
 
 import { createServer, type Server } from 'node:http'
-import { callServerToolDetailed, listServerTools } from '../src/lib/mcp'
+import { callServerToolDetailed, listServerTools, type McpServerSpec } from '../src/lib/mcp'
 import { isMcpWriteTool, validateConnectionUrl } from '../src/lib/agent'
 
 const PORT = 8791
@@ -99,7 +99,9 @@ function rejects(label: string, url: string, expected: RegExp): void {
 
 async function main(): Promise<void> {
   const server = await startServer()
-  const spec = { url: `http://127.0.0.1:${PORT}`, name: 'verify' }
+  // `name` was never part of McpServerSpec and `id` always was — the script
+  // simply was not typechecked. It is now, via tsconfig.scripts.json.
+  const spec: McpServerSpec = { id: 'verify', url: `http://127.0.0.1:${PORT}` }
 
   try {
     console.log('— transport —')

@@ -1,6 +1,7 @@
 /** Shared blackboard — agents produce artifacts, not meetings. */
 
 import type { DelegationState } from './workforce/delegation'
+import type { MemoryBook } from './workforce/memory-layers'
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'needs_user'
 export type WorkerKind = 'planner' | 'research' | 'browser' | 'code' | 'analyst' | 'writer' | 'reviewer' | 'tester'
@@ -195,6 +196,15 @@ export interface ProjectState {
   spend: BudgetSpend
   /** Sandbox shared by every workspace tool in this project, once one exists. */
   sandboxId?: string
+  /**
+   * Canonical project memory: findings, decisions, constraints, past failures.
+   *
+   * Lives on the ledger rather than in a store beside it, because the ledger is
+   * already the thing that is threaded, judged and persisted. Two copies of
+   * "what this project established" is how they disagree. Written by the
+   * memory kernel service, never by a worker.
+   */
+  memory?: MemoryBook
   /** Depth/sibling/total counters that bound delegation. */
   delegation?: DelegationState
   /**

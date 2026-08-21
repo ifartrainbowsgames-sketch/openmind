@@ -21,6 +21,7 @@
 
 import type { TaskRecord, WorkerKind } from '../task-ledger'
 import type { OpenMindEvent } from './events'
+import type { MemoryContext } from './memory-service'
 import type { Workspace } from './runtime'
 import type { WorkerSession } from './sessions'
 
@@ -61,6 +62,27 @@ export interface CreateSessionInput {
   workspace?: Workspace
 }
 
+/**
+ * What the kernel hands a runtime alongside the task.
+ *
+ * `TaskRecord` describes the work; this describes what the project already
+ * knows. It is a parameter rather than something the runtime looks up because
+ * of the failure it prevents: the builtin runtime composed its own prompt from
+ * the ledger, so canonical memory reached OpenMind's worker and nothing else.
+ * A Claude Code or Codex runtime would have started every task knowing
+ * nothing, and would have looked like it was working.
+ *
+ * A runtime may render this however its provider expects. It may not skip it.
+ */
+export interface TaskContext {
+  memory: MemoryContext
+}
+
+/** For callers with no project memory — tests, and one-off runs. */
+export function emptyTaskContext(): TaskContext {
+  return { memory: { text: '', entries: [], priorFailures: [] } }
+}
+
 export interface AgentRuntime {
   readonly id: string
 
@@ -73,8 +95,16 @@ export interface AgentRuntime {
   /**
    * Run one task. The stream is the only channel out, so the terminal
    * `task_finished` event carries both the outcome and the runtime's result.
+   *
+   * `context` is required so that canonical memory cannot reach one runtime
+   * and not another — that is the whole point of memory being a kernel service
+   * rather than a tool the builtin worker happens to have.
    */
-  runTask(session: AgentSession, task: TaskRecord): AsyncIterable<OpenMindEvent>
+  runTask(
+    session: AgentSession,
+    task: TaskRecord,
+    context: TaskContext,
+  ): AsyncIterable<OpenMindEvent>
 
   checkpoint(sessionId: string): Promise<SessionCheckpoint>
 

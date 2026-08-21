@@ -78,6 +78,9 @@ export function hydrate(p: ProjectState): ProjectState {
     blockers: p.blockers ?? [],
     events: p.events ?? [],
     budget: p.budget ?? DEFAULT_BUDGET,
+    // Projects persisted before memory existed carry their context in
+    // decisions/evidence; the memory service seeds from those on first run.
+    memory: p.memory ?? { entries: [] },
     spend: p.spend ?? { ...ZERO_SPEND },
   }
 }

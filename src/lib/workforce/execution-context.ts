@@ -42,6 +42,17 @@ export interface PermissionContext {
   confirm?: (tool: string, summary: string) => Promise<boolean>
 }
 
+/**
+ * What an agent may ask canonical memory.
+ *
+ * Read-only on purpose. Writing is the kernel's job: a worker that decides
+ * what the project remembers is a worker whose successor remembers something
+ * different.
+ */
+export interface MemoryReader {
+  search(query: string, limit?: number): Promise<string[]>
+}
+
 /** Where a running task reports progress. One stream, not a second callback. */
 export interface EventSink {
   emit(e: OpenMindEvent): void
@@ -56,6 +67,15 @@ export interface ExecutionContext {
   readonly capabilities: CapabilitySet
   readonly permissions: PermissionContext
   readonly eventSink: EventSink
+  /**
+   * Read access to canonical memory.
+   *
+   * The kernel has already put the relevant part in the prompt — this is for
+   * the agent that wants to look further, which is the whole remaining job of
+   * `memory_search`. Optional because the sessionless surfaces have no project
+   * book to read; those fall back to the account's saved notes.
+   */
+  readonly memory?: MemoryReader
   /** Aborted when the run is cancelled, so in-flight tool calls stop. */
   readonly abortSignal?: AbortSignal
   /**
@@ -80,6 +100,7 @@ export interface ExecutionContextInput {
   capabilities: CapabilitySet
   permissions: PermissionContext
   eventSink: EventSink
+  memory?: MemoryReader
   abortSignal?: AbortSignal
 }
 
@@ -98,6 +119,7 @@ export function createExecutionContext(input: ExecutionContextInput): ExecutionC
     capabilities: input.capabilities,
     permissions: input.permissions,
     eventSink: input.eventSink,
+    memory: input.memory,
     abortSignal: input.abortSignal,
     adoptSandbox(sandboxId: string) {
       const id = sandboxId.trim()

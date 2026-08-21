@@ -243,16 +243,33 @@ TOOL_REGISTRY.gdrive_list = {
   run: (q, _args, ctx) => invokeCrewTool('gdrive_list', q, undefined, ctx),
 }
 
+// ── Explicit memory access ───────────────────────────────────────────────────
+// Reclassified rather than removed. The kernel's memory service already puts
+// this project's established facts in the prompt before the task starts and
+// records the outcome afterwards, for every runtime — so remembering the basic
+// state of the work is no longer the worker's responsibility. What is left is
+// genuinely useful: an agent that wants to look further than the recall budget.
+
 TOOL_REGISTRY.memory_search = {
   id: 'memory_search',
   name: 'Memory search',
-  desc: 'Recall notes saved for this user (account or this device)',
-  run: (q) => import('../memory').then((m) => m.searchMemory(q)),
+  desc: 'Search deeper into what this project established, beyond the context you were already given.',
+  run: async (q, _args, ctx) => {
+    if (ctx?.memory) {
+      const hits = await ctx.memory.search(q)
+      return hits.length
+        ? `[memory_search] ${hits.join('\n')}`
+        : '[memory_search] Nothing further recorded for that.'
+    }
+    // No session — the chat surfaces still reach the account's saved notes.
+    const memory = await import('../memory')
+    return memory.searchMemory(q)
+  },
 }
 
 TOOL_REGISTRY.memory_save = {
   id: 'memory_save',
   name: 'Memory save',
-  desc: 'Save a note. Plain text, or JSON {"content","scope?"} where scope is user, project, or ephemeral.',
+  desc: 'Save a note for this user across projects. Plain text, or JSON {"content","scope?"}.',
   run: (q) => import('../memory').then((m) => m.saveMemory(q)),
 }

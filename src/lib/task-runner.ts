@@ -24,12 +24,16 @@ import {
   parseSpawnRequests, recordSpawn,
 } from './workforce/delegation'
 import { isWorkerCapability } from './workforce/capabilities'
-import { runtimeFor, type AgentRuntime } from './workforce/agent-runtime'
+import { runtimeFor, type AgentRuntime, type TaskContext } from './workforce/agent-runtime'
 import { createBuiltinRuntime } from './workforce/builtin-runtime'
 import type { OpenMindEvent } from './workforce/events'
 import { makeWorkspace } from './workforce/runtime'
 import { renderConstitution, withProjectRules } from './workforce/constitution'
 import { mergeAcceptance, renderSop, sopFor } from './workforce/sop'
+import { renderMemory } from './workforce/memory-layers'
+import {
+  accountUserLayer, createMemoryService, initialBook, type MemoryService,
+} from './workforce/memory-service'
 import { planProjectSmart, type PlannerBrain } from './task-planner-llm'
 import { saveProject } from './project-store'
 import {
@@ -47,6 +51,7 @@ import {
   type BudgetSpend,
   type ProjectBudget,
   type ProjectSnapshot,
+  type JudgeVerdict,
   type ProjectState,
   type TaskRecord,
   type WorkerKind,
@@ -271,7 +276,7 @@ export function estimateRunSpend(
   }
 }
 
-function buildWorkerPrompt(project: ProjectState, task: TaskRecord): string {
+function buildWorkerPrompt(project: ProjectState, task: TaskRecord, memoryText?: string): string {
   const inputs = task.dependsOn
     .flatMap((id) => project.artifacts.filter((a) => a.taskId === id))
     .map((a) => `INPUT ${a.path}:\n${a.body.slice(0, 4000)}`)
@@ -291,7 +296,10 @@ function buildWorkerPrompt(project: ProjectState, task: TaskRecord): string {
     (sop ? `
 ${renderSop(sop)}
 ` : '') +
-    buildSharedContext(project) +
+    // Canonical memory. Supplied by the kernel service when a run is in
+    // progress; the project-only view otherwise. Every worker on every runtime
+    // receives this — it is not something a worker chooses to look up.
+    (memoryText ? `\n${memoryText}\n` : buildSharedContext(project)) +
     // Only offered where it can be honoured. At max depth, or once the project
     // has spent its delegation budget, describing the option would invite a
     // request guaranteed to be refused — and a worker that asks and is denied
@@ -320,19 +328,19 @@ function canDelegate(project: ProjectState, task: TaskRecord): boolean {
 }
 
 /**
- * What the project already established. Without this every worker re-derives
- * the same facts from scratch, which is why the same questions kept coming
- * back around — the ledger held them, but nothing put them in the prompt.
+ * What the project already established, rendered from canonical memory.
+ *
+ * This used to format `decisions` and `evidence` directly. It now renders the
+ * memory book, seeded from those same two arrays for projects that predate it —
+ * so there is one renderer rather than a prompt block and a memory layer
+ * describing the same facts differently.
+ *
+ * The synchronous, project-only view. A run supplies the fuller one through
+ * the memory service, which merges the account's user layer on top.
  */
 export function buildSharedContext(project: ProjectState): string {
-  const decisions = project.decisions.slice(-6)
-  const evidence = project.evidence.slice(-12)
-  if (!decisions.length && !evidence.length) return ''
-  return (
-    '\nALREADY ESTABLISHED — do not re-derive:\n' +
-    (decisions.length ? `Decisions:\n${decisions.map((d) => `- ${d}`).join('\n')}\n` : '') +
-    (evidence.length ? `Sources already found:\n${evidence.map((e) => `- ${e}`).join('\n')}\n` : '')
-  )
+  const text = renderMemory(initialBook(project))
+  return text ? `\n${text}\n` : ''
 }
 
 /**
@@ -467,10 +475,16 @@ export function applyDelegation(
   return { project: { ...next, delegation: state }, created }
 }
 
+/** The kernel's memory service for one run. */
+interface MemoryPass {
+  service: MemoryService
+}
+
 async function executeBatch(
   project: ProjectState,
   options: RunTaskGraphOptions,
   runtime: AgentRuntime,
+  memory: MemoryPass,
 ): Promise<{ project: ProjectState; members: CrewMemberResult[]; trace: TraceLine[] }> {
   const batch = readyTasks(project)
   if (!batch.length) return { project, members: [], trace: [] }
@@ -515,8 +529,21 @@ async function executeBatch(
       continue
     }
 
+    // Canonical memory, before execution, unconditionally. Not a tool the
+    // worker may call — the whole point is that a Claude Code worker, a Codex
+    // worker and the builtin worker all start from the same project facts. It
+    // travels as an argument to runTask for exactly that reason.
+    const taskContext: TaskContext = {
+      memory: await memory.service.buildContext({
+        book: next.memory ?? { entries: [] },
+        projectId: next.id,
+        task,
+        worker: task.worker,
+      }),
+    }
+
     const employee = withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace)
-    const prompt = buildWorkerPrompt(next, task)
+    const prompt = buildWorkerPrompt(next, task, taskContext.memory.text)
     next = logEvent(next, { action: 'request_tool', taskId: task.id, worker: task.worker, detail: task.goal })
 
     // The prompt has captured the rejected bodies; drop them so the judge only
@@ -542,7 +569,7 @@ async function executeBatch(
     })
 
     let result: RunResult | undefined
-    for await (const ev of runtime.runTask(session, task)) {
+    for await (const ev of runtime.runTask(session, task, taskContext)) {
       // Runtime events reach the trace, so the UI observes the same stream the
       // orchestrator does rather than a parallel one.
       if (ev.kind === 'task_finished') {
@@ -569,6 +596,7 @@ async function executeBatch(
         action: 'report_blocker', taskId: task.id, worker: task.worker,
         detail: 'runtime returned no result',
       })
+      next = await recordTaskMemory(next, memory, task, undefined, [])
       continue
     }
 
@@ -595,6 +623,11 @@ async function executeBatch(
       next = updateTask(next, task.id, { status: 'needs_user', blocker: reason, costUsd: task.costUsd + spent.costUsd })
       next = { ...next, blockers: [...next.blockers, `${task.id}: ${reason}`] }
       next = logEvent(next, { action: 'report_blocker', taskId: task.id, worker: task.worker, detail: reason })
+      // A blocked capability is a fact about the project, not about this
+      // attempt. Recorded here because this path is terminal — it never
+      // reaches the judge, and without this every later worker rediscovers
+      // that the same connection is missing.
+      next = await recordTaskMemory(next, memory, task, result, [])
       continue
     }
 
@@ -614,6 +647,9 @@ async function executeBatch(
     // Evidence is the URL set behind the artifacts — carried on the project so
     // a later worker cites what an earlier one found instead of re-searching.
     next = recordEvidence(next, artifacts.flatMap((a) => extractUrls(a.body)))
+    // What this attempt produced. The verdict is added after the judge runs —
+    // recordOutcome is idempotent, so each caller contributes what it knows.
+    next = await recordTaskMemory(next, memory, task, result, artifacts)
     next = updateTask(next, task.id, {
       status: 'running',
       stepsUsed: task.stepsUsed + result.toolCalls.length + 1,
@@ -639,6 +675,33 @@ async function persistQuietly(project: ProjectState, options: RunTaskGraphOption
   }
 }
 
+/**
+ * Record one task's outcome into canonical memory.
+ *
+ * Called from every path a task can terminate on: blocked before the judge,
+ * no result at all, and after judging. `recordOutcome` deduplicates, so a task
+ * that passes through two of them contributes what each knew without writing
+ * the same fact twice.
+ */
+async function recordTaskMemory(
+  project: ProjectState,
+  memory: MemoryPass,
+  task: TaskRecord,
+  result: RunResult | undefined,
+  artifacts: readonly ArtifactRecord[],
+  verdict?: JudgeVerdict,
+): Promise<ProjectState> {
+  const book = await memory.service.recordOutcome({
+    book: project.memory ?? { entries: [] },
+    projectId: project.id,
+    task,
+    result,
+    artifacts,
+    verdict,
+  })
+  return { ...project, memory: book }
+}
+
 /** Drop every artifact a task produced — used to clear a rejected attempt. */
 export function clearTaskArtifacts(project: ProjectState, taskId: string): ProjectState {
   return { ...project, artifacts: project.artifacts.filter((a) => a.taskId !== taskId) }
@@ -651,7 +714,7 @@ function updateTask(project: ProjectState, taskId: string, patch: Partial<TaskRe
   }
 }
 
-function judgeBatch(project: ProjectState): ProjectState {
+async function judgeBatch(project: ProjectState, memory: MemoryPass): Promise<ProjectState> {
   let next = project
   for (const task of next.tasks.filter((t) => t.status === 'running')) {
     const taskArtifacts = next.artifacts.filter((a) => a.taskId === task.id)
@@ -663,6 +726,10 @@ function judgeBatch(project: ProjectState): ProjectState {
       acceptance: mergeAcceptance(sopFor(task.worker), task.acceptance),
     }
     const verdict = judgeTask(contract, taskArtifacts)
+    // The validator's decision is the part of the outcome worth carrying
+    // forward — a pass supersedes the failures recorded for the same task, so
+    // a fixed problem stops being recalled as an open one.
+    next = await recordTaskMemory(next, memory, task, undefined, taskArtifacts, verdict)
     if (verdict.passed) {
       next = updateTask(next, task.id, { status: 'completed', verdict })
       next = recordDecision(next, `${task.id} accepted (${verdict.score}/100): ${task.goal} → ${task.outputs.join(', ')}`)
@@ -730,7 +797,13 @@ export async function runTaskGraph(
     DEFAULT_LIMITS,
     options.budget ?? DEFAULT_BUDGET,
   )
-  const project = initial
+  // Canonical memory for this run. Seeded from the ledger's decisions and
+  // evidence so a project that predates the memory service does not look like
+  // one that has established nothing.
+  const memory: MemoryPass = {
+    service: createMemoryService({ userLayer: accountUserLayer() }),
+  }
+  const project: ProjectState = { ...initial, memory: initialBook(initial) }
   let allMembers: CrewMemberResult[] = []
   let allTrace: TraceLine[] = [{ node: 'plan', text: `Task graph — ${project.tasks.length} tasks` }]
 
@@ -753,11 +826,23 @@ export async function runTaskGraph(
         brain,
         employeeFor: (task) =>
           withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace),
-        promptFor: (task) => buildWorkerPrompt(currentProject, task),
+        promptFor: (task, context) => buildWorkerPrompt(currentProject, task, context.memory.text),
         configs: options.configs,
         // Carried on the context rather than read from module state by the
         // tool layer, so what a run may spend is a property of the run.
         permissions: { platformKeys: options.platformKeys === true },
+        // The explicit half of memory: the kernel already put this project's
+        // established facts in the prompt, and a worker that wants to look
+        // further searches the same canonical book rather than its own.
+        memory: {
+          search: async (query, limit) => {
+            const hits = await memory.service.search(
+              currentProject.memory ?? { entries: [] },
+              { text: query, limit },
+            )
+            return hits.map((e) => `(${e.layer}/${e.kind}) ${e.text}`)
+          },
+        },
       })
 
   // The prompt needs the ledger as it stands when the task runs, not as it was
@@ -766,12 +851,12 @@ export async function runTaskGraph(
 
   const executeNode = async (state: TRS): Promise<Partial<TRS>> => {
     currentProject = state.project
-    const { project: p, members, trace } = await executeBatch(state.project, options, runtime)
+    const { project: p, members, trace } = await executeBatch(state.project, options, runtime, memory)
     return { project: p, members, trace }
   }
 
   const judgeNode = async (state: TRS): Promise<Partial<TRS>> => {
-    const p = judgeBatch(state.project)
+    const p = await judgeBatch(state.project, memory)
     await persistQuietly(p, options)
     return {
       project: p,

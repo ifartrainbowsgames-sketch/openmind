@@ -17,7 +17,9 @@
 import { createBuiltinRuntime } from '../src/lib/workforce/builtin-runtime'
 import { setActiveCrewToolKeys, setPlatformKeysAllowed } from '../src/lib/crew-tools'
 import { withCrewTools } from '../src/lib/crew'
-import type { AgentRuntime } from '../src/lib/workforce/agent-runtime'
+import type { AgentRuntime, TaskContext } from '../src/lib/workforce/agent-runtime'
+import { createMemoryService } from '../src/lib/workforce/memory-service'
+import type { MemoryBook } from '../src/lib/workforce/memory-layers'
 import type { OpenMindEvent } from '../src/lib/workforce/events'
 import type { AgentBrain, Employee, PlanStep } from '../src/lib/agent'
 import type { TaskRecord } from '../src/lib/task-ledger'
@@ -78,12 +80,21 @@ async function main(): Promise<void> {
     permissions: { platformKeys: true },
   })
 
+  // Canonical memory, built by the kernel service exactly as task-runner does.
+  const memory = createMemoryService()
+  let book: MemoryBook = { entries: [] }
+
   console.log('— TASK A: write a file through the runtime —')
   const runtimeA: AgentRuntime = createBuiltinRuntime(deps([
     { tool: 'workspace_write_file', input: JSON.stringify({ path: 'hello.txt', content: MARKER }) },
   ]))
   const sessionA = await runtimeA.createSession({ projectId: 'verify-session', worker: 'code' })
-  const eventsA = await collect(runtimeA.runTask(sessionA, task('a')))
+  const contextA: TaskContext = {
+    memory: await memory.buildContext({
+      book, projectId: 'verify-session', task: task('a'), worker: 'code',
+    }),
+  }
+  const eventsA = await collect(runtimeA.runTask(sessionA, task('a'), contextA))
   const wroteOutput = outputOf(eventsA)
 
   check('task A ran through the runtime', eventsA.some((e) => e.kind === 'task_started'))
@@ -114,7 +125,27 @@ async function main(): Promise<void> {
     worker: 'code',
     workspace: afterA?.workspace,
   })
-  const eventsB = await collect(runtimeB.runTask(readerSession, task('b')))
+  // Record what A established, then build B's context from it. This is the
+  // kernel path, not a test double: the same service task-runner uses.
+  book = await memory.recordOutcome({
+    book,
+    projectId: 'verify-session',
+    task: task('a'),
+    result: eventsA.find((e) => e.kind === 'task_finished')?.result as never,
+    artifacts: [],
+    verdict: { passed: true, score: 90, problems: [], requiredFixes: [] },
+  })
+  const contextB: TaskContext = {
+    memory: await memory.buildContext({
+      book, projectId: 'verify-session', task: task('b'), worker: 'code',
+    }),
+  }
+  check(
+    'B starts with what A established',
+    contextB.memory.entries.length > 0 && contextA.memory.entries.length === 0,
+    `A had ${contextA.memory.entries.length}, B has ${contextB.memory.entries.length}`,
+  )
+  const eventsB = await collect(runtimeB.runTask(readerSession, task('b'), contextB))
   const readOutput = outputOf(eventsB)
 
   check(

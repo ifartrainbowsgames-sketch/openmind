@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBuiltinRuntime } from './builtin-runtime'
+import { emptyTaskContext } from './agent-runtime'
 import { setActiveSandbox } from '../crew-tools'
 import { ALL_TOOLS } from '../agent/connections'
 import type { AgentBrain, PlanStep } from '../agent'
@@ -88,7 +89,7 @@ describe('one session, one workspace', () => {
       worker: 'code',
       workspace: { id: 'w', projectId: 'p1', path: '/home/user/project', sandboxId: 'sbx-known' },
     })
-    await drain(runtime.runTask(session, task('t1')))
+    await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
     expect(seen).toEqual(['sbx-known'])
   })
 
@@ -103,7 +104,7 @@ describe('one session, one workspace', () => {
       worker: 'code',
       workspace: { id: 'w', projectId: 'p1', path: '/home/user/project', sandboxId: 'sbx-right' },
     })
-    await drain(runtime.runTask(session, task('t1')))
+    await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
     expect(seen).toEqual(['sbx-right'])
   })
 
@@ -111,7 +112,7 @@ describe('one session, one workspace', () => {
     adopt = 'sbx-created'
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    await drain(runtime.runTask(session, task('t1')))
+    await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
     const after = await runtime.resumeSession(session.id)
     expect(after?.workspace?.sandboxId).toBe('sbx-created')
   })
@@ -123,11 +124,11 @@ describe('one session, one workspace', () => {
     const runtime = createBuiltinRuntime(deps(probeBrain()))
 
     const first = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    await drain(runtime.runTask(first, task('a')))
+    await drain(runtime.runTask(first, task('a'), emptyTaskContext()))
 
     const second = await runtime.createSession({ projectId: 'p1', worker: 'code' })
     expect(second.id).toBe(first.id)
-    await drain(runtime.runTask(second, task('b')))
+    await drain(runtime.runTask(second, task('b'), emptyTaskContext()))
 
     // First run started with nothing; the second started on the adopted machine.
     expect(seen[0]).toBeUndefined()
@@ -138,7 +139,7 @@ describe('one session, one workspace', () => {
     adopt = 'sbx-created'
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    await drain(runtime.runTask(session, task('t1')))
+    await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
     const state = await runtime.inspectWorkspace(session.id)
     expect(state.workspace?.sandboxId).toBe('sbx-created')
   })
@@ -148,7 +149,7 @@ describe('one session, one workspace', () => {
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const code = await runtime.createSession({ projectId: 'p1', worker: 'code' })
     const research = await runtime.createSession({ projectId: 'p1', worker: 'research' })
-    await drain(runtime.runTask(code, task('t1')))
+    await drain(runtime.runTask(code, task('t1'), emptyTaskContext()))
 
     const codeAfter = await runtime.resumeSession(code.id)
     const researchAfter = await runtime.resumeSession(research.id)
@@ -167,7 +168,7 @@ describe('one session, one workspace', () => {
       worker: 'code',
       workspace: { id: 'w', projectId: 'p1', path: '/home/user/project', sandboxId: 'sbx-a' },
     })
-    const events = await drain(runtime.runTask(session, task('t1')))
+    const events = await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
     expect(events.at(-1)?.outcome).toBe('failed')
     // The session still owns its machine — a failure is not a reason to forget
     // which sandbox holds the half-finished work.
@@ -189,7 +190,7 @@ describe('one session, one workspace', () => {
     // implementation replayed them from `result.toolCalls` after the fact.
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    const events = await drain(runtime.runTask(session, task('t1')))
+    const events = await drain(runtime.runTask(session, task('t1'), emptyTaskContext()))
 
     const started = events.findIndex((e) => e.kind === 'tool_started' && e.tool === PROBE)
     const completed = events.findIndex((e) => e.kind === 'tool_completed' && e.tool === PROBE)

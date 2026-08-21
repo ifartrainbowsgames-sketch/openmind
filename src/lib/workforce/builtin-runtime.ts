@@ -15,13 +15,14 @@ import { runEmployee, type AgentBrain, type Employee, type LiveConnectionConfig,
 import type { TaskRecord } from '../task-ledger'
 import {
   type AgentRuntime, type AgentSession, type CapabilitySet,
-  type CreateSessionInput, type SessionCheckpoint, type WorkspaceState,
+  type CreateSessionInput, type SessionCheckpoint, type TaskContext,
+  type WorkspaceState,
 } from './agent-runtime'
 import { event, type OpenMindEvent, type RunOutcome } from './events'
 import { setActiveSandbox } from '../crew-tools'
 import {
   NULL_SINK, createExecutionContext,
-  type ExecutionContext, type PermissionContext,
+  type ExecutionContext, type MemoryReader, type PermissionContext,
 } from './execution-context'
 import { makeWorkspace, type Workspace } from './runtime'
 import { sandboxRuntime } from './sandbox-runtime'
@@ -50,11 +51,22 @@ export interface BuiltinRuntimeDeps {
   brain: AgentBrain
   /** Builds the employee for a task — routing stays outside the runtime. */
   employeeFor: (task: TaskRecord) => Employee
-  /** Full prompt: rules, SOP, shared context, revision block. */
-  promptFor: (task: TaskRecord) => string
+  /**
+   * Full prompt: rules, SOP, canonical memory, revision block.
+   *
+   * Takes the TaskContext so the memory the kernel built is what reaches the
+   * prompt — the runtime does not get to compose a different one.
+   */
+  promptFor: (task: TaskRecord, context: TaskContext) => string
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>
   /** What this run may do. Defaults to no platform credentials, no guard. */
   permissions?: PermissionContext
+  /**
+   * Read access to canonical memory, for the agent that wants to look past
+   * the context the kernel already gave it. The kernel service does the
+   * writing; a runtime never does.
+   */
+  memory?: MemoryReader
 }
 
 export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
@@ -125,7 +137,11 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       return store.sessions[sessionId] ?? null
     },
 
-    async *runTask(session: AgentSession, task: TaskRecord): AsyncIterable<OpenMindEvent> {
+    async *runTask(
+      session: AgentSession,
+      task: TaskRecord,
+      taskContext: TaskContext,
+    ): AsyncIterable<OpenMindEvent> {
       const ctx = { sessionId: session.id, taskId: task.id, worker: task.worker }
       store = recordActivity(store, session.id, { status: 'running', taskId: task.id })
 
@@ -160,6 +176,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         capabilities: CAPABILITIES,
         permissions,
         eventSink: { emit: (e) => push({ ...ctx, ...e }) },
+        memory: deps.memory,
         abortSignal: abort.signal,
       })
 
@@ -176,7 +193,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       const running = runEmployee(
         deps.brain,
         deps.employeeFor(task),
-        deps.promptFor(task),
+        deps.promptFor(task, taskContext),
         (line) => push(event('agent_thinking', line.text, ctx)),
         deps.configs,
         context,

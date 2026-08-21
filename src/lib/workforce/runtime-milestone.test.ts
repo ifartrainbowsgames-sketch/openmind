@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runTaskGraph } from '../task-runner'
 import { createBuiltinRuntime } from './builtin-runtime'
-import { _resetRuntimes, registerRuntime, runtimeFor, type AgentRuntime } from './agent-runtime'
+import {
+  _resetRuntimes, emptyTaskContext, registerRuntime, runtimeFor, type AgentRuntime,
+} from './agent-runtime'
 import type { OpenMindEvent } from './events'
 import type { AgentBrain } from '../agent'
 import type { TaskRecord } from '../task-ledger'
@@ -85,7 +87,7 @@ describe('sessions are created and reused', () => {
   it('records the tasks a session served', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    await drain(runtime.runTask(session, task))
+    await drain(runtime.runTask(session, task, emptyTaskContext()))
     const resumed = await runtime.resumeSession(session.id)
     expect(resumed?.taskIds).toContain('t1')
   })
@@ -102,7 +104,7 @@ describe('runtime events describe the run', () => {
   it('brackets a run with task_started and a terminal task_finished', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    const events = await drain(runtime.runTask(session, task))
+    const events = await drain(runtime.runTask(session, task, emptyTaskContext()))
     expect(events[0].kind).toBe('task_started')
     expect(events.at(-1)?.kind).toBe('task_finished')
     expect(events.at(-1)?.outcome).toBe('completed')
@@ -111,14 +113,14 @@ describe('runtime events describe the run', () => {
   it('carries the result on the terminal event, since the stream is the only channel', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    const events = await drain(runtime.runTask(session, task))
+    const events = await drain(runtime.runTask(session, task, emptyTaskContext()))
     expect(events.at(-1)?.result).toBeDefined()
   })
 
   it('stamps every event with the session and task it belongs to', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    const events = await drain(runtime.runTask(session, task))
+    const events = await drain(runtime.runTask(session, task, emptyTaskContext()))
     for (const e of events) {
       expect(e.sessionId).toBe(session.id)
       expect(e.taskId).toBe('t1')
@@ -131,7 +133,7 @@ describe('runtime events describe the run', () => {
       respond: async () => '',
     }))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    const events = await drain(runtime.runTask(session, task))
+    const events = await drain(runtime.runTask(session, task, emptyTaskContext()))
     expect(events.at(-1)?.outcome).toBe('failed')
     expect(events.at(-1)?.text).toMatch(/provider down/)
   })
@@ -140,7 +142,7 @@ describe('runtime events describe the run', () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
     await runtime.cancel(session.id)
-    const events = await drain(runtime.runTask(session, task))
+    const events = await drain(runtime.runTask(session, task, emptyTaskContext()))
     expect(events.at(-1)?.outcome).toBe('cancelled')
   })
 })

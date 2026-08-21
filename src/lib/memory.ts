@@ -97,6 +97,37 @@ export async function saveMemory(input: string, threadId?: string): Promise<stri
   return `[memory_save] Stored (${scope}) on this device.`
 }
 
+/**
+ * The saved notes, as records rather than a formatted string.
+ *
+ * `searchMemory` renders for a model; the memory kernel service needs the rows
+ * so it can layer, rank and budget them alongside project memory. Same store,
+ * two readers — not two stores.
+ */
+export async function listMemories(scope?: MemoryScope, limit = 8): Promise<AgentMemory[]> {
+  const user = await cloudSession()
+  if (user) {
+    const { supabase } = await import('./supabase')
+    let req = supabase
+      .from('agent_memories')
+      .select('id, content, scope, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (scope) req = req.eq('scope', scope)
+    const { data, error } = await req
+    if (!error && data?.length) {
+      return data.map((r) => ({
+        id: String(r.id),
+        scope: (r.scope as MemoryScope) ?? 'user',
+        content: String(r.content),
+        createdAt: new Date(String(r.created_at)).getTime() || Date.now(),
+      }))
+    }
+  }
+  const local = readLocal()
+  return (scope ? local.filter((m) => m.scope === scope) : local).slice(0, limit)
+}
+
 export async function searchMemory(query: string): Promise<string> {
   const q = query.trim().slice(0, 200)
   const user = await cloudSession()
