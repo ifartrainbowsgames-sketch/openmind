@@ -10,19 +10,28 @@
  */
 
 import { invokeCrewTool } from '../crew-tools'
+import type { ExecutionContext } from './execution-context'
 import {
   RuntimeUnavailableError, WORKSPACE_ROOT, makeWorkspace, toExecResult,
   type ExecOptions, type ExecResult, type GitResult, type Runtime, type Workspace,
 } from './runtime'
 
-async function call(tool: string, input: unknown): Promise<string> {
+async function callTool(tool: string, input: unknown, context?: ExecutionContext): Promise<string> {
   return invokeCrewTool(
     tool as Parameters<typeof invokeCrewTool>[0],
     typeof input === 'string' ? input : JSON.stringify(input),
+    undefined,
+    context,
   )
 }
 
-export function sandboxRuntime(): Runtime {
+/**
+ * Bound to a context when one exists, so the typed edge and the agent's own
+ * tools resolve the same machine by construction rather than by both happening
+ * to read the same global.
+ */
+export function sandboxRuntime(context?: ExecutionContext): Runtime {
+  const call = (tool: string, input: unknown) => callTool(tool, input, context)
   return {
     id: 'e2b',
 

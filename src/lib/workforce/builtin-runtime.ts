@@ -18,7 +18,11 @@ import {
   type CreateSessionInput, type SessionCheckpoint, type WorkspaceState,
 } from './agent-runtime'
 import { event, type OpenMindEvent, type RunOutcome } from './events'
-import { getActiveSandbox, setActiveSandbox } from '../crew-tools'
+import { setActiveSandbox } from '../crew-tools'
+import {
+  NULL_SINK, createExecutionContext,
+  type ExecutionContext, type PermissionContext,
+} from './execution-context'
 import { makeWorkspace, type Workspace } from './runtime'
 import { sandboxRuntime } from './sandbox-runtime'
 import { ensureWorktree } from './worktrees'
@@ -49,11 +53,32 @@ export interface BuiltinRuntimeDeps {
   /** Full prompt: rules, SOP, shared context, revision block. */
   promptFor: (task: TaskRecord) => string
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>
+  /** What this run may do. Defaults to no platform credentials, no guard. */
+  permissions?: PermissionContext
 }
 
 export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
   let store: SessionStore = emptySessionStore()
   const cancelled = new Set<string>()
+  /** One per in-flight task, so cancel() stops work already in the network. */
+  const aborts = new Map<string, AbortController>()
+  const permissions: PermissionContext = deps.permissions ?? { platformKeys: false }
+
+  /**
+   * A context for work the runtime does *around* a task — provisioning a
+   * worktree, inspecting a workspace. Same session, same machine, no event
+   * stream to feed and nothing to cancel.
+   */
+  function contextFor(session: AgentSession, workspace: Workspace): ExecutionContext {
+    return createExecutionContext({
+      session,
+      runtime: (self) => sandboxRuntime(self),
+      workspace,
+      capabilities: CAPABILITIES,
+      permissions,
+      eventSink: NULL_SINK,
+    })
+  }
 
   return {
     id: 'builtin',
@@ -83,9 +108,9 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         && session.workspace?.sandboxId
         && !session.workspace.worktree
       ) {
-        setActiveSandbox(session.workspace.sandboxId)
         try {
-          const { workspace } = await ensureWorktree(sandboxRuntime(), input.projectId, input.worker)
+          const provisioning = contextFor(session, session.workspace)
+          const { workspace } = await ensureWorktree(provisioning.runtime, input.projectId, input.worker)
           const isolated: Workspace = { ...workspace, sandboxId: session.workspace.sandboxId }
           store = recordActivity(store, session.id, { workspace: isolated })
           session = { ...session, workspace: isolated }
@@ -111,12 +136,6 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
 
       yield event('task_started', task.goal, ctx)
 
-      // ONE workspace identity. The agent's own tools resolve their sandbox
-      // from this same value, so the machine the coder edits is the machine
-      // inspectWorkspace() reads. Without this the two drift apart silently and
-      // everything still looks live.
-      setActiveSandbox(session.workspace?.sandboxId)
-
       // The employee graph reports progress through a callback while it runs,
       // but this is a generator — so trace lines land in a queue that the loop
       // below drains as they arrive. Collecting them and yielding at the end
@@ -129,6 +148,27 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         wake?.()
       }
 
+      // ONE workspace identity, as a value the tools receive rather than a
+      // global they read. The machine the coder edits is the machine
+      // inspectWorkspace() reads because there is nowhere else to look.
+      const abort = new AbortController()
+      aborts.set(session.id, abort)
+      const context = createExecutionContext({
+        session,
+        runtime: (self) => sandboxRuntime(self),
+        workspace: session.workspace ?? makeWorkspace(session.projectId),
+        capabilities: CAPABILITIES,
+        permissions,
+        eventSink: { emit: (e) => push({ ...ctx, ...e }) },
+        abortSignal: abort.signal,
+      })
+
+      // Still bound, for the tools that reach the sandbox without a context —
+      // deep research and the chat crew share this transport. Both values come
+      // from the session, so they cannot disagree at the start of a run, and
+      // `adoptSandbox` keeps them together if a tool creates a machine.
+      setActiveSandbox(context.workspace.sandboxId)
+
       let done = false
       let failure: unknown
       let result: RunResult | undefined
@@ -139,6 +179,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         deps.promptFor(task),
         (line) => push(event('agent_thinking', line.text, ctx)),
         deps.configs,
+        context,
       ).then(
         (r) => { result = r; done = true; wake?.() },
         (e) => { failure = e; done = true; wake?.() },
@@ -154,6 +195,18 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       }
       await running
 
+      aborts.delete(session.id)
+
+      // The tools may have created a sandbox; the context adopted it as it
+      // happened. Record it whether the run succeeded or failed — a failure is
+      // not a reason to forget which machine holds the half-finished work.
+      const sandboxAfter = context.workspace.sandboxId
+      const adopted = Boolean(sandboxAfter) && sandboxAfter !== session.workspace?.sandboxId
+      if (adopted) {
+        const workspace: Workspace = { ...context.workspace }
+        store = recordActivity(store, session.id, { workspace })
+      }
+
       try {
         if (failure) throw failure
         if (!result) throw new Error('employee runtime returned no result')
@@ -165,28 +218,15 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         return
       }
 
-      // The tools may have created or replaced the sandbox; adopt whatever they
-      // ended on so the session and the machine stay the same thing.
-      const sandboxAfter = getActiveSandbox()
-      if (sandboxAfter && sandboxAfter !== session.workspace?.sandboxId) {
-        const workspace: Workspace = {
-          ...(session.workspace ?? makeWorkspace(session.projectId)),
-          sandboxId: sandboxAfter,
-        }
-        store = recordActivity(store, session.id, { workspace })
+      if (adopted) {
         yield event('session_opened', `workspace on sandbox ${sandboxAfter}`, {
           ...ctx, sessionId: session.id,
         })
       }
 
-      for (const call of result.toolCalls) {
-        yield event('tool_started', call.tool, { ...ctx, tool: call.tool })
-        yield event(
-          call.error ? 'blocked' : 'tool_completed',
-          call.error?.message ?? call.output.slice(0, 200),
-          { ...ctx, tool: call.tool },
-        )
-      }
+      // Tool events are not replayed here. The actor emits them through the
+      // context's sink as each call happens, which is both live and the only
+      // place that knows a call started before it finished.
 
       // Every tool call blocked means a missing capability, not a failed
       // attempt. That distinction is the difference between asking the user for
@@ -220,10 +260,10 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         // a caller must not read an empty list as a clean tree.
         return { workspace, changedFiles: [], inspected: false }
       }
-      // Read the same sandbox the session owns, not a fresh one.
-      setActiveSandbox(workspace.sandboxId)
+      // Read the same sandbox the session owns, not a fresh one. The context
+      // carries that identity, so there is no binding step to forget.
       try {
-        const changed = await sandboxRuntime().exec(
+        const changed = await contextFor(session, workspace).runtime.exec(
           `cd '${workspace.path}' && git status --porcelain 2>/dev/null || true`,
         )
         if (!changed.ran) return { workspace, changedFiles: [], inspected: false }
@@ -240,11 +280,17 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
 
     async cancel(sessionId: string): Promise<void> {
       cancelled.add(sessionId)
+      // Not just a flag for the next task: abort the tool calls this one has
+      // in flight, or a cancelled run keeps a sandbox busy with an install
+      // nobody is waiting for.
+      aborts.get(sessionId)?.abort()
       store = recordActivity(store, sessionId, { status: 'blocked' })
     },
 
     async close(sessionId: string): Promise<void> {
       cancelled.delete(sessionId)
+      aborts.get(sessionId)?.abort()
+      aborts.delete(sessionId)
       store = closeSession(store, sessionId)
     },
   }

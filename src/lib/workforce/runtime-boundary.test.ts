@@ -100,3 +100,49 @@ describe('production execution goes through AgentRuntime', () => {
     expect(text).toMatch(/runtime\.createSession\(/)
   })
 })
+
+/**
+ * The second boundary: where a tool executes is an argument, not a global.
+ *
+ * `setActiveSandbox` is the module-level binding the ExecutionContext replaced.
+ * It still exists for the surfaces that have no session — the chat crew, deep
+ * research — but every additional writer is a chance for the tools and the
+ * session to end up on different live machines with nothing reporting it.
+ */
+const SANDBOX_BINDERS = [
+  // Owns the value.
+  '/src/lib/crew-tools.ts',
+  // Binds it once per run, from the session, for the context-free tools that
+  // share the transport.
+  '/src/lib/workforce/builtin-runtime.ts',
+  // Sessionless surfaces: no ExecutionContext exists to carry the machine.
+  '/src/lib/crew.ts',
+  '/src/lib/openmind-os.ts',
+]
+
+describe('the machine a tool uses comes from its context', () => {
+  it('nothing new writes the module-level sandbox binding', () => {
+    const offenders = productionFiles
+      .filter(([, text]) => /\bsetActiveSandbox\s*\(/.test(text))
+      .map(([path]) => path)
+      .filter((path) => !SANDBOX_BINDERS.includes(path))
+
+    expect(
+      offenders,
+      'setActiveSandbox is the pre-context binding. A new writer means the tools ' +
+      'and the session can resolve different sandboxes — which looks entirely ' +
+      'live and is entirely wrong. Take an ExecutionContext instead.',
+    ).toEqual([])
+  })
+
+  it('the workspace tools take a context', () => {
+    // If the tool registry stopped threading it, every assertion about the
+    // context would still pass while the tools read module state again.
+    const tools = sources['/src/lib/agent/tools.ts']
+    expect(tools).toMatch(/run: \(q, _args, ctx\) => invokeCrewTool\('workspace_run', q, undefined, ctx\)/)
+  })
+
+  it('the actor passes it to every tool it calls', () => {
+    expect(sources['/src/lib/agent/graph.ts']).toMatch(/tool\.run\(spec\.input, spec\.args, context\)/)
+  })
+})

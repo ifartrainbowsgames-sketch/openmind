@@ -72,6 +72,10 @@ async function main(): Promise<void> {
     brain: scriptedBrain(steps),
     employeeFor: () => coder,
     promptFor: () => 'go',
+    // Explicit, because the ExecutionContext is authoritative for permissions:
+    // a run that does not ask for the deployment's own tool credentials does
+    // not get them, whatever the module-level switch says.
+    permissions: { platformKeys: true },
   })
 
   console.log('— TASK A: write a file through the runtime —')

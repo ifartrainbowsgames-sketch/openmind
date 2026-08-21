@@ -1,3 +1,5 @@
+import type { ExecutionContext } from '../workforce/execution-context'
+
 export interface Employee {
   id: string
   name: string
@@ -96,8 +98,20 @@ export interface ToolSpec {
    * whether it was live or mocked, structured data, or why it failed. Callers
    * normalize with `normalizeToolResult`, so a plain string still works.
    */
-  run: (input: string, args?: Record<string, unknown>) =>
-    string | ToolResult | Promise<string | ToolResult>
+  run: (
+    input: string,
+    args?: Record<string, unknown>,
+    /**
+     * Where this call executes. Present whenever the tool runs inside a task
+     * session; absent on the context-free surfaces (chat crew, evaluation
+     * harness), which fall back to the module-level workspace binding.
+     *
+     * A tool that needs a machine must prefer this over module state — that
+     * preference is what makes "one session, one workspace" structural rather
+     * than a rule the runtime has to remember.
+     */
+    context?: ExecutionContext,
+  ) => string | ToolResult | Promise<string | ToolResult>
 }
 
 /**

@@ -110,28 +110,28 @@ TOOL_REGISTRY.run_checks = {
   id: 'run_checks',
   name: 'Run project checks',
   desc: "Run the repo's OWN typecheck/lint/test/build in the sandbox and report real exit codes. Use this to verify code works.",
-  run: (q) => invokeCrewTool('run_checks', q),
+  run: (q, _args, ctx) => invokeCrewTool('run_checks', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.web_search = {
   id: 'web_search',
   name: 'Web search',
   desc: 'Search the public web (DuckDuckGo / SearXNG; Tavily optional)',
-  run: (q) => invokeCrewTool('web_search', q),
+  run: (q, _args, ctx) => invokeCrewTool('web_search', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.browse_url = {
   id: 'browse_url',
   name: 'Browse URL',
   desc: 'Read a URL to text (Jina Reader / fetch; Firecrawl optional)',
-  run: (q) => invokeCrewTool('browse_url', q),
+  run: (q, _args, ctx) => invokeCrewTool('browse_url', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.run_code = {
   id: 'run_code',
   name: 'Run code',
   desc: 'Execute Python in the project sandbox (mock if no E2B key)',
-  run: (q) => invokeCrewTool('run_code', q),
+  run: (q, _args, ctx) => invokeCrewTool('run_code', q, undefined, ctx),
 }
 
 // ── Workspace tools — one persistent sandbox per project ─────────────────────
@@ -142,91 +142,91 @@ TOOL_REGISTRY.workspace_run = {
   id: 'workspace_run',
   name: 'Run shell command',
   desc: 'Run any shell command in the project sandbox — npm install, pytest, build. Input: the command, or {"command":"..."}',
-  run: (q) => invokeCrewTool('workspace_run', q),
+  run: (q, _args, ctx) => invokeCrewTool('workspace_run', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.workspace_write_file = {
   id: 'workspace_write_file',
   name: 'Write file',
   desc: 'Write a file in the project sandbox. Input: {"path":"src/x.ts","content":"..."}',
-  run: (q) => invokeCrewTool('workspace_write_file', q),
+  run: (q, _args, ctx) => invokeCrewTool('workspace_write_file', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.workspace_read_file = {
   id: 'workspace_read_file',
   name: 'Read file',
   desc: 'Read a file from the project sandbox. Input: the path, or {"path":"..."}',
-  run: (q) => invokeCrewTool('workspace_read_file', q),
+  run: (q, _args, ctx) => invokeCrewTool('workspace_read_file', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.workspace_ls = {
   id: 'workspace_ls',
   name: 'List files',
   desc: 'List the project sandbox tree. Input: a path, or {"path":"."}',
-  run: (q) => invokeCrewTool('workspace_ls', q),
+  run: (q, _args, ctx) => invokeCrewTool('workspace_ls', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.git_clone = {
   id: 'git_clone',
   name: 'Clone repo',
   desc: 'Clone an https git repo into the project sandbox. Input: the URL, or {"repo":"...","branch":"main"}',
-  run: (q) => invokeCrewTool('git_clone', q),
+  run: (q, _args, ctx) => invokeCrewTool('git_clone', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.github_write_file = {
   id: 'github_write_file',
   name: 'GitHub write file',
   desc: 'Commit a file to the GitHub · main workspace. Required one-line JSON only: {"path","content"} with optional "message" and "branch". Do not pass the workspace prompt.',
-  run: (q) => invokeCrewTool('github_write_file', q),
+  run: (q, _args, ctx) => invokeCrewTool('github_write_file', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.github_create_branch = {
   id: 'github_create_branch',
   name: 'GitHub create branch',
   desc: 'Create a branch from main on the GitHub workspace. One-line JSON: {"name","from?"}.',
-  run: (q) => invokeCrewTool('github_create_branch', q),
+  run: (q, _args, ctx) => invokeCrewTool('github_create_branch', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.github_open_pr = {
   id: 'github_open_pr',
   name: 'GitHub open PR',
   desc: 'Open a pull request into main. One-line JSON: {"title","body?","head","base?"}.',
-  run: (q) => invokeCrewTool('github_open_pr', q),
+  run: (q, _args, ctx) => invokeCrewTool('github_open_pr', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.slack_post = {
   id: 'slack_post',
   name: 'Slack post',
   desc: 'Post to Slack. One-line JSON: {"text","channel?"}. Connect Slack first.',
-  run: (q) => invokeCrewTool('slack_post', q),
+  run: (q, _args, ctx) => invokeCrewTool('slack_post', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.gmail_send = {
   id: 'gmail_send',
   name: 'Gmail send',
   desc: 'Send mail from Gmail. One-line JSON: {"to","subject","body"}. Connect Gmail first.',
-  run: (q) => invokeCrewTool('gmail_send', q),
+  run: (q, _args, ctx) => invokeCrewTool('gmail_send', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.gmail_list = {
   id: 'gmail_list',
   name: 'Gmail list',
   desc: 'List inbox threads. Optional JSON {"query"} e.g. is:unread. Connect Gmail first.',
-  run: (q) => invokeCrewTool('gmail_list', q),
+  run: (q, _args, ctx) => invokeCrewTool('gmail_list', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.gmail_read = {
   id: 'gmail_read',
   name: 'Gmail read',
   desc: 'Read one message. JSON {"id"} from gmail_list. Connect Gmail first.',
-  run: (q) => invokeCrewTool('gmail_read', q),
+  run: (q, _args, ctx) => invokeCrewTool('gmail_read', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.web_act = {
   id: 'web_act',
   name: 'Web act',
   desc: 'Hosted Chrome: JSON {"url","goal","steps":[{"click":"css"},{"type":{"selector","text"}}]}. Confirm first.',
-  run: (q) => invokeCrewTool('web_act', q),
+  run: (q, _args, ctx) => invokeCrewTool('web_act', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.business_plan = {
@@ -240,7 +240,7 @@ TOOL_REGISTRY.gdrive_list = {
   id: 'gdrive_list',
   name: 'Drive list',
   desc: 'List Google Drive files. Optional JSON: {"query"}. Connect Drive first.',
-  run: (q) => invokeCrewTool('gdrive_list', q),
+  run: (q, _args, ctx) => invokeCrewTool('gdrive_list', q, undefined, ctx),
 }
 
 TOOL_REGISTRY.memory_search = {

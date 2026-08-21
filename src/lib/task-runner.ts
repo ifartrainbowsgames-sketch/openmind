@@ -755,6 +755,9 @@ export async function runTaskGraph(
           withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace),
         promptFor: (task) => buildWorkerPrompt(currentProject, task),
         configs: options.configs,
+        // Carried on the context rather than read from module state by the
+        // tool layer, so what a run may spend is a property of the run.
+        permissions: { platformKeys: options.platformKeys === true },
       })
 
   // The prompt needs the ledger as it stands when the task runs, not as it was

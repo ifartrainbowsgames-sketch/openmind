@@ -7,6 +7,7 @@ import { nangoLinked, customerConnectError } from './nango'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
 import { mockWebAct, parseWebActInput } from './web-act'
 import { blockedMessage, isStrict } from './execution-mode'
+import type { ExecutionContext } from './workforce/execution-context'
 
 export type CrewToolKind =
   | 'web_search'
@@ -91,8 +92,14 @@ let activeWorkspace: WorkspaceSpace | undefined
 let activeGuard: ((kind: CrewToolKind, summary: string) => Promise<boolean>) | undefined
 
 /**
- * The sandbox every workspace tool in this run shares. Set once per project so
- * a clone survives into the install, and the install into the test run.
+ * The sandbox every workspace tool shares on the context-free surfaces.
+ *
+ * This used to be how the task graph worked too, and that was the weak point:
+ * the runtime had to remember to bind it before the agent ran, and nothing
+ * failed when it didn't — the tools just quietly resolved a different machine.
+ * Task execution now passes an ExecutionContext instead, and a context always
+ * wins over this value. What remains here serves the chat crew and deep
+ * research, which have no session to carry.
  */
 let activeSandboxId: string | undefined
 
@@ -714,15 +721,40 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
   }
 }
 
+/**
+ * The timeout, plus the run's own cancellation when it has one.
+ *
+ * Without the second half, cancelling a run leaves whatever npm install it
+ * started running to completion against a sandbox nobody is waiting on.
+ * `AbortSignal.any` is guarded because the tool layer also runs in older
+ * embedded webviews.
+ */
+function callSignal(context?: ExecutionContext): AbortSignal {
+  const timeout = AbortSignal.timeout(WORKSPACE_TIMEOUT_MS)
+  if (!context?.abortSignal || typeof AbortSignal.any !== 'function') return timeout
+  return AbortSignal.any([timeout, context.abortSignal])
+}
+
 /** Whether a real backend is reachable for this tool right now. */
 export function isCrewToolLive(kind: CrewToolKind): boolean {
   if (isGithubCrewTool(kind) || isNangoAppTool(kind)) return !!supabaseFnUrl('nango-act')
   return !!supabaseFnUrl('agent-tools')
 }
 
-export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = getActiveCrewToolKeys()): Promise<string> {
+export async function invokeCrewTool(
+  kind: CrewToolKind,
+  input: string,
+  keys = getActiveCrewToolKeys(),
+  /**
+   * Where this call executes. When present it is authoritative for the machine,
+   * the permissions and the cancellation signal — the module state below is
+   * only consulted for callers that have no session.
+   */
+  context?: ExecutionContext,
+): Promise<string> {
   if (needsCrewToolConfirm(kind, input)) {
-    const allowed = await (activeGuard?.(kind, crewToolConfirmSummary(kind, input)) ?? Promise.resolve(true))
+    const confirm = context?.permissions.confirm ?? activeGuard
+    const allowed = await (confirm?.(kind, crewToolConfirmSummary(kind, input)) ?? Promise.resolve(true))
     if (!allowed) return `[BLOCKED · ${kind}] You declined this action.`
   }
 
@@ -751,17 +783,24 @@ export async function invokeCrewTool(kind: CrewToolKind, input: string, keys = g
       const res = await fetch(url, {
         method: 'POST',
         headers,
-        // sandboxId keeps successive workspace calls on the same machine.
+        // sandboxId keeps successive workspace calls on the same machine. The
+        // context owns it when there is one; the module value is the fallback
+        // for sessionless callers.
         body: JSON.stringify({
           tool: kind, input, keys,
-          sandboxId: activeSandboxId,
-          platformKeys: platformKeysAllowed,
+          sandboxId: context?.workspace.sandboxId ?? activeSandboxId,
+          platformKeys: context?.permissions.platformKeys ?? platformKeysAllowed,
         }),
-        signal: AbortSignal.timeout(WORKSPACE_TIMEOUT_MS),
+        signal: callSignal(context),
       })
       const data = (await res.json()) as Partial<CrewToolResponse> & { error?: string; sandboxId?: string }
-      // Adopt the sandbox the function used — it may have created or replaced one.
-      if (typeof data.sandboxId === 'string' && data.sandboxId) activeSandboxId = data.sandboxId
+      // Adopt the sandbox the function used — it may have created or replaced
+      // one. Both are updated so a run that mixes context-carrying tools with
+      // sessionless ones cannot end up straddling two machines.
+      if (typeof data.sandboxId === 'string' && data.sandboxId) {
+        activeSandboxId = data.sandboxId
+        context?.adoptSandbox(data.sandboxId)
+      }
       if (res.ok && typeof data.output === 'string') return data.output
       if (typeof data.output === 'string') return data.output
     } catch (err) {

@@ -4,6 +4,7 @@ import { resolveConnectionTools, type LiveConnectionConfig } from './live-connec
 import { MAX_STEPS } from './plan'
 import { MAX_REPLANS, evaluateObservations, replanPrompt } from './verdict'
 import { normalizeToolResult } from './types'
+import { emit, type ExecutionContext } from '../workforce/execution-context'
 import type { AgentBrain, Employee, PlanStep, RunResult, ToolCall, ToolSpec, TraceLine } from './types'
 
 const AgentState = Annotation.Root({
@@ -22,6 +23,11 @@ export function buildEmployeeGraph(
   brain: AgentBrain,
   employee: Employee,
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>,
+  /**
+   * Where this employee's tools execute. Undefined on the chat surfaces, which
+   * have no session and fall back to the module-level workspace binding.
+   */
+  context?: ExecutionContext,
 ) {
   const toolMap: Record<string, ToolSpec> = {}
   for (const id of employee.tools) if (ALL_TOOLS[id]) toolMap[id] = ALL_TOOLS[id]
@@ -44,9 +50,24 @@ export function buildEmployeeGraph(
   const actNode = async (state: AgentGraphState): Promise<Partial<AgentGraphState>> => {
     const spec = state.plan[state.step]
     const tool = toolMap[spec.tool] ?? ALL_TOOLS[spec.tool]
-    const raw = tool ? await tool.run(spec.input, spec.args) : `error: unknown tool "${spec.tool}"`
+
+    // Tool events are emitted here, as the call happens, rather than replayed
+    // from the finished result. A workspace tool can run for a minute; an event
+    // stream that only reports it afterwards cannot show a task is moving.
+    emit(context, 'tool_started', spec.tool, { tool: spec.tool })
+
+    const raw = tool
+      ? await tool.run(spec.input, spec.args, context)
+      : `error: unknown tool "${spec.tool}"`
     const result = normalizeToolResult(raw)
     const output = result.content
+
+    emit(
+      context,
+      result.error ? 'blocked' : 'tool_completed',
+      result.error?.message ?? output.slice(0, 200),
+      { tool: spec.tool },
+    )
     return {
       step: state.step + 1,
       observations: [{
@@ -153,8 +174,9 @@ export async function runEmployee(
   input: string,
   onTrace?: (line: TraceLine) => void,
   configs?: LiveConnectionConfig[] | Record<string, LiveConnectionConfig>,
+  context?: ExecutionContext,
 ): Promise<RunResult> {
-  const app = buildEmployeeGraph(brain, employee, configs)
+  const app = buildEmployeeGraph(brain, employee, configs, context)
   const stream = await app.stream({ input }, { streamMode: 'updates' })
   const trace: TraceLine[] = []
   const toolCalls: ToolCall[] = []

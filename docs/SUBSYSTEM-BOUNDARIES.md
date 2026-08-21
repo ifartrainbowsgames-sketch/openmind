@@ -206,7 +206,8 @@ must not end up buried inside a browser agent.
 
 ## Recorded debt: ExecutionContext
 
-**Status: transitional. Not solved.**
+**Status: landed.** Kept here because the reasoning is the point, and because
+the fallback it left behind is real.
 
 Today the runtime binds a module-global before the agent's tools run:
 
@@ -218,37 +219,54 @@ runEmployee()
 tools read module state
 ```
 
-`workspace-identity.test.ts` asserts this holds. But it holds because the
-runtime *remembers to bind*, not because divergence is impossible. The target
-makes it structural:
+`workspace-identity.test.ts` asserted this held. But it held because the runtime
+*remembered to bind*, not because divergence was impossible.
+
+Now the machine is an argument:
 
 ```ts
 interface ExecutionContext {
   session: WorkerSession
-  runtime: Runtime
-  workspace: Workspace
+  runtime: Runtime          // lazily built FROM this context
+  workspace: Workspace      // getter; adoptSandbox() is the one mutation
+  capabilities: CapabilitySet
   permissions: PermissionContext
+  eventSink: EventSink
+  abortSignal?: AbortSignal
 }
 
-createTools(context)   // instead of tools deciding where to execute
+tool.run(input, args, context)   // instead of tools deciding where to execute
 ```
 
-Naming it `ExecutionContext` rather than threading `runtime` and `workspace`
-separately leaves room for `resources`, `secrets`, `eventSink` and
-`abortSignal` without turning every tool constructor into argument soup.
+Every field earns its place, which was the risk with a struct this shape:
 
-Until this lands, `tool workspace ≠ session workspace` is prevented by a test
-rather than by the type system.
+| Field | What it changed |
+|---|---|
+| `runtime` | `sandboxRuntime(ctx)` — resolves the Q6 residual debt. The typed edge and the agent's tools now reach one machine by construction. |
+| `workspace` | The tools' only source for the sandbox. A test poisons the old global with `sbx-WRONG` and the run is unaffected. |
+| `permissions` | `platformKeys` and the confirm guard are properties of a run, not module state. Default is `false` — a billing switch fails closed. |
+| `eventSink` | Tool events are emitted by the actor **as calls happen**. The runtime's replay-from-result loop is gone; the events were previously all emitted after the task finished. |
+| `abortSignal` | `cancel()` now aborts in-flight tool calls instead of only setting a flag for the next task. |
+
+**What it does not do.** `setActiveSandbox` still exists for the sessionless
+surfaces — the chat crew, `openmind-os`, deep research — which have no session
+to carry a context. Four modules may write it, enforced by
+`runtime-boundary.test.ts`. That list can shrink; it must not grow silently.
+
+Live proof: `scripts/verify-session-workspace.ts`, all checks PASS against a
+real E2B machine, including `TASK B SEES TASK A'S FILE`.
 
 ---
 
 ## What this changes about the order
 
-1. **ExecutionContext** — turns the identity invariant from a test into a type.
-2. **Capability vocabulary unification** — required before learned routing;
+1. ~~**ExecutionContext**~~ — landed. The identity invariant is an argument now.
+2. **Memory as a kernel service** — first on the architectural risk list.
+   Capability debt blocks a *feature* (learned routing); memory debt breaks
+   *correctness* as soon as a second runtime arrives. That is the harder
+   failure, so it goes first even though it is the larger change.
+3. **Capability vocabulary unification** — required before learned routing;
    currently two disjoint sets.
-3. **Memory as a kernel service** — required before external runtimes, or
-   continuity breaks on the first worker switch.
 4. **Browser split** — mechanical; the halves already exist.
 
 Evolution, ACP, terminal and the workbench all sit above these. Attaching them
