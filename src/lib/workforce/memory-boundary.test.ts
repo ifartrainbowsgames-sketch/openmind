@@ -4,6 +4,7 @@ import {
   _resetRuntimes, emptyTaskContext, registerRuntime,
   type AgentRuntime, type AgentSession, type TaskContext,
 } from './agent-runtime'
+import { ALL_CAPABILITIES, runtimeCapabilities } from './capabilities'
 import { createMemoryService, extractOutcome, initialBook } from './memory-service'
 import { recall } from './memory-layers'
 import { event, type OpenMindEvent } from './events'
@@ -45,8 +46,11 @@ function foreignRuntime(): {
   }
   const runtime: AgentRuntime = {
     id: 'foreign',
-    capabilities: async () => ({
-      resumable: false, writesFiles: false, runsCommands: false, checkpointable: false,
+    // Declared in the shared vocabulary, like any runtime. Without web.search
+    // the orchestrator would refuse the research tasks outright — which is the
+    // dispatch-time capability check doing its job.
+    capabilities: async () => runtimeCapabilities(ALL_CAPABILITIES, {
+      resumable: false, checkpointable: false, inspectable: false, persistentWorkspace: false,
     }),
     createSession: async (input): Promise<AgentSession> => ({
       id: `foreign:${input.projectId}:${input.worker}`,

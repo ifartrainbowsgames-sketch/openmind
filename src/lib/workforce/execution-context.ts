@@ -22,7 +22,7 @@
  * "no machine yet" into "this machine".
  */
 
-import type { CapabilitySet } from './agent-runtime'
+import type { RuntimeCapabilities } from './capabilities'
 import { event, type OpenMindEvent, type OpenMindEventKind } from './events'
 import type { Runtime, Workspace } from './runtime'
 import type { WorkerSession } from './sessions'
@@ -64,7 +64,7 @@ export interface ExecutionContext {
   readonly runtime: Runtime
   /** The machine and directory this session owns. */
   readonly workspace: Workspace
-  readonly capabilities: CapabilitySet
+  readonly capabilities: RuntimeCapabilities
   readonly permissions: PermissionContext
   readonly eventSink: EventSink
   /**
@@ -97,7 +97,7 @@ export interface ExecutionContextInput {
    */
   runtime: (ctx: ExecutionContext) => Runtime
   workspace: Workspace
-  capabilities: CapabilitySet
+  capabilities: RuntimeCapabilities
   permissions: PermissionContext
   eventSink: EventSink
   memory?: MemoryReader

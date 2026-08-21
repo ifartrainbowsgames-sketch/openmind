@@ -185,17 +185,21 @@ export function recordSpawn(
  * capability, not a worker, so the requester never picks its own helper.
  */
 export const CAPABILITY_WORKER: Readonly<Record<WorkerCapability, WorkerKind>> = {
-  web_search: 'research',
-  browser: 'browser',
-  coding: 'code',
-  filesystem: 'code',
-  terminal: 'code',
-  git: 'code',
-  data_analysis: 'analyst',
-  writing: 'writer',
-  testing: 'tester',
-  mcp: 'research',
-  document_creation: 'writer',
+  'web.search': 'research',
+  'browser.navigate': 'browser',
+  'browser.extract': 'browser',
+  'browser.act': 'browser',
+  'filesystem.read': 'code',
+  'filesystem.write': 'code',
+  'terminal.exec': 'code',
+  'git.read': 'code',
+  'git.write': 'code',
+  'code.write': 'code',
+  'testing.run': 'tester',
+  'data.analyze': 'analyst',
+  'writing.compose': 'writer',
+  'document.create': 'writer',
+  'mcp.call': 'research',
 }
 
 /**
@@ -267,7 +271,7 @@ emitting a fenced block. You cannot talk to other workers; you can only ask for
 a task to be created, and the orchestrator decides.
 
 \`\`\`delegate
-{"capability":"data_analysis","goal":"what the helper must achieve","inputArtifacts":["research/pricing.json"],"expectedOutputs":[{"path":"analysis/clusters.json","kind":"json"}]}
+{"capability":"data.analyze","goal":"what the helper must achieve","inputArtifacts":["research/pricing.json"],"expectedOutputs":[{"path":"analysis/clusters.json","kind":"json"}]}
 \`\`\`
 
 A request with no expectedOutputs is refused. Ask only when the work genuinely

@@ -10,7 +10,7 @@ const artifactPaths = ['research/competitors.json']
 
 const request = (over: Partial<SpawnRequest> = {}): SpawnRequest => ({
   parentTaskId: 't1',
-  capability: 'data_analysis',
+  capability: 'data.analyze',
   goal: 'Cluster the pricing tiers',
   inputArtifacts: [],
   expectedOutputs: [{ path: 'analysis/pricing.json', kind: 'json' }],

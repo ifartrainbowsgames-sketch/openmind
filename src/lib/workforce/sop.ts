@@ -48,7 +48,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['research'],
     whenToUse: 'A question needs evidence from multiple independent sources.',
     inputs: ['the research question', 'any prior findings in the project ledger'],
-    capabilities: ['web_search', 'browser'],
+    capabilities: ['web.search', 'browser.navigate', 'browser.extract'],
     process: [
       { text: 'Decompose the question into the specific claims that would answer it.' },
       {
@@ -79,7 +79,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['code'],
     whenToUse: 'Code must be written or changed in a real workspace.',
     inputs: ['requirements', 'the existing repository'],
-    capabilities: ['coding', 'filesystem', 'terminal', 'testing'],
+    capabilities: ['code.write', 'filesystem.read', 'filesystem.write', 'terminal.exec', 'testing.run'],
     process: [
       { text: 'Clone or open the workspace before writing anything.' },
       {
@@ -107,7 +107,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['tester', 'reviewer'],
     whenToUse: "Another worker's output must be checked before it counts.",
     inputs: ['the artifacts under test', 'their acceptance criteria'],
-    capabilities: ['testing', 'terminal'],
+    capabilities: ['testing.run', 'terminal.exec'],
     process: [
       { text: 'Read the acceptance criteria before looking at the work.' },
       {
@@ -130,7 +130,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['analyst'],
     whenToUse: 'Findings must be turned into a decision or a comparison.',
     inputs: ['upstream artifacts'],
-    capabilities: ['data_analysis', 'writing'],
+    capabilities: ['data.analyze', 'writing.compose'],
     process: [
       { text: 'Read every input artifact before forming a view.' },
       { text: 'State the criteria you are comparing on, before the comparison.' },
@@ -150,7 +150,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['browser'],
     whenToUse: 'Data lives behind interaction — a form, a login wall, a rendered page.',
     inputs: ['target URLs', 'what to extract'],
-    capabilities: ['browser'],
+    capabilities: ['browser.navigate', 'browser.act'],
     process: [
       { text: 'Navigate and read the accessibility tree or DOM before considering a screenshot.',
         rationale: 'Vision is slower, costlier and less exact than the DOM that is already there.' },
@@ -171,7 +171,7 @@ export const SOPS: readonly Sop[] = [
     appliesTo: ['writer'],
     whenToUse: 'A finished document is the output.',
     inputs: ['upstream artifacts', 'the audience'],
-    capabilities: ['writing', 'document_creation'],
+    capabilities: ['writing.compose', 'document.create'],
     process: [
       { text: 'Work only from artifacts already in the project. Do not add new claims.' },
       { text: 'Lead with the conclusion, then the support.' },

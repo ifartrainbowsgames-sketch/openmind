@@ -7,6 +7,7 @@ import {
 import type { OpenMindEvent } from './events'
 import type { AgentBrain } from '../agent'
 import type { TaskRecord } from '../task-ledger'
+import { ALL_CAPABILITIES, runtimeCapabilities, type WorkerCapability } from './capabilities'
 
 vi.mock('../supabase')
 
@@ -152,7 +153,7 @@ describe('runtime events describe the run', () => {
 describe('the builtin runtime does not overclaim', () => {
   it('reports that it cannot checkpoint', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
-    expect((await runtime.capabilities()).checkpointable).toBe(false)
+    expect((await runtime.capabilities()).traits.checkpointable).toBe(false)
     const cp = await runtime.checkpoint('any')
     // captured:false means "not saved". Reporting true with an empty payload
     // would let a caller build recovery on something that cannot recover.
@@ -210,4 +211,72 @@ describe('the task graph runs through the runtime', () => {
     await runTaskGraph(GOAL, brain(), { budget: BUDGET, onTrace: (l) => lines.push(l.text) })
     expect(lines.length).toBeGreaterThan(0)
   }, 30_000)
+})
+
+// ── Capability routing reaches dispatch ─────────────────────────────────────
+
+/**
+ * The half that was missing. `assignWorker` ran once, at plan time, matching a
+ * task type to a worker kind — and nothing consulted capabilities when a task
+ * was actually handed to a runtime. A runtime that could not do the work would
+ * be given it anyway, and would fail in whatever way that runtime fails: a
+ * timeout, an empty answer, a judge rejection. Never "this runtime cannot
+ * write files".
+ */
+function limitedRuntime(skills: readonly WorkerCapability[]): AgentRuntime & { ran: string[] } {
+  const ran: string[] = []
+  return {
+    id: 'limited',
+    ran,
+    capabilities: async () => runtimeCapabilities(skills, {
+      resumable: false, checkpointable: false, inspectable: false, persistentWorkspace: false,
+    }),
+    createSession: async (input) => ({
+      id: `limited:${input.projectId}:${input.worker}`,
+      projectId: input.projectId,
+      worker: input.worker,
+      provider: 'limited',
+      status: 'running' as const,
+      taskIds: [],
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+    }),
+    resumeSession: async () => null,
+    async *runTask(_session, t) {
+      ran.push(t.id)
+      yield { kind: 'task_finished' as const, text: 'ok', at: Date.now(), outcome: 'completed' as const }
+    },
+    checkpoint: async (sessionId) => ({ sessionId, at: Date.now(), state: null, captured: false }),
+    inspectWorkspace: async () => ({ changedFiles: [], inspected: false }),
+    cancel: async () => {},
+    close: async () => {},
+  }
+}
+
+describe('a runtime is not given work it cannot do', () => {
+  it('blocks the task and names the missing capability', async () => {
+    _resetRuntimes()
+    // Can browse, cannot search. Every research task requires web.search.
+    const runtime = limitedRuntime(['browser.navigate'])
+    registerRuntime(runtime, true)
+
+    const run = await runTaskGraph(GOAL, brain(), { runtimeId: 'limited', budget: BUDGET })
+
+    expect(runtime.ran).toEqual([])
+    const blocked = run.project.blockers.join(' ')
+    expect(blocked).toContain('cannot')
+    expect(blocked).toContain('web.search')
+    _resetRuntimes()
+  })
+
+  it('runs the task when the runtime covers what it requires', async () => {
+    _resetRuntimes()
+    const runtime = limitedRuntime(ALL_CAPABILITIES)
+    registerRuntime(runtime, true)
+
+    await runTaskGraph(GOAL, brain(), { runtimeId: 'limited', budget: BUDGET })
+
+    expect(runtime.ran.length).toBeGreaterThan(0)
+    _resetRuntimes()
+  })
 })

@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
-  TASK_REQUIREMENTS, WORKER_CAPABILITIES, assignWorker, builtInHolders,
-  capabilitiesFromTools, hasAll, missingFor, rankForTask,
-  type CapabilityHolder,
+  ALL_CAPABILITIES, LEGACY_CAPABILITY, TASK_REQUIREMENTS, WORKER_CAPABILITIES,
+  assignWorker, builtInHolders, capabilitiesFromTools, eligibleRuntimes,
+  expandCapability, hasAll, isWorkerCapability, missingFor, rankForTask,
+  runtimeCan, runtimeCapabilities, runtimeShortfall, toCapability,
+  type CapabilityHolder, type RuntimeTraits,
 } from './capabilities'
 
 const holder = (id: string, capabilities: CapabilityHolder['capabilities']): CapabilityHolder =>
   ({ id, capabilities })
+
+const TRAITS: RuntimeTraits = {
+  resumable: true, checkpointable: false, inspectable: true, persistentWorkspace: true,
+}
 
 describe('built-in capability declarations', () => {
   it('gives every worker kind a capability list', () => {
@@ -26,18 +32,56 @@ describe('built-in capability declarations', () => {
 
   it('does not claim a capability the worker has no tools for', () => {
     // The code worker owns the sandbox, so it alone claims terminal/git.
-    expect(WORKER_CAPABILITIES.research).not.toContain('terminal')
-    expect(WORKER_CAPABILITIES.writer).not.toContain('coding')
-    expect(WORKER_CAPABILITIES.code).toContain('git')
+    expect(WORKER_CAPABILITIES.research).not.toContain('terminal.exec')
+    expect(WORKER_CAPABILITIES.writer).not.toContain('code.write')
+    expect(WORKER_CAPABILITIES.code).toContain('git.write')
+  })
+
+  it('separates read from write, which the old vocabulary could not', () => {
+    // The reason for the migration: "filesystem" cannot describe a read-only
+    // runtime, and a read-only runtime is a real thing.
+    expect(ALL_CAPABILITIES).toContain('filesystem.read')
+    expect(ALL_CAPABILITIES).toContain('filesystem.write')
+    expect(WORKER_CAPABILITIES.tester).toContain('filesystem.read')
+    expect(WORKER_CAPABILITIES.tester).not.toContain('filesystem.write')
+  })
+})
+
+describe('legacy capability names', () => {
+  it('still resolve, because they are in prompts and on disk', () => {
+    // A worker asking for "filesystem" must not look like a worker asking for
+    // something that does not exist.
+    expect(toCapability('filesystem')).toBe('filesystem.read')
+    expect(toCapability('data_analysis')).toBe('data.analyze')
+    expect(toCapability('web_search')).toBe('web.search')
+  })
+
+  it('expand to everything the coarse name implied', () => {
+    expect(expandCapability('git')).toEqual(['git.read', 'git.write'])
+    expect(expandCapability('browser')).toHaveLength(3)
+  })
+
+  it('reject genuine nonsense', () => {
+    expect(toCapability('teleportation')).toBeUndefined()
+    expect(isWorkerCapability('filesystem')).toBe(false)
+    expect(isWorkerCapability('filesystem.write')).toBe(true)
+  })
+
+  it('every legacy name maps to capabilities that exist', () => {
+    for (const [name, caps] of Object.entries(LEGACY_CAPABILITY)) {
+      expect(caps.length, name).toBeGreaterThan(0)
+      for (const c of caps) expect(ALL_CAPABILITIES, `${name} → ${c}`).toContain(c)
+    }
   })
 })
 
 describe('hasAll / missingFor', () => {
   it('reports exactly what is absent', () => {
-    const h = holder('a', ['writing'])
-    expect(hasAll(h, ['writing'])).toBe(true)
-    expect(hasAll(h, ['writing', 'browser'])).toBe(false)
-    expect(missingFor(h, ['writing', 'browser', 'coding'])).toEqual(['browser', 'coding'])
+    const h = holder('a', ['writing.compose'])
+    expect(hasAll(h, ['writing.compose'])).toBe(true)
+    expect(hasAll(h, ['writing.compose', 'browser.navigate'])).toBe(false)
+    expect(missingFor(h, ['writing.compose', 'browser.navigate', 'code.write']))
+      .toEqual(['browser.navigate', 'code.write'])
   })
 
   it('treats an empty requirement as satisfied', () => {
@@ -48,16 +92,16 @@ describe('hasAll / missingFor', () => {
 describe('rankForTask', () => {
   it('excludes anyone missing a required capability', () => {
     const ranked = rankForTask('research', [
-      holder('no-search', ['writing', 'browser']),
-      holder('searcher', ['web_search']),
+      holder('no-search', ['writing.compose', 'browser.navigate']),
+      holder('searcher', ['web.search']),
     ])
     expect(ranked.map((r) => r.holder.id)).toEqual(['searcher'])
   })
 
   it('prefers the worker covering more preferred capabilities', () => {
     const ranked = rankForTask('research', [
-      holder('bare', ['web_search']),
-      holder('rich', ['web_search', 'browser', 'writing', 'mcp']),
+      holder('bare', ['web.search']),
+      holder('rich', ['web.search', 'browser.navigate', 'writing.compose', 'mcp.call']),
     ])
     expect(ranked[0].holder.id).toBe('rich')
   })
@@ -65,30 +109,36 @@ describe('rankForTask', () => {
   it('prefers a specialist over a generalist when coverage ties', () => {
     // Both cover the same preferred set; the generalist carries surplus.
     const ranked = rankForTask('analyst', [
-      holder('generalist', ['data_analysis', 'writing', 'coding', 'browser', 'testing']),
-      holder('specialist', ['data_analysis', 'writing']),
+      holder('generalist', ['data.analyze', 'writing.compose', 'code.write', 'browser.navigate', 'testing.run']),
+      holder('specialist', ['data.analyze', 'writing.compose']),
     ])
     expect(ranked[0].holder.id).toBe('specialist')
   })
 
   it('is deterministic when scores tie exactly', () => {
-    const ranked = rankForTask('writer', [holder('zoe', ['writing']), holder('amy', ['writing'])])
+    const ranked = rankForTask('writer', [
+      holder('zoe', ['writing.compose']),
+      holder('amy', ['writing.compose']),
+    ])
     expect(ranked.map((r) => r.holder.id)).toEqual(['amy', 'zoe'])
   })
 })
 
 describe('assignWorker', () => {
   it('names the shortfall when the pool cannot serve the task', () => {
-    const result = assignWorker('browser', [holder('writer', ['writing'])])
+    const result = assignWorker('browser', [holder('writer', ['writing.compose'])])
     expect(result.holder).toBeNull()
-    if (result.holder === null) expect(result.missing).toEqual(['browser'])
+    if (result.holder === null) expect(result.missing).toEqual(['browser.navigate'])
   })
 
-  it('reports nothing missing when the pool has the capability but no single worker qualifies', () => {
-    // 'code' requires only 'coding', so this is a genuine pool shortfall.
-    const result = assignWorker('code', [holder('a', ['filesystem']), holder('b', ['git'])])
+  it('reports the pool shortfall, not the per-worker one', () => {
+    const result = assignWorker('code', [
+      holder('a', ['filesystem.write']),
+      holder('b', ['git.write']),
+    ])
     expect(result.holder).toBeNull()
-    if (result.holder === null) expect(result.missing).toEqual(['coding'])
+    // Between them the pool has filesystem.write; nobody has code.write.
+    if (result.holder === null) expect(result.missing).toEqual(['code.write'])
   })
 
   it('assigns a task type with no required capabilities to anyone', () => {
@@ -99,11 +149,12 @@ describe('assignWorker', () => {
 
 describe('capabilitiesFromTools', () => {
   it('maps known tools to capabilities', () => {
-    expect(capabilitiesFromTools(['web_search', 'browse_url'])).toEqual(['web_search', 'browser'])
+    expect(capabilitiesFromTools(['web_search', 'browse_url']))
+      .toEqual(['web.search', 'browser.navigate', 'browser.extract'])
   })
 
   it('grants mcp for any mcp-prefixed tool', () => {
-    expect(capabilitiesFromTools(['mcp_github_create_issue'])).toEqual(['mcp'])
+    expect(capabilitiesFromTools(['mcp_github_create_issue'])).toEqual(['mcp.call'])
   })
 
   it('grants nothing for an unrecognised tool', () => {
@@ -113,12 +164,60 @@ describe('capabilitiesFromTools', () => {
   })
 
   it('deduplicates when several tools imply one capability', () => {
-    expect(capabilitiesFromTools(['workspace_ls', 'workspace_read_file'])).toEqual(['filesystem'])
+    expect(capabilitiesFromTools(['workspace_ls', 'workspace_read_file'])).toEqual(['filesystem.read'])
   })
 
   it('makes a sandbox-equipped employee eligible for coding work', () => {
-    const caps = capabilitiesFromTools(['run_code', 'workspace_run', 'git_clone', 'run_checks'])
+    const caps = capabilitiesFromTools([
+      'run_code', 'workspace_run', 'workspace_write_file', 'git_clone', 'run_checks',
+    ])
     const result = assignWorker('code', [{ id: 'custom', capabilities: caps }])
     expect(result.holder?.id).toBe('custom')
+  })
+})
+
+/**
+ * The half that did not exist. Capabilities described workers; runtimes
+ * described themselves with four unrelated booleans, so the scheduler could
+ * rank a worker and then hand it to a runtime that could not run it.
+ */
+describe('runtimes speak the same vocabulary', () => {
+  it('names what a runtime cannot do for a task type', () => {
+    const readOnly = runtimeCapabilities(['filesystem.read', 'terminal.exec'], TRAITS)
+    expect(runtimeShortfall('code', readOnly)).toEqual(['code.write', 'filesystem.write'])
+    expect(runtimeShortfall('reviewer', readOnly)).toEqual([])
+  })
+
+  it('says yes only when every required capability is present', () => {
+    const web = runtimeCapabilities(['web.search'], TRAITS)
+    expect(runtimeCan(web, ['web.search'])).toBe(true)
+    expect(runtimeCan(web, ['web.search', 'filesystem.write'])).toBe(false)
+  })
+
+  it('ranks eligible runtimes by preferred coverage', () => {
+    const bare = { id: 'bare', capabilities: runtimeCapabilities(['web.search'], TRAITS) }
+    const rich = {
+      id: 'rich',
+      capabilities: runtimeCapabilities(
+        ['web.search', 'browser.navigate', 'browser.extract', 'writing.compose'],
+        TRAITS,
+      ),
+    }
+    expect(eligibleRuntimes('research', [bare, rich]).map((r) => r.id)).toEqual(['rich', 'bare'])
+  })
+
+  it('excludes a runtime that cannot do the required work at all', () => {
+    const web = { id: 'web', capabilities: runtimeCapabilities(['web.search'], TRAITS) }
+    expect(eligibleRuntimes('code', [web])).toEqual([])
+  })
+
+  it('keeps mechanics out of routing', () => {
+    // A task needs filesystem.write. It never needs "checkpointable" — mixing
+    // the two is what made the first capability model useless for routing.
+    const caps = runtimeCapabilities(['code.write', 'filesystem.write'], {
+      resumable: false, checkpointable: false, inspectable: false, persistentWorkspace: false,
+    })
+    expect(runtimeShortfall('code', caps)).toEqual([])
+    expect(caps.traits.checkpointable).toBe(false)
   })
 })

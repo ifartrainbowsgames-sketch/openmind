@@ -14,10 +14,13 @@
 import { runEmployee, type AgentBrain, type Employee, type LiveConnectionConfig, type RunResult } from '../agent'
 import type { TaskRecord } from '../task-ledger'
 import {
-  type AgentRuntime, type AgentSession, type CapabilitySet,
+  type AgentRuntime, type AgentSession,
   type CreateSessionInput, type SessionCheckpoint, type TaskContext,
   type WorkspaceState,
 } from './agent-runtime'
+import {
+  ALL_CAPABILITIES, runtimeCapabilities, type RuntimeCapabilities,
+} from './capabilities'
 import { event, type OpenMindEvent, type RunOutcome } from './events'
 import { setActiveSandbox } from '../crew-tools'
 import {
@@ -32,16 +35,24 @@ import {
   type SessionStore,
 } from './sessions'
 
-const CAPABILITIES: CapabilitySet = {
-  // Sessions resume within a project, but there is no provider-side session to
-  // restore and no checkpoint format — state is whatever the sandbox and the
-  // ledger still hold. Claiming otherwise would make the orchestrator trust a
-  // restore that cannot happen.
-  resumable: true,
-  writesFiles: true,
-  runsCommands: true,
-  checkpointable: false,
-}
+const CAPABILITIES: RuntimeCapabilities = runtimeCapabilities(
+  // Every skill, because this runtime executes arbitrary employees with
+  // arbitrary tools. A capability is not a credential: a missing Slack
+  // connection is reported as a blocked tool call, not as a runtime that
+  // cannot post to Slack. Conflating the two would make a key outage look like
+  // an architectural limit.
+  ALL_CAPABILITIES,
+  {
+    // Sessions resume within a project, but there is no provider-side session
+    // to restore and no checkpoint format — state is whatever the sandbox and
+    // the ledger still hold. Claiming otherwise would make the orchestrator
+    // trust a restore that cannot happen.
+    resumable: true,
+    checkpointable: false,
+    inspectable: true,
+    persistentWorkspace: true,
+  },
+)
 
 /** Workers that get their own branch, so two coders never share a directory. */
 const ISOLATED_WORKERS: readonly string[] = ['code', 'tester']

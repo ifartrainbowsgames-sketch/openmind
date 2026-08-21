@@ -21,6 +21,7 @@
 
 import type { TaskRecord, WorkerKind } from '../task-ledger'
 import type { OpenMindEvent } from './events'
+import type { RuntimeCapabilities } from './capabilities'
 import type { MemoryContext } from './memory-service'
 import type { Workspace } from './runtime'
 import type { WorkerSession } from './sessions'
@@ -28,16 +29,15 @@ import type { WorkerSession } from './sessions'
 /** A runtime's session. Alias rather than a new type — sessions.ts already models this. */
 export type AgentSession = WorkerSession
 
-export interface CapabilitySet {
-  /** Can resume a prior session by id. */
-  resumable: boolean
-  /** Edits files in a workspace itself. */
-  writesFiles: boolean
-  /** Runs commands in a workspace. */
-  runsCommands: boolean
-  /** Can produce a restorable checkpoint. */
-  checkpointable: boolean
-}
+/**
+ * What a runtime can do, in the same vocabulary tasks and workers use.
+ *
+ * This was four booleans — resumable, writesFiles, runsCommands,
+ * checkpointable — which described the plumbing and could not answer the only
+ * question routing asks: can this runtime do the work this task needs? See
+ * capabilities.ts for why skills and traits are separated.
+ */
+export type { RuntimeCapabilities } from './capabilities'
 
 export interface SessionCheckpoint {
   sessionId: string
@@ -86,7 +86,7 @@ export function emptyTaskContext(): TaskContext {
 export interface AgentRuntime {
   readonly id: string
 
-  capabilities(): Promise<CapabilitySet>
+  capabilities(): Promise<RuntimeCapabilities>
 
   createSession(input: CreateSessionInput): Promise<AgentSession>
 

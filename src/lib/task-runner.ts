@@ -23,7 +23,9 @@ import {
   CAPABILITY_WORKER, DELEGATION_PROMPT, emptyDelegationState, evaluateSpawn,
   parseSpawnRequests, recordSpawn,
 } from './workforce/delegation'
-import { isWorkerCapability } from './workforce/capabilities'
+import {
+  runtimeShortfall, toCapability, type RuntimeCapabilities,
+} from './workforce/capabilities'
 import { runtimeFor, type AgentRuntime, type TaskContext } from './workforce/agent-runtime'
 import { createBuiltinRuntime } from './workforce/builtin-runtime'
 import type { OpenMindEvent } from './workforce/events'
@@ -314,7 +316,7 @@ function canDelegate(project: ProjectState, task: TaskRecord): boolean {
   return evaluateSpawn(
     {
       parentTaskId: task.id,
-      capability: 'data_analysis',
+      capability: 'data.analyze',
       goal: 'probe',
       inputArtifacts: [],
       expectedOutputs: [{ path: `__probe__/${task.id}.json`, kind: 'json' }],
@@ -422,7 +424,11 @@ export function applyDelegation(
   let created = 0
 
   for (const request of requests) {
-    if (!isWorkerCapability(request.capability)) {
+    // Legacy coarse names resolve rather than being refused: they are in the
+    // prompt a model was shown and in ledgers already on disk, and "unknown
+    // capability" is the wrong thing to tell a worker that asked correctly.
+    const capability = toCapability(request.capability)
+    if (!capability) {
       next = logEvent(next, {
         action: 'request_subtask', taskId: task.id, worker: task.worker,
         detail: `refused — unknown capability "${request.capability}"`,
@@ -444,7 +450,7 @@ export function applyDelegation(
       continue
     }
 
-    const worker = CAPABILITY_WORKER[request.capability]
+    const worker = CAPABILITY_WORKER[capability]
     const childId = `${task.id}-d${(state.children[task.id] ?? 0) + 1}`
     const child: TaskRecord = {
       id: childId,
@@ -480,11 +486,34 @@ interface MemoryPass {
   service: MemoryService
 }
 
+/**
+ * Refuse a task the chosen runtime cannot do, before spending anything on it.
+ *
+ * This is the half of capability routing that did not exist. `assignWorker`
+ * ran once, at plan time, matching a task type to a worker kind; nothing
+ * consulted capabilities at dispatch. So a task could be handed to a runtime
+ * with no chance of completing it, and the failure would arrive as whatever
+ * that runtime does when asked for something it cannot do — a timeout, an
+ * empty answer, a judge rejection — rather than as "this runtime cannot write
+ * files".
+ */
+function capabilityBlocker(
+  task: TaskRecord,
+  capabilities: RuntimeCapabilities | undefined,
+  runtimeId: string,
+): string | undefined {
+  if (!capabilities) return undefined
+  const missing = runtimeShortfall(task.worker, capabilities)
+  if (!missing.length) return undefined
+  return `runtime "${runtimeId}" cannot ${missing.join(', ')}`
+}
+
 async function executeBatch(
   project: ProjectState,
   options: RunTaskGraphOptions,
   runtime: AgentRuntime,
   memory: MemoryPass,
+  capabilities: RuntimeCapabilities | undefined,
 ): Promise<{ project: ProjectState; members: CrewMemberResult[]; trace: TraceLine[] }> {
   const batch = readyTasks(project)
   if (!batch.length) return { project, members: [], trace: [] }
@@ -503,6 +532,19 @@ async function executeBatch(
         taskId: task.id,
         worker: task.worker,
         detail: 'cancelled by the user',
+      })
+      continue
+    }
+
+    // Capability first: cheaper than the budget check and a harder no. A
+    // runtime that cannot do the work will not do it more cheaply later.
+    const unable = capabilityBlocker(task, capabilities, runtime.id)
+    if (unable) {
+      next = updateTask(next, task.id, { status: 'needs_user', blocker: unable })
+      next = { ...next, blockers: [...next.blockers, `${task.id}: ${unable}`] }
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker,
+        detail: blockedMessage('capability_unavailable', task.worker, unable),
       })
       continue
     }
@@ -845,13 +887,18 @@ export async function runTaskGraph(
         },
       })
 
+  // What this runtime can actually do, asked once. Tasks it cannot serve are
+  // refused before they cost anything.
+  const capabilities = await runtime.capabilities().catch(() => undefined)
+
   // The prompt needs the ledger as it stands when the task runs, not as it was
   // when the runtime was built.
   let currentProject: ProjectState = project
 
   const executeNode = async (state: TRS): Promise<Partial<TRS>> => {
     currentProject = state.project
-    const { project: p, members, trace } = await executeBatch(state.project, options, runtime, memory)
+    const { project: p, members, trace } =
+      await executeBatch(state.project, options, runtime, memory, capabilities)
     return { project: p, members, trace }
   }
 
