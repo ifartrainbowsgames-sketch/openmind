@@ -54,8 +54,7 @@ function foreignRuntime(): {
     }),
     createSession: async (input): Promise<AgentSession> => ({
       id: `foreign:${input.projectId}:${input.worker}`,
-      projectId: input.projectId,
-      worker: input.worker,
+      scope: { kind: 'project', projectId: input.projectId, worker: input.worker },
       provider: 'foreign',
       status: 'running',
       taskIds: [],

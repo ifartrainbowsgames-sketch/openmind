@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBuiltinRuntime } from './builtin-runtime'
 import { emptyTaskContext } from './agent-runtime'
 import { setActiveSandbox } from '../crew-tools'
+import { _resetRepositories } from './session-repository'
 import { ALL_TOOLS } from '../agent/connections'
 import type { AgentBrain, PlanStep } from '../agent'
 import type { ExecutionContext } from './execution-context'
@@ -79,6 +80,10 @@ afterEach(() => {
   seen = []
   adopt = undefined
   setActiveSandbox(undefined)
+  // Sessions and workspaces are now a shared process service — which is the
+  // point, and which means a test that does not reset it inherits the previous
+  // test's machine.
+  _resetRepositories()
 })
 
 describe('one session, one workspace', () => {
@@ -144,7 +149,10 @@ describe('one session, one workspace', () => {
     expect(state.workspace?.sandboxId).toBe('sbx-created')
   })
 
-  it('keeps two workers on separate sessions from sharing one machine record', async () => {
+  it('shares one machine per project, because a clone must survive between workers', async () => {
+    // Deliberately asserted rather than assumed: the tester needs the repo the
+    // coder cloned. Two machines per project would make every handoff a
+    // re-clone, which is the cost sessions exist to remove.
     adopt = 'sbx-code'
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const code = await runtime.createSession({ projectId: 'p1', worker: 'code' })
@@ -154,8 +162,22 @@ describe('one session, one workspace', () => {
     const codeAfter = await runtime.resumeSession(code.id)
     const researchAfter = await runtime.resumeSession(research.id)
     expect(codeAfter?.workspace?.sandboxId).toBe('sbx-code')
-    // The research session never ran, so it must not inherit the coder's machine.
-    expect(researchAfter?.workspace?.sandboxId).toBeUndefined()
+    expect(researchAfter?.workspace?.sandboxId).toBe('sbx-code')
+    expect(code.id).not.toBe(research.id)
+  })
+
+  it('never lets two projects share a machine', async () => {
+    // The invariant that actually protects a user: project B must not be able
+    // to read project A's files.
+    adopt = 'sbx-a'
+    const runtime = createBuiltinRuntime(deps(probeBrain()))
+    const a = await runtime.createSession({ projectId: 'p-a', worker: 'code' })
+    await drain(runtime.runTask(a, task('t1'), emptyTaskContext()))
+
+    adopt = undefined
+    const b = await runtime.createSession({ projectId: 'p-b', worker: 'code' })
+    expect(b.workspace?.sandboxId).toBeUndefined()
+    expect((await runtime.resumeSession(a.id))?.workspace?.sandboxId).toBe('sbx-a')
   })
 
   it('does not leave a machine bound after a failed run', async () => {

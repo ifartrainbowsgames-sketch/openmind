@@ -31,9 +31,16 @@ import { makeWorkspace, type Workspace } from './runtime'
 import { sandboxRuntime } from './sandbox-runtime'
 import { ensureWorktree } from './worktrees'
 import {
-  closeSession, emptySessionStore, openSession, recordActivity,
-  type SessionStore,
+  closed, isResumable, newSession, touch, type WorkerSession,
 } from './sessions'
+import {
+  repositories, scopeProjectId,
+  type Repositories, type SessionScope,
+} from './session-repository'
+import {
+  makeWorkspaceRecord, recoverWorkspace, toWorkspace, withWorkspace,
+  type WorkspaceRecovery,
+} from './workspaces'
 
 export const BUILTIN_CAPABILITIES: RuntimeCapabilities = runtimeCapabilities(
   // Every skill, because this runtime executes arbitrary employees with
@@ -78,10 +85,19 @@ export interface BuiltinRuntimeDeps {
    * writing; a runtime never does.
    */
   memory?: MemoryReader
+  /**
+   * Where sessions and workspaces live between runs.
+   *
+   * Injected rather than held, because the runtime itself is per-run: it
+   * carries the brain and the composed prompt, so a shared instance would be
+   * shared mutable state two concurrent runs corrupt. The runtime stays
+   * isolated; the store is what they have in common.
+   */
+  repositories?: Repositories
 }
 
 export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
-  let store: SessionStore = emptySessionStore()
+  const repos = deps.repositories ?? repositories()
   const cancelled = new Set<string>()
   /** One per in-flight task, so cancel() stops work already in the network. */
   const aborts = new Map<string, AbortController>()
@@ -92,7 +108,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
    * worktree, inspecting a workspace. Same session, same machine, no event
    * stream to feed and nothing to cancel.
    */
-  function contextFor(session: AgentSession, workspace: Workspace): ExecutionContext {
+  function contextFor(session: WorkerSession, workspace: Workspace): ExecutionContext {
     return createExecutionContext({
       session,
       runtime: (self) => sandboxRuntime(self),
@@ -111,14 +127,35 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
     },
 
     async createSession(input: CreateSessionInput): Promise<AgentSession> {
-      const opened = openSession(store, {
-        projectId: input.projectId,
-        worker: input.worker,
-        provider: 'builtin',
-        workspace: input.workspace ?? makeWorkspace(input.projectId),
+      const scope: SessionScope = { kind: 'project', projectId: input.projectId, worker: input.worker }
+      const existing = await repos.sessions.find(scope, 'builtin')
+      const resumed = Boolean(existing && isResumable(existing))
+      let session = resumed && existing ? touch(existing, { status: 'running' }) : newSession(scope, 'builtin')
+
+      // The machine, as a record rather than a string. `input.workspace` is the
+      // caller's hint — the project's remembered sandbox — and it seeds a
+      // record only when we do not already have one.
+      let record = session.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
+      record ??= makeWorkspaceRecord({
+        projectId: scopeProjectId(scope),
+        kind: 'shared',
+        externalId: input.workspace?.sandboxId,
+        path: input.workspace?.path,
       })
-      store = opened.store
-      let session = opened.session
+
+      // "Do we still have a machine?" is a question, asked, not assumed. A
+      // pointer to a reclaimed sandbox reads exactly like a pointer to a live
+      // one, and the difference only shows up when a task reads a file that is
+      // no longer there.
+      const recovery: WorkspaceRecovery = await recoverWorkspace({
+        record,
+        context: contextFor(session, toWorkspace(record)),
+      })
+      record = recovery.record
+      await repos.workspaces.save(record)
+      session = touch(session, { workspaceId: record.id })
+
+      let workspace = 'workspace' in recovery ? recovery.workspace : toWorkspace(record)
 
       // A coding worker gets its own worktree so parallel coders cannot edit
       // the same directory. Best-effort by design: a project with no repo (or
@@ -126,26 +163,45 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       // to start — isolation is an improvement on the default, not a
       // precondition for running at all.
       if (
-        !opened.resumed
+        !resumed
+        && recovery.kind === 'resumed'
         && ISOLATED_WORKERS.includes(input.worker)
-        && session.workspace?.sandboxId
-        && !session.workspace.worktree
+        && workspace.sandboxId
+        && !workspace.worktree
       ) {
         try {
-          const provisioning = contextFor(session, session.workspace)
-          const { workspace } = await ensureWorktree(provisioning.runtime, input.projectId, input.worker)
-          const isolated: Workspace = { ...workspace, sandboxId: session.workspace.sandboxId }
-          store = recordActivity(store, session.id, { workspace: isolated })
-          session = { ...session, workspace: isolated }
+          const provisioning = contextFor(session, workspace)
+          const isolated = await ensureWorktree(provisioning.runtime, input.projectId, input.worker)
+          workspace = { ...isolated.workspace, sandboxId: workspace.sandboxId }
+          // A NEW record, not the project's shared one folded into a worktree.
+          // Overwriting it would give the whole project the coder's branch and
+          // directory, which is the opposite of isolation.
+          record = withWorkspace(
+            makeWorkspaceRecord({
+              projectId: scopeProjectId(scope),
+              kind: 'worktree',
+              name: input.worker,
+              externalId: workspace.sandboxId,
+            }),
+            workspace,
+          )
+          record = { ...record, status: 'active', lastVerifiedAt: Date.now() }
+          await repos.workspaces.save(record)
+          session = touch(session, { workspaceId: record.id })
         } catch {
           // No repo to branch from. The shared workspace is still correct.
         }
       }
-      return session
+
+      await repos.sessions.save(session)
+      return { ...session, workspace, recovery }
     },
 
     async resumeSession(sessionId: string): Promise<AgentSession | null> {
-      return store.sessions[sessionId] ?? null
+      const session = await repos.sessions.get(sessionId)
+      if (!session) return null
+      const record = session.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
+      return { ...session, workspace: record ? toWorkspace(record) : undefined }
     },
 
     async *runTask(
@@ -154,7 +210,19 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       taskContext: TaskContext,
     ): AsyncIterable<OpenMindEvent> {
       const ctx = { sessionId: session.id, taskId: task.id, worker: task.worker }
-      store = recordActivity(store, session.id, { status: 'running', taskId: task.id })
+
+      // Read from the repository, not from the caller's copy. The `session`
+      // argument is a snapshot taken at createSession; a caller that runs two
+      // tasks against it hands back the same stale object twice, and the
+      // second write discards the first — which silently emptied the task
+      // history a session had served. The store is the truth.
+      const stored = (await repos.sessions.get(session.id)) ?? session
+      let current: WorkerSession = touch(stored, { status: 'running', taskId: task.id })
+      const record = async (patch: Parameters<typeof touch>[1]) => {
+        current = touch(current, patch)
+        await repos.sessions.save(current)
+      }
+      await repos.sessions.save(current)
 
       if (cancelled.has(session.id)) {
         yield event('task_finished', 'cancelled before start', { ...ctx, outcome: 'cancelled' })
@@ -183,7 +251,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       const context = createExecutionContext({
         session,
         runtime: (self) => sandboxRuntime(self),
-        workspace: session.workspace ?? makeWorkspace(session.projectId),
+        workspace: session.workspace ?? makeWorkspace(scopeProjectId(session.scope)),
         capabilities: BUILTIN_CAPABILITIES,
         permissions,
         eventSink: { emit: (e) => push({ ...ctx, ...e }) },
@@ -230,16 +298,22 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       // not a reason to forget which machine holds the half-finished work.
       const sandboxAfter = context.workspace.sandboxId
       const adopted = Boolean(sandboxAfter) && sandboxAfter !== session.workspace?.sandboxId
-      if (adopted) {
-        const workspace: Workspace = { ...context.workspace }
-        store = recordActivity(store, session.id, { workspace })
+      if (adopted && session.workspaceId) {
+        const held = await repos.workspaces.get(session.workspaceId)
+        if (held) {
+          await repos.workspaces.save({
+            ...withWorkspace(held, context.workspace),
+            status: 'active',
+            lastVerifiedAt: Date.now(),
+          })
+        }
       }
 
       try {
         if (failure) throw failure
         if (!result) throw new Error('employee runtime returned no result')
       } catch (error) {
-        store = recordActivity(store, session.id, { status: 'failed' })
+        await record({ status: 'failed' })
         yield event('task_finished', error instanceof Error ? error.message : String(error), {
           ...ctx, outcome: 'failed',
         })
@@ -265,7 +339,7 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         ? 'cancelled'
         : blocked ? 'needs_user' : 'completed'
 
-      store = recordActivity(store, session.id, { status: outcome === 'completed' ? 'idle' : 'blocked' })
+      await record({ status: outcome === 'completed' ? 'idle' : 'blocked' })
       yield event('task_finished', outcome === 'needs_user' ? 'capability unavailable' : 'task complete', {
         ...ctx,
         outcome,
@@ -281,9 +355,10 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
     },
 
     async inspectWorkspace(sessionId: string): Promise<WorkspaceState> {
-      const session = store.sessions[sessionId]
-      const workspace = session?.workspace
-      if (!workspace?.sandboxId) {
+      const session = await repos.sessions.get(sessionId)
+      const record = session?.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
+      const workspace = record ? toWorkspace(record) : undefined
+      if (!session || !workspace?.sandboxId) {
         // No machine yet. `inspected: false` means "unknown", never "clean" —
         // a caller must not read an empty list as a clean tree.
         return { workspace, changedFiles: [], inspected: false }
@@ -312,14 +387,16 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
       // in flight, or a cancelled run keeps a sandbox busy with an install
       // nobody is waiting for.
       aborts.get(sessionId)?.abort()
-      store = recordActivity(store, sessionId, { status: 'blocked' })
+      const session = await repos.sessions.get(sessionId)
+      if (session) await repos.sessions.save(touch(session, { status: 'blocked' }))
     },
 
     async close(sessionId: string): Promise<void> {
       cancelled.delete(sessionId)
       aborts.get(sessionId)?.abort()
       aborts.delete(sessionId)
-      store = closeSession(store, sessionId)
+      const session = await repos.sessions.get(sessionId)
+      if (session) await repos.sessions.save(closed(session))
     },
   }
 }

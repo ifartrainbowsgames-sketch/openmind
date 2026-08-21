@@ -24,10 +24,28 @@ import type { OpenMindEvent } from './events'
 import type { RuntimeCapabilities } from './capabilities'
 import type { MemoryContext } from './memory-service'
 import type { Workspace } from './runtime'
+import type { WorkspaceRecovery } from './workspaces'
 import type { WorkerSession } from './sessions'
 
-/** A runtime's session. Alias rather than a new type — sessions.ts already models this. */
-export type AgentSession = WorkerSession
+/**
+ * A session as a runtime uses it: the persisted record, plus the machine it
+ * resolves to and how that resolution went.
+ *
+ * `WorkerSession` stores a `workspaceId`; resolving it costs a repository read
+ * and can fail. Doing that once, at createSession, and handing the result down
+ * keeps every later step from re-deriving it — and makes the recovery outcome
+ * something a caller has to look at rather than something it can forget to ask
+ * about.
+ */
+export interface AgentSession extends WorkerSession {
+  /** Resolved from `workspaceId`. Absent when the session has no machine yet. */
+  workspace?: Workspace
+  /**
+   * How the machine was obtained. `lost` and `needs_user` mean the session
+   * resumed but its workspace did not — a task must not run as though it had.
+   */
+  recovery?: WorkspaceRecovery
+}
 
 /**
  * What a runtime can do, in the same vocabulary tasks and workers use.

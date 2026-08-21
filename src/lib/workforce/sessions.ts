@@ -1,31 +1,42 @@
 /**
  * Persistent worker sessions.
  *
- * A coding worker currently rediscovers the repository on every task: clone,
- * look around, work out the conventions, then do the actual job. That cost is
- * paid per task, and it is paid in model tokens.
+ * A coding worker would otherwise rediscover the repository on every task:
+ * clone, look around, work out the conventions, then do the actual job. That
+ * cost is paid per task, and it is paid in model tokens.
  *
- * A session is the durable half of a worker — its workspace, its provider
- * session id, when it was last active. Tasks come and go against it. This is
- * the piece external coding agents need most, because Claude Code and Codex
- * both have their own resumable session ids, and throwing those away on every
- * task is what makes an adapter feel stateless and expensive.
+ * A session is the durable half of a worker — its scope, its workspace, its
+ * provider session id, when it was last active. Tasks come and go against it.
+ * This is the piece external coding agents need most, because Claude Code and
+ * Codex both have their own resumable session ids, and throwing those away on
+ * every task is what makes an adapter feel stateless and expensive.
+ *
+ * ## Why the workspace is an id
+ *
+ * A session says *who was working*; a `WorkspaceRecord` says *where*, with a
+ * status and a last-verified time. Embedding the machine in the session made
+ * "the sandbox id we remember" and "a machine that still exists" the same
+ * field, which they are not — see workspaces.ts.
+ *
+ * The functions here stay pure. Durability is a repository the caller injects,
+ * so a per-run runtime can hold no state and still see the same sessions as
+ * every other run in the process, and as the process before it.
  */
 
+import { scopeKey, type SessionScope } from './session-repository'
 import type { WorkerKind } from '../task-ledger'
-import type { Workspace } from './runtime'
 
 export type SessionStatus = 'idle' | 'running' | 'waiting' | 'blocked' | 'failed' | 'closed'
 
 export interface WorkerSession {
   id: string
-  projectId: string
-  worker: WorkerKind
-  workspace?: Workspace
+  scope: SessionScope
   /** Which adapter owns this session — 'builtin', 'claude-code', 'codex'… */
   provider: string
-  /** The provider's own resumable id, when it has one. */
+  /** The provider's own resumable id, when it has one. Internal metadata. */
   providerSessionId?: string
+  /** The machine this session works on. Resolved through WorkspaceRepository. */
+  workspaceId?: string
   status: SessionStatus
   /** Tasks this session has served, most recent last. */
   taskIds: string[]
@@ -36,44 +47,30 @@ export interface WorkerSession {
 /** Sessions idle longer than this are considered stale and not resumed. */
 export const SESSION_IDLE_MS = 15 * 60 * 1000
 
-export interface SessionStore {
-  sessions: Record<string, WorkerSession>
+export function sessionProjectId(session: WorkerSession): string {
+  return session.scope.kind === 'project'
+    ? session.scope.projectId
+    : `conversation:${session.scope.conversationId}`
 }
 
-export function emptySessionStore(): SessionStore {
-  return { sessions: {} }
+export function sessionWorker(session: WorkerSession): WorkerKind | undefined {
+  return session.scope.kind === 'project' ? session.scope.worker : undefined
 }
 
-function sessionKey(projectId: string, worker: WorkerKind, provider: string): string {
-  return `${projectId}:${worker}:${provider}`
-}
-
-export function openSession(
-  store: SessionStore,
-  input: { projectId: string; worker: WorkerKind; provider?: string; workspace?: Workspace },
+export function newSession(
+  scope: SessionScope,
+  provider: string,
   now = Date.now(),
-): { store: SessionStore; session: WorkerSession; resumed: boolean } {
-  const provider = input.provider ?? 'builtin'
-  const key = sessionKey(input.projectId, input.worker, provider)
-  const existing = store.sessions[key]
-
-  if (existing && isResumable(existing, now)) {
-    const session: WorkerSession = { ...existing, status: 'running', lastActivityAt: now }
-    return { store: { sessions: { ...store.sessions, [key]: session } }, session, resumed: true }
-  }
-
-  const session: WorkerSession = {
-    id: key,
-    projectId: input.projectId,
-    worker: input.worker,
-    workspace: input.workspace ?? existing?.workspace,
+): WorkerSession {
+  return {
+    id: scopeKey(scope, provider),
+    scope,
     provider,
     status: 'running',
     taskIds: [],
     startedAt: now,
     lastActivityAt: now,
   }
-  return { store: { sessions: { ...store.sessions, [key]: session } }, session, resumed: false }
 }
 
 /**
@@ -87,44 +84,30 @@ export function isResumable(session: WorkerSession, now = Date.now()): boolean {
   return now - session.lastActivityAt < SESSION_IDLE_MS
 }
 
-export function recordActivity(
-  store: SessionStore,
-  sessionId: string,
-  patch: Partial<Pick<WorkerSession, 'status' | 'providerSessionId' | 'workspace'>> & { taskId?: string },
+export type SessionPatch =
+  Partial<Pick<WorkerSession, 'status' | 'providerSessionId' | 'workspaceId'>>
+  & { taskId?: string }
+
+export function touch(
+  session: WorkerSession,
+  patch: SessionPatch = {},
   now = Date.now(),
-): SessionStore {
-  const existing = store.sessions[sessionId]
-  if (!existing) return store
+): WorkerSession {
   const { taskId, ...rest } = patch
-  const updated: WorkerSession = {
-    ...existing,
+  return {
+    ...session,
     ...rest,
-    taskIds: taskId && !existing.taskIds.includes(taskId)
-      ? [...existing.taskIds, taskId]
-      : existing.taskIds,
+    taskIds: taskId && !session.taskIds.includes(taskId)
+      ? [...session.taskIds, taskId]
+      : session.taskIds,
     lastActivityAt: now,
   }
-  return { sessions: { ...store.sessions, [sessionId]: updated } }
 }
 
-export function closeSession(store: SessionStore, sessionId: string, now = Date.now()): SessionStore {
-  const existing = store.sessions[sessionId]
-  if (!existing) return store
-  return {
-    sessions: {
-      ...store.sessions,
-      [sessionId]: { ...existing, status: 'closed', lastActivityAt: now },
-    },
-  }
+export function closed(session: WorkerSession, now = Date.now()): WorkerSession {
+  return { ...session, status: 'closed', lastActivityAt: now }
 }
 
-/** Sessions eligible for cleanup. Callers decide what closing costs. */
-export function staleSessions(store: SessionStore, now = Date.now()): WorkerSession[] {
-  return Object.values(store.sessions).filter(
-    (s) => s.status !== 'closed' && now - s.lastActivityAt >= SESSION_IDLE_MS,
-  )
-}
-
-export function sessionsFor(store: SessionStore, projectId: string): WorkerSession[] {
-  return Object.values(store.sessions).filter((s) => s.projectId === projectId)
+export function isStale(session: WorkerSession, now = Date.now()): boolean {
+  return session.status !== 'closed' && now - session.lastActivityAt >= SESSION_IDLE_MS
 }

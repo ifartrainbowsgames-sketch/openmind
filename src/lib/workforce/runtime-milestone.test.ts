@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runTaskGraph } from '../task-runner'
 import { createBuiltinRuntime } from './builtin-runtime'
 import {
@@ -7,9 +7,14 @@ import {
 import type { OpenMindEvent } from './events'
 import type { AgentBrain } from '../agent'
 import type { TaskRecord } from '../task-ledger'
+import { _resetRepositories } from './session-repository'
 import { ALL_CAPABILITIES, runtimeCapabilities, type WorkerCapability } from './capabilities'
 
 vi.mock('../supabase')
+
+// Sessions are a shared process service now; a test that does not reset it
+// inherits the previous test's machine.
+afterEach(() => _resetRepositories())
 
 /**
  * The four gates for the AgentRuntime consolidation:
@@ -64,7 +69,7 @@ describe('sessions are created and reused', () => {
   it('creates a session for a project and worker', async () => {
     const runtime = createBuiltinRuntime(deps(brain()))
     const session = await runtime.createSession({ projectId: 'p1', worker: 'code' })
-    expect(session.projectId).toBe('p1')
+    expect(session.scope).toEqual({ kind: 'project', projectId: 'p1', worker: 'code' })
     expect(session.provider).toBe('builtin')
     expect(session.workspace).toBeDefined()
   })
@@ -233,8 +238,7 @@ function limitedRuntime(skills: readonly WorkerCapability[]): AgentRuntime & { r
     }),
     createSession: async (input) => ({
       id: `limited:${input.projectId}:${input.worker}`,
-      projectId: input.projectId,
-      worker: input.worker,
+      scope: { kind: 'project' as const, projectId: input.projectId, worker: input.worker },
       provider: 'limited',
       status: 'running' as const,
       taskIds: [],

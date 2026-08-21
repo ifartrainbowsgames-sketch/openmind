@@ -642,6 +642,25 @@ async function executeBatch(
       workspace: sessionWorkspace(next),
     })
 
+    // The session resumed but its machine did not. Running anyway would
+    // provision an empty sandbox and report it as the same session — every
+    // file the last task wrote silently gone, and the first thing this task
+    // does is assume they are there. Blocking is the honest outcome.
+    const recovery = session.recovery
+    if (recovery && (recovery.kind === 'lost' || recovery.kind === 'needs_user')) {
+      next = updateTask(next, task.id, { status: 'needs_user', blocker: recovery.reason })
+      next = { ...next, blockers: [...next.blockers, `${task.id}: ${recovery.reason}`] }
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker,
+        detail: blockedMessage('capability_unavailable', 'workspace', recovery.reason),
+      })
+      // The project's remembered sandbox is gone. Clearing it stops the next
+      // run inheriting a pointer we have already proven dead.
+      next = { ...next, sandboxId: undefined }
+      next = await recordTaskMemory(next, memory, task, undefined, [])
+      continue
+    }
+
     let result: RunResult | undefined
     for await (const ev of runtime.runTask(session, task, taskContext)) {
       // Runtime events reach the trace, so the UI observes the same stream the

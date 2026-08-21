@@ -3,8 +3,8 @@
  *
  * The chat turn, the crew, and the Studio's single-employee run are production
  * surfaces — a user action runs a real employee with real tools — but they are
- * not task-graph runs, so they have no project, no ledger and no session. They
- * were therefore left on the module-level sandbox binding.
+ * not task-graph runs, so they have no project and no ledger. They were
+ * therefore left on the module-level sandbox binding.
  *
  * That is a leak, not merely untidy. None of them ever *sets* the binding, so
  * they inherit whatever the last task run left there. A chat turn following a
@@ -12,13 +12,20 @@
  * files, and writing into a machine the task still believes it owns. Nothing
  * errors. The only symptom is a chat answer that knows things it should not.
  *
- * So a conversation gets its own identity: one workspace per conversation,
- * held across turns, and never the task graph's. Same `sessions.ts` machinery,
- * so the same rules about resumption and staleness apply.
+ * The fix is not a second session system. It is the *same* one with a different
+ * ownership key:
  *
- * What this deliberately does NOT do is give a conversation a ledger, memory
- * recording, or a judge. Those belong to tasks. This is the smallest thing
- * that makes "which machine am I on" answerable.
+ *   task session          { kind: 'project', projectId, worker }
+ *   conversation session  { kind: 'conversation', conversationId }
+ *
+ * Same repository, same resumption rules, same workspace records, same
+ * recovery. A conversation deliberately gets no ledger, no memory recording
+ * and no judge — those belong to tasks.
+ *
+ * Synchronous by necessity: `runEmployee` callers build this inline. So it
+ * reads the process-local cache and writes through to durable storage in the
+ * background. A conversation losing its machine on a cold start costs one new
+ * sandbox; blocking a chat turn on a round trip costs every chat turn.
  */
 
 import { BUILTIN_CAPABILITIES } from './builtin-runtime'
@@ -26,11 +33,16 @@ import {
   NULL_SINK, createExecutionContext,
   type EventSink, type ExecutionContext, type MemoryReader, type PermissionContext,
 } from './execution-context'
-import { makeWorkspace, type Workspace } from './runtime'
+import { newSession, touch, type WorkerSession } from './sessions'
+import {
+  repositories, scopeKey, scopeProjectId, type SessionScope,
+} from './session-repository'
 import { sandboxRuntime } from './sandbox-runtime'
-import { emptySessionStore, openSession, recordActivity, type SessionStore } from './sessions'
+import { makeWorkspaceRecord, toWorkspace, withWorkspace, type WorkspaceRecord } from './workspaces'
+import type { Workspace } from './runtime'
 
-let store: SessionStore = emptySessionStore()
+/** Process-local view, so building a context does not await. */
+const live = new Map<string, { session: WorkerSession; record: WorkspaceRecord }>()
 
 export interface ConversationContextInput {
   /**
@@ -45,37 +57,78 @@ export interface ConversationContextInput {
 }
 
 export function conversationContext(input: ConversationContextInput): ExecutionContext {
-  const projectId = `conversation:${input.conversationId || 'anon'}`
-  const opened = openSession(store, {
-    projectId,
-    // Conversations are not typed work. 'research' is the least-privileged
-    // built-in kind that still reads as a general assistant; nothing routes on
-    // it, because nothing routes conversations.
-    worker: 'research',
-    provider: 'conversation',
-    workspace: makeWorkspace(projectId),
-  })
-  store = opened.store
-  const session = opened.session
+  const scope: SessionScope = { kind: 'conversation', conversationId: input.conversationId || 'anon' }
+  const id = scopeKey(scope, 'builtin')
+
+  let entry = live.get(id)
+  if (!entry) {
+    const record = makeWorkspaceRecord({ projectId: scopeProjectId(scope), kind: 'conversation' })
+    const session = touch(newSession(scope, 'builtin'), { workspaceId: record.id })
+    entry = { session, record }
+    live.set(id, entry)
+    void persist(entry)
+  }
+
+  const held = entry
 
   return createExecutionContext({
-    session,
+    session: held.session,
     runtime: (self) => sandboxRuntime(self),
-    workspace: session.workspace ?? makeWorkspace(projectId),
+    workspace: toWorkspace(held.record),
     capabilities: BUILTIN_CAPABILITIES,
     permissions: input.permissions,
     eventSink: input.eventSink ?? NULL_SINK,
     memory: input.memory,
     abortSignal: input.abortSignal,
-    // Written back to the store, so the machine a tool created in this turn is
-    // the machine the next turn uses.
+    // Written back so the machine a tool created in this turn is the machine
+    // the next turn uses — and so it outlives the process.
     onAdopt: (workspace: Workspace) => {
-      store = recordActivity(store, session.id, { workspace })
+      held.record = { ...withWorkspace(held.record, workspace), status: 'active', lastVerifiedAt: Date.now() }
+      live.set(id, held)
+      void persist(held)
     },
   })
 }
 
+/**
+ * Durable write, deliberately not awaited.
+ *
+ * A failure here costs a conversation its remembered machine on the next cold
+ * start — one new sandbox. Awaiting it would cost a round trip on every chat
+ * turn, and a chat turn that stalls on a database write is a worse product
+ * than one that occasionally forgets which sandbox it had.
+ */
+async function persist(entry: { session: WorkerSession; record: WorkspaceRecord }): Promise<void> {
+  try {
+    const repos = repositories()
+    await repos.workspaces.save(entry.record)
+    await repos.sessions.save(entry.session)
+  } catch {
+    /* local-first: the process map is still correct */
+  }
+}
+
+/**
+ * Adopt a durable conversation session, when a caller can afford to wait.
+ *
+ * Used at boot so a returning user keeps the machine their last conversation
+ * left behind, rather than starting a new one because the process is new.
+ */
+export async function warmConversation(conversationId: string): Promise<void> {
+  const scope: SessionScope = { kind: 'conversation', conversationId: conversationId || 'anon' }
+  const id = scopeKey(scope, 'builtin')
+  if (live.has(id)) return
+  try {
+    const repos = repositories()
+    const session = await repos.sessions.find(scope, 'builtin')
+    const record = session?.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
+    if (session && record) live.set(id, { session, record })
+  } catch {
+    /* nothing stored yet, or no account — a fresh conversation is correct */
+  }
+}
+
 /** Test seam. Production never clears conversation sessions. */
 export function _resetConversations(): void {
-  store = emptySessionStore()
+  live.clear()
 }

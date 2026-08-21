@@ -259,7 +259,8 @@ describe('a file a tool wrote becomes a ledger artifact', () => {
       }),
       createSession: async (input): Promise<AgentSession> => ({
         id: `x:${input.projectId}:${input.worker}`,
-        projectId: input.projectId, worker: input.worker, provider: 'x',
+        scope: { kind: 'project', projectId: input.projectId, worker: input.worker },
+      provider: 'x',
         status: 'running', taskIds: [], startedAt: Date.now(), lastActivityAt: Date.now(),
       }),
       resumeSession: async () => null,
