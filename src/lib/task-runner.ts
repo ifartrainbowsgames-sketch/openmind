@@ -2,7 +2,6 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import {
   liveBrain,
-  runEmployee,
   simulatedBrain,
   type AgentBrain,
   type Employee,
@@ -27,6 +26,10 @@ import {
   parseSpawnRequests, recordSpawn,
 } from './workforce/delegation'
 import { isWorkerCapability } from './workforce/capabilities'
+import { runtimeFor, type AgentRuntime } from './workforce/agent-runtime'
+import { createBuiltinRuntime } from './workforce/builtin-runtime'
+import type { OpenMindEvent } from './workforce/events'
+import { makeWorkspace } from './workforce/runtime'
 import { renderConstitution, withProjectRules } from './workforce/constitution'
 import { mergeAcceptance, renderSop, sopFor } from './workforce/sop'
 import { planProjectSmart, type PlannerBrain } from './task-planner-llm'
@@ -87,6 +90,15 @@ export interface RunTaskGraphOptions {
    * honour a cancellation the user made after the run was claimed.
    */
   shouldStop?: () => boolean | Promise<boolean>
+  /** Which AgentRuntime executes tasks. Defaults to the registered default. */
+  runtimeId?: string
+  /** Canonical runtime events, for the UI and any future replay/event store. */
+  onEvent?: (event: OpenMindEvent) => void
+}
+
+/** The workspace a session runs in. One per project for now; worktrees later. */
+function sessionWorkspace(project: ProjectState) {
+  return makeWorkspace(project.id)
 }
 
 const WORKER_TOOLS: Record<WorkerKind, string[]> = {
@@ -456,9 +468,9 @@ export function applyDelegation(
 }
 
 async function executeBatch(
-  brain: AgentBrain,
   project: ProjectState,
   options: RunTaskGraphOptions,
+  runtime: AgentRuntime,
 ): Promise<{ project: ProjectState; members: CrewMemberResult[]; trace: TraceLine[] }> {
   const batch = readyTasks(project)
   if (!batch.length) return { project, members: [], trace: [] }
@@ -516,13 +528,47 @@ async function executeBatch(
     // with — the function may have created or replaced one.
     setActiveSandbox(next.sandboxId)
     takeTokenUsage() // start a clean accounting window for this worker
-    const result = await runEmployee(
-      brain,
-      employee,
-      prompt,
-      (line) => options.onTrace?.({ ...line, text: `${task.worker}: ${line.text}` }),
-      options.configs,
-    )
+
+    // Execution goes through the runtime, never through runEmployee directly.
+    // One path: the runtime owns session identity and workspace ownership, and
+    // the builtin implementation is what wraps the employee graph.
+    const session = await runtime.createSession({
+      projectId: next.id,
+      worker: task.worker,
+      workspace: sessionWorkspace(next),
+    })
+
+    let result: RunResult | undefined
+    for await (const ev of runtime.runTask(session, task)) {
+      // Runtime events reach the trace, so the UI observes the same stream the
+      // orchestrator does rather than a parallel one.
+      if (ev.kind === 'task_finished') {
+        result = ev.result as RunResult | undefined
+        if (ev.outcome && ev.outcome !== 'completed') {
+          trace.push({ node: 'act', text: `${task.id} ${task.worker} — ${ev.outcome}: ${ev.text}` })
+        }
+      } else if (ev.kind === 'blocked') {
+        trace.push({ node: 'act', text: `${task.worker}: blocked — ${ev.text}` })
+      } else if (ev.kind === 'agent_thinking') {
+        // Same live trace the direct call used to produce, now sourced from the
+        // runtime's stream instead of a second callback path.
+        options.onTrace?.({ node: 'act', text: `${task.worker}: ${ev.text}` })
+      }
+      options.onEvent?.(ev)
+    }
+
+    if (!result) {
+      // The runtime terminated without a result. Treat it as a failed task
+      // rather than inventing an empty one, which would judge as an artifact-less
+      // completion.
+      next = updateTask(next, task.id, { status: 'failed', blocker: 'runtime returned no result' })
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker,
+        detail: 'runtime returned no result',
+      })
+      continue
+    }
+
     const sandboxAfter = getActiveSandbox()
     if (sandboxAfter && sandboxAfter !== next.sandboxId) {
       next = { ...next, sandboxId: sandboxAfter }
@@ -684,8 +730,36 @@ export async function runTaskGraph(
   let allMembers: CrewMemberResult[] = []
   let allTrace: TraceLine[] = [{ node: 'plan', text: `Task graph — ${project.tasks.length} tasks` }]
 
+  /**
+   * One runtime for the whole run.
+   *
+   * The builtin is constructed here rather than pulled from the registry
+   * because its dependencies — the brain, the employee, the composed prompt —
+   * are per-run values. A registered singleton holding them would be shared
+   * mutable state that two concurrent runs would corrupt. External runtimes
+   * (Claude Code, Codex, Wayland Core) have no such dependency and do come from
+   * the registry, by id.
+   *
+   * Built once, not per task, so a worker's session survives across the tasks
+   * it serves instead of being reopened each time.
+   */
+  const runtime: AgentRuntime = options.runtimeId
+    ? runtimeFor(options.runtimeId)
+    : createBuiltinRuntime({
+        brain,
+        employeeFor: (task) =>
+          withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace),
+        promptFor: (task) => buildWorkerPrompt(currentProject, task),
+        configs: options.configs,
+      })
+
+  // The prompt needs the ledger as it stands when the task runs, not as it was
+  // when the runtime was built.
+  let currentProject: ProjectState = project
+
   const executeNode = async (state: TRS): Promise<Partial<TRS>> => {
-    const { project: p, members, trace } = await executeBatch(brain, state.project, options)
+    currentProject = state.project
+    const { project: p, members, trace } = await executeBatch(state.project, options, runtime)
     return { project: p, members, trace }
   }
 

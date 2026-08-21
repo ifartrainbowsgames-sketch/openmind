@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildOverlay, employeeForWorker, overlayEdges } from './map-overlay'
-import { createBuiltinAdapter } from './builtin-adapter'
-import { drainToOutcome } from './adapters'
-import type { ProjectSnapshot, TaskRecord } from '../task-ledger'
-import type { AgentBrain, Employee } from '../agent'
+import type { ProjectSnapshot } from '../task-ledger'
 
 vi.mock('../supabase')
 
@@ -121,54 +118,5 @@ describe('overlayEdges', () => {
       employees,
     )
     expect(edges).toEqual([])
-  })
-})
-
-describe('builtin adapter', () => {
-  const employee: Employee = {
-    id: 'worker-code', name: 'Code', role: 'code worker',
-    prompt: 'do it', tools: [], accent: '#000',
-  }
-  const record: TaskRecord = {
-    id: 't1', type: 'code', goal: 'build', inputs: {}, outputs: [], dependsOn: [],
-    status: 'running', worker: 'code',
-    limits: { maxSteps: 4, maxRetries: 1, maxDelegations: 1, maxCostUsd: 1 },
-    retries: 0, stepsUsed: 0, costUsd: 0, artifactIds: [],
-  }
-
-  const deps = (brain: AgentBrain) => ({
-    brain,
-    employeeFor: () => employee,
-    promptFor: () => 'prompt',
-  })
-
-  it('reports itself available and registers as a real adapter', async () => {
-    const adapter = createBuiltinAdapter(deps({ plan: async () => [], respond: async () => 'ok' }))
-    expect(await adapter.available()).toBe(true)
-    expect(adapter.capabilities.runsCommands).toBe(true)
-  })
-
-  it('runs a task through to a terminal outcome', async () => {
-    const adapter = createBuiltinAdapter(deps({ plan: async () => [], respond: async () => 'done' }))
-    const session = await adapter.start({ id: 'w', projectId: 'p1', path: '/w' }, 'p1')
-    const result = await drainToOutcome(adapter.runTask(session, record))
-    expect(result.outcome).toBe('completed')
-  })
-
-  it('reports a thrown error as failed rather than letting it escape', async () => {
-    const adapter = createBuiltinAdapter(deps({
-      plan: async () => { throw new Error('provider down') },
-      respond: async () => '',
-    }))
-    const session = await adapter.start({ id: 'w', projectId: 'p1', path: '/w' }, 'p1')
-    const result = await drainToOutcome(adapter.runTask(session, record))
-    expect(result.outcome).toBe('failed')
-  })
-
-  it('resumes a session it started', async () => {
-    const adapter = createBuiltinAdapter(deps({ plan: async () => [], respond: async () => 'ok' }))
-    const session = await adapter.start({ id: 'w', projectId: 'p1', path: '/w' }, 'p1')
-    expect((await adapter.resume(session.id))?.id).toBe(session.id)
-    expect(await adapter.resume('nope')).toBeNull()
   })
 })

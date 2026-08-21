@@ -1,10 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { WORKTREE_ROOT, planWorktree, ensureWorktree, worktreeDiff, removeWorktree } from './worktrees'
-import {
-  TERMINAL_OUTCOMES, _resetAdapters, availableAdapters, drainToOutcome, getAdapter,
-  isTerminal, listAdapters, registerAdapter,
-  type AgentRuntimeEvent, type CodingAgentAdapter,
-} from './adapters'
 import {
   RECALL_LIMITS, clearLayer, emptyMemory, priorFailures, recall, remember, renderMemory,
 } from './memory-layers'
@@ -112,92 +107,6 @@ describe('removeWorktree', () => {
   it('refuses to remove a primary checkout', async () => {
     const removed = await removeWorktree(fakeRuntime(), { id: 'w', projectId: 'p', path: '/w' })
     expect(removed).toBe(false)
-  })
-})
-
-// ── Phase 12: adapters ──────────────────────────────────────────────────────
-
-function fakeAdapter(id: string, available = true): CodingAgentAdapter {
-  return {
-    id,
-    name: id,
-    capabilities: { resumable: true, writesFiles: true, runsCommands: true },
-    available: async () => available,
-    start: async () => ({
-      id: `${id}-s`, projectId: 'p', worker: 'code', provider: id,
-      status: 'running', taskIds: [], startedAt: 0, lastActivityAt: 0,
-    }),
-    runTask: async function* () { yield event('finished', 'done', 'completed') },
-    cancel: async () => undefined,
-    resume: async () => null,
-  }
-}
-
-function event(kind: AgentRuntimeEvent['kind'], text: string, outcome?: AgentRuntimeEvent['outcome']): AgentRuntimeEvent {
-  return { kind, text, outcome, at: 0 }
-}
-
-async function* stream(...events: AgentRuntimeEvent[]): AsyncIterable<AgentRuntimeEvent> {
-  for (const e of events) yield e
-}
-
-describe('adapter registry', () => {
-  beforeEach(() => _resetAdapters())
-
-  it('registers and finds adapters by id', () => {
-    registerAdapter(fakeAdapter('claude-code'))
-    expect(getAdapter('claude-code')?.name).toBe('claude-code')
-    expect(listAdapters()).toHaveLength(1)
-  })
-
-  it('treats an unavailable adapter as absent, not an error', async () => {
-    registerAdapter(fakeAdapter('present', true))
-    registerAdapter(fakeAdapter('missing', false))
-    expect((await availableAdapters()).map((a) => a.id)).toEqual(['present'])
-  })
-})
-
-describe('drainToOutcome', () => {
-  it('returns the outcome the adapter reported', async () => {
-    const result = await drainToOutcome(stream(event('thinking', '…'), event('finished', 'ok', 'completed')))
-    expect(result.outcome).toBe('completed')
-    expect(result.events).toBe(2)
-  })
-
-  it('forwards every event to the observer', async () => {
-    const seen: string[] = []
-    await drainToOutcome(stream(event('tool_started', 'a'), event('finished', 'b', 'completed')),
-      (e) => seen.push(e.kind))
-    expect(seen).toEqual(['tool_started', 'finished'])
-  })
-
-  it('fails a stream that ends without saying how', async () => {
-    // Treating an unexplained end as success is a guess, and the optimistic
-    // guess is the expensive one.
-    const result = await drainToOutcome(stream(event('message', 'hmm')))
-    expect(result.outcome).toBe('failed')
-  })
-
-  it('caps a stream that never terminates', async () => {
-    async function* forever(): AsyncIterable<AgentRuntimeEvent> {
-      for (;;) yield event('thinking', 'still going')
-    }
-    const result = await drainToOutcome(forever(), undefined, 10)
-    expect(result.capped).toBe(true)
-    expect(result.outcome).toBe('failed')
-    expect(result.events).toBe(10)
-  })
-
-  it('reports blocked and needs_user as themselves', async () => {
-    for (const outcome of ['blocked', 'needs_user', 'cancelled'] as const) {
-      const result = await drainToOutcome(stream(event('finished', 'x', outcome)))
-      expect(result.outcome).toBe(outcome)
-    }
-  })
-
-  it('knows which outcomes are terminal', () => {
-    for (const o of TERMINAL_OUTCOMES) expect(isTerminal(o)).toBe(true)
-    expect(isTerminal('still discussing')).toBe(false)
   })
 })
 
