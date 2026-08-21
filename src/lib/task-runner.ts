@@ -199,6 +199,38 @@ export function parseWorkerArtifacts(task: TaskRecord, answer: string, worker: W
   return found
 }
 
+/**
+ * Files the tools produced, as ledger records.
+ *
+ * `ToolCall.artifacts` existed and nothing read it, so a tool that wrote a
+ * real file had it silently discarded and the ledger kept only whatever the
+ * model said about it afterwards. That is the gap that made the browser
+ * subsystem look wired when its output could never reach a judge.
+ *
+ * Confidence is higher than a parsed answer's because the provenance is
+ * better: these bytes came from a tool, not from a model's account of one.
+ */
+export function toolArtifacts(task: TaskRecord, result: RunResult): ArtifactRecord[] {
+  const out: ArtifactRecord[] = []
+  for (const call of result.toolCalls) {
+    if (call.error) continue
+    for (const artifact of call.artifacts ?? []) {
+      if (!artifact.path || !artifact.body.trim()) continue
+      out.push({ ...makeArtifact(task, artifact.path, artifact.body, task.worker), confidence: 0.9 })
+    }
+  }
+  return out
+}
+
+/** First list wins on a path collision. */
+function mergeArtifacts(
+  preferred: readonly ArtifactRecord[],
+  fallback: readonly ArtifactRecord[],
+): ArtifactRecord[] {
+  const taken = new Set(preferred.map((a) => a.path))
+  return [...preferred, ...fallback.filter((a) => !taken.has(a.path))]
+}
+
 function makeArtifact(task: TaskRecord, path: string, body: string, worker: WorkerKind): ArtifactRecord {
   return {
     id: `art-${task.id}-${path.replace(/\W/g, '-')}`,
@@ -681,7 +713,14 @@ async function executeBatch(
       trace.push({ node: 'act', text: `${task.id} delegated ${delegated.created} subtask(s)` })
     }
 
-    const artifacts = parseWorkerArtifacts(task, result.answer, task.worker)
+    // Files a tool produced directly, then files described in the answer.
+    // Tool artifacts win on a path collision: a browser session that wrote
+    // sources.json from the URLs it actually visited is evidence, and the
+    // model's prose account of the same page is a description of evidence.
+    const artifacts = mergeArtifacts(
+      toolArtifacts(task, result),
+      parseWorkerArtifacts(task, result.answer, task.worker),
+    )
     next = {
       ...next,
       artifacts: [...next.artifacts.filter((a) => !artifacts.some((n) => n.path === a.path)), ...artifacts],

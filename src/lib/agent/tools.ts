@@ -1,7 +1,7 @@
 import { invokeCrewTool } from '../crew-tools'
 import { draftBusinessPlan } from '../business-plan'
 import { analyzeSentiment, retrievePassages, summarize } from '../demo'
-import type { AgentTool } from './types'
+import type { AgentTool, ToolResult } from './types'
 
 export const KNOWLEDGE = `
 OpenMind is the open-source integration layer for AI. Its chatbot ships as an embeddable widget and one unified API.
@@ -222,11 +222,54 @@ TOOL_REGISTRY.gmail_read = {
   run: (q, _args, ctx) => invokeCrewTool('gmail_read', q, undefined, ctx),
 }
 
+// ── The browser, through its provider ────────────────────────────────────────
+// This tool is the only production path to a browser, so it is where the
+// invariant is enforced: a browser task cannot complete without going through
+// a BrowserProvider. It used to call the transport directly and return prose —
+// unusable downstream, because the judge cannot count sources in a sentence
+// and nobody could tell a loaded page from a described one.
+
 TOOL_REGISTRY.web_act = {
   id: 'web_act',
   name: 'Web act',
   desc: 'Hosted Chrome: JSON {"url","goal","steps":[{"click":"css"},{"type":{"selector","text"}}]}. Confirm first.',
-  run: (q, _args, ctx) => invokeCrewTool('web_act', q, undefined, ctx),
+  run: async (q, _args, ctx): Promise<ToolResult> => {
+    const { parseWebActInput } = await import('../web-act')
+    const { actionsFromWebAct, webActProvider } = await import('../workforce/browser-provider')
+    const { runBrowserPlan } = await import('../workforce/browser-worker')
+    const { isStrict } = await import('../execution-mode')
+
+    const spec = parseWebActInput(q)
+    const { result, artifacts } = await runBrowserPlan(
+      webActProvider(ctx),
+      actionsFromWebAct(spec),
+    )
+
+    if (result.blocked) {
+      // A simulated page is not a visit, so the session reports blocked either
+      // way — but only strict mode turns that into a failed capability. Demo
+      // mode still shows the mock, and produces no artifacts from it, because
+      // an artifact from a page nobody loaded is a fabricated source.
+      return isStrict()
+        ? { content: result.blocked, error: { kind: 'blocked', message: result.blocked }, source: 'mock' }
+        : { content: result.blocked, source: 'mock' }
+    }
+
+    const visited = result.visits.map((v) => v.url).join(', ')
+    const first = result.data[0] as { text?: string; fields?: Record<string, string> } | undefined
+    return {
+      content: [
+        `[LIVE · web_act] ${visited}`,
+        first?.fields && Object.keys(first.fields).length
+          ? `Extracted: ${JSON.stringify(first.fields)}`
+          : '',
+        (first?.text ?? '').slice(0, 4000),
+      ].filter(Boolean).join('\n'),
+      data: { visits: result.visits, items: result.data },
+      artifacts,
+      source: 'live',
+    }
+  },
 }
 
 TOOL_REGISTRY.business_plan = {

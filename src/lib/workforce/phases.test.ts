@@ -180,21 +180,24 @@ describe('browser artifacts', () => {
       visits: [{ url: 'https://a.com/pricing', at: 0, via: 'dom' as const }],
       data: [{ plan: 'Pro', price: 20 }],
     }
-    const artifacts = browserArtifacts(result, 't1')
+    const artifacts = browserArtifacts(result)
     expect(artifacts.map((a) => a.path)).toEqual(['browser/page-data.json', 'browser/sources.json'])
-    expect(artifacts[0].sources).toBe(1)
+    // The URL is in the body, so the orchestrator's own source counter finds
+    // it — one counter, not a second one that can disagree.
+    expect(artifacts[1].body).toContain('https://a.com/pricing')
+    expect(JSON.parse(artifacts[1].body).hosts).toEqual(['a.com'])
   })
 
   it('produces NOTHING for a blocked session', () => {
     // An empty page-data.json would satisfy an artifact_exists check while
     // containing no data — fake success in its purest form.
     const result = { ...emptySessionResult(), blocked: 'hosted Chrome unavailable' }
-    expect(browserArtifacts(result, 't1')).toEqual([])
+    expect(browserArtifacts(result)).toEqual([])
   })
 
   it('omits page-data when nothing was extracted but still records sources', () => {
     const result = { ...emptySessionResult(), visits: [{ url: 'https://a.com', at: 0, via: 'dom' as const }] }
-    expect(browserArtifacts(result, 't1').map((a) => a.path)).toEqual(['browser/sources.json'])
+    expect(browserArtifacts(result).map((a) => a.path)).toEqual(['browser/sources.json'])
   })
 })
 

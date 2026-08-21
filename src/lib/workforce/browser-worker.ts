@@ -19,50 +19,72 @@
  * a page is actually fetched.
  */
 
-import type { BrowserAction, BrowserSessionResult, VisitRecord } from './browser-runtime'
-import type { ArtifactRecord } from '../task-ledger'
+import type {
+  BrowserAction, BrowserProvider, BrowserSessionResult, VisitRecord,
+} from './browser-runtime'
+import type { ToolArtifact } from '../agent'
 
 /**
- * Turn a session into the artifacts the ledger expects.
+ * Turn a session into files.
+ *
+ * `{ path, body }` rather than `ArtifactRecord` on purpose: this runs inside a
+ * tool call, which does not know the task it serves and should not invent a
+ * ledger id. The orchestrator shapes these into records with the task it
+ * already has, so there is one artifact shaper rather than two that drift.
  *
  * A blocked session produces NO artifacts. Emitting an empty `page-data.json`
  * would pass an `artifact_exists` check while containing nothing — the precise
  * shape of fake success this system keeps removing.
  */
-export function browserArtifacts(
-  result: BrowserSessionResult,
-  taskId: string,
-  now = Date.now(),
-): ArtifactRecord[] {
+export function browserArtifacts(result: BrowserSessionResult): ToolArtifact[] {
   if (result.blocked) return []
 
-  const artifacts: ArtifactRecord[] = []
-  const add = (path: string, body: string, sources: number) => {
+  const artifacts: ToolArtifact[] = []
+  if (result.data.length) {
     artifacts.push({
-      id: `art-${taskId}-${path.replace(/\W/g, '-')}`,
-      path,
-      kind: path.endsWith('.json') ? 'json' : 'markdown',
-      title: path.split('/').pop() ?? path,
-      body,
-      taskId,
-      worker: 'browser',
-      sources,
-      confidence: 0.8,
-      createdAt: now,
+      path: 'browser/page-data.json',
+      body: JSON.stringify({ items: result.data }, null, 2),
     })
   }
-
-  if (result.data.length) {
-    add('browser/page-data.json', JSON.stringify({ items: result.data }, null, 2), result.visits.length)
-  }
   if (result.visits.length) {
-    add(
-      'browser/sources.json',
-      JSON.stringify({ sources: result.visits.map((v) => ({ url: v.url, title: v.title, via: v.via })) }, null, 2),
-      result.visits.length,
-    )
+    artifacts.push({
+      path: 'browser/sources.json',
+      body: JSON.stringify(
+        {
+          sources: result.visits.map((v) => ({ url: v.url, title: v.title, via: v.via })),
+          // A weak but real independence signal, and the reason distinctHosts
+          // exists — three pages from one host is one source wearing three hats.
+          hosts: distinctHosts(result.visits),
+        },
+        null,
+        2,
+      ),
+    })
   }
   return artifacts
+}
+
+/**
+ * Run a browsing plan and return what survives it.
+ *
+ * This is the WHO half doing its job: normalise the plan, refuse to run
+ * against a provider that is not there, and shape the outcome. It never learns
+ * how a page is fetched — that is the provider's business.
+ */
+export async function runBrowserPlan(
+  provider: BrowserProvider,
+  actions: BrowserAction[],
+): Promise<{ result: BrowserSessionResult; artifacts: ToolArtifact[] }> {
+  if (!(await provider.available())) {
+    const result: BrowserSessionResult = {
+      visits: [], data: [], screenshots: [], downloads: [],
+      blocked: `browser provider "${provider.id}" is not available`,
+    }
+    return { result, artifacts: [] }
+  }
+
+  const result = await provider.run(orderActions([...actions]))
+  return { result, artifacts: browserArtifacts(result) }
 }
 
 /**
