@@ -1,18 +1,16 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   crewToolConfirmSummary,
-  getActiveSandbox,
+  invokeCrewTool,
   isWorkspaceTool,
   mockCrewTool,
   needsCrewToolConfirm,
   parseWorkspaceToolInput,
-  setActiveSandbox,
 } from './crew-tools'
 import { MAX_STEPS, TOOL_REGISTRY, type Employee } from './agent'
 import { setExecutionMode } from './execution-mode'
 
 afterEach(() => {
-  setActiveSandbox(undefined)
   setExecutionMode('demo')
 })
 
@@ -49,16 +47,21 @@ describe('parseWorkspaceToolInput', () => {
   })
 })
 
-describe('sandbox session', () => {
-  it('starts empty and round-trips an id', () => {
-    expect(getActiveSandbox()).toBeUndefined()
-    setActiveSandbox('sbx-123')
-    expect(getActiveSandbox()).toBe('sbx-123')
+describe('a machine tool without a machine', () => {
+  it('is refused rather than given a fresh sandbox', async () => {
+    // There is no ambient machine any more. The alternative — provisioning one
+    // silently — runs perfectly and holds none of the work, which is the exact
+    // shape of fake success this layer exists to stop.
+    const out = await invokeCrewTool('workspace_read_file', 'src/a.ts')
+    expect(out).toContain('TASK_BLOCKED')
+    expect(out).toContain('no workspace in scope')
   })
 
-  it('treats blank as no sandbox', () => {
-    setActiveSandbox('   ')
-    expect(getActiveSandbox()).toBeUndefined()
+  it('does not refuse tools that never needed one', async () => {
+    // Deep research reads web pages. Requiring a sandbox for that would mean
+    // provisioning a machine to fetch a URL.
+    const out = await invokeCrewTool('web_search', 'openmind')
+    expect(out).not.toContain('no workspace in scope')
   })
 })
 

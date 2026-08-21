@@ -14,7 +14,8 @@
  *   npx tsx scripts/verify-worktrees.ts
  */
 
-import { setActiveSandbox, setPlatformKeysAllowed } from '../src/lib/crew-tools'
+import { setPlatformKeysAllowed } from '../src/lib/crew-tools'
+import { conversationContext } from '../src/lib/workforce/conversation-context'
 import { sandboxRuntime } from '../src/lib/workforce/sandbox-runtime'
 import { ensureWorktree, planWorktree, removeWorktree, worktreeDiff } from '../src/lib/workforce/worktrees'
 
@@ -29,9 +30,15 @@ function check(label: string, passed: boolean, detail = ''): void {
 async function main(): Promise<void> {
   // Tool credentials are the platform's; this is the same path a real run takes.
   setPlatformKeysAllowed(true)
-  setActiveSandbox(undefined)
 
-  const runtime = sandboxRuntime()
+  // A real workspace identity rather than an ambient machine. There is no
+  // longer any such thing as "the active sandbox" — a machine tool that
+  // arrives without a context is refused.
+  const context = conversationContext({
+    conversationId: 'verify-worktrees',
+    permissions: { platformKeys: true },
+  })
+  const runtime = sandboxRuntime(context)
 
   console.log('— runtime —')
   const echo = await runtime.exec('echo runtime-alive')

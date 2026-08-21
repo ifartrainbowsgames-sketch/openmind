@@ -58,13 +58,16 @@ export interface EventSink {
   emit(e: OpenMindEvent): void
 }
 
-export interface ExecutionContext {
-  readonly session: WorkerSession
-  /** The typed edge to this session's machine, bound to this context. */
-  readonly runtime: Runtime
-  /** The machine and directory this session owns. */
-  readonly workspace: Workspace
-  readonly capabilities: RuntimeCapabilities
+/**
+ * What every tool call gets, machine or not.
+ *
+ * Split from ExecutionContext because "having a sandbox" should not be a
+ * prerequisite for running a web search. Deep research needs permissions, a
+ * place to report progress and a way to be cancelled; it does not need a
+ * workspace, and forcing one on it would mean provisioning a machine to read a
+ * web page.
+ */
+export interface ToolContext {
   readonly permissions: PermissionContext
   readonly eventSink: EventSink
   /**
@@ -72,12 +75,28 @@ export interface ExecutionContext {
    *
    * The kernel has already put the relevant part in the prompt — this is for
    * the agent that wants to look further, which is the whole remaining job of
-   * `memory_search`. Optional because the sessionless surfaces have no project
-   * book to read; those fall back to the account's saved notes.
+   * `memory_search`.
    */
   readonly memory?: MemoryReader
   /** Aborted when the run is cancelled, so in-flight tool calls stop. */
   readonly abortSignal?: AbortSignal
+}
+
+/**
+ * A ToolContext that also has a machine.
+ *
+ * Required by the tools that touch one — filesystem, terminal, git, run_code.
+ * A tool that needs a workspace and receives only a ToolContext is refused
+ * rather than silently given a fresh sandbox, because a fresh sandbox runs
+ * fine and holds none of the work.
+ */
+export interface ExecutionContext extends ToolContext {
+  readonly session: WorkerSession
+  /** The typed edge to this session's machine, bound to this context. */
+  readonly runtime: Runtime
+  /** The machine and directory this session owns. */
+  readonly workspace: Workspace
+  readonly capabilities: RuntimeCapabilities
   /**
    * Take ownership of a sandbox a tool created. Ignored when it names the
    * machine already held — the session follows the machine, it does not
@@ -142,6 +161,32 @@ export function createExecutionContext(input: ExecutionContextInput): ExecutionC
   return ctx
 }
 
+/**
+ * Does this context carry a machine?
+ *
+ * The one place the narrowing happens. Everything below the tool transport
+ * asks this rather than reaching for a module global, which is what made the
+ * machine implicit in the first place.
+ */
+export function hasWorkspace(context?: ToolContext): context is ExecutionContext {
+  return Boolean(context && 'workspace' in context && 'runtime' in context)
+}
+
+/** A tool context with no machine. For web-only work — search, browse, memory. */
+export function toolContext(input: {
+  permissions: PermissionContext
+  eventSink?: EventSink
+  memory?: MemoryReader
+  abortSignal?: AbortSignal
+}): ToolContext {
+  return {
+    permissions: input.permissions,
+    eventSink: input.eventSink ?? NULL_SINK,
+    memory: input.memory,
+    abortSignal: input.abortSignal,
+  }
+}
+
 /** A sink that drops everything. For callers with no stream to feed. */
 export const NULL_SINK: EventSink = { emit: () => {} }
 
@@ -153,11 +198,12 @@ export const NULL_SINK: EventSink = { emit: () => {} }
  * does not own the vocabulary.
  */
 export function emit(
-  ctx: ExecutionContext | undefined,
+  ctx: ToolContext | undefined,
   kind: OpenMindEventKind,
   text: string,
   rest: Partial<OpenMindEvent> = {},
 ): void {
   if (!ctx) return
-  ctx.eventSink.emit(event(kind, text, { sessionId: ctx.session.id, ...rest }))
+  const sessionId = hasWorkspace(ctx) ? ctx.session.id : undefined
+  ctx.eventSink.emit(event(kind, text, { sessionId, ...rest }))
 }

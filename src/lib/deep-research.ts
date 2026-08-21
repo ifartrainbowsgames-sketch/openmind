@@ -2,6 +2,7 @@
 // split the question → parallel web_search → browse a few sources → cite.
 import { stripWorkspacePrompt } from './workspace'
 import { invokeCrewTool } from './crew-tools'
+import type { ToolContext } from './workforce/execution-context'
 
 const MAX_QUERIES = 4
 const MAX_BROWSE = 2
@@ -85,18 +86,29 @@ export interface DeepResearchRun {
   urls: string[]
 }
 
-export async function runDeepResearch(task: string): Promise<DeepResearchRun> {
+/**
+ * `context` is a ToolContext, not an ExecutionContext.
+ *
+ * Deep research reads web pages. It needs permissions, somewhere to report
+ * progress and a way to be cancelled; it does not need a machine, and
+ * demanding one would mean provisioning a sandbox to fetch a URL. That
+ * distinction is the whole reason the two context types are separate.
+ */
+export async function runDeepResearch(
+  task: string,
+  context?: ToolContext,
+): Promise<DeepResearchRun> {
   const queries = researchQueries(task)
   const legs = await Promise.all(
     queries.map(async (query) => ({
       query,
-      hits: await invokeCrewTool('web_search', query),
+      hits: await invokeCrewTool('web_search', query, undefined, context),
     })),
   )
   const urls = extractHttpUrls(legs.map((l) => l.hits).join('\n')).slice(0, MAX_BROWSE)
   const pages: { url: string; extract: string }[] = []
   for (const url of urls) {
-    pages.push({ url, extract: await invokeCrewTool('browse_url', url) })
+    pages.push({ url, extract: await invokeCrewTool('browse_url', url, undefined, context) })
   }
   return {
     dossier: formatResearchDossier(task, legs, pages),

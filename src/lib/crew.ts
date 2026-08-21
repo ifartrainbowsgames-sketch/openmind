@@ -15,6 +15,7 @@ import {
   platformKeysAreAllowed, setActiveCrewToolKeys, setActiveWorkspace, type CrewToolKeys,
 } from './crew-tools'
 import { conversationContext } from './workforce/conversation-context'
+import { toolContext } from './workforce/execution-context'
 import { getMemoryOwner } from './memory'
 import { needsDeepResearch, runDeepResearch } from './deep-research'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
@@ -252,7 +253,11 @@ export async function runCrew(
 
   const gatherNode = async (state: CS): Promise<Partial<CS>> => {
     if (!needsDeepResearch(state.task)) return { dossier: '' }
-    const run = await runDeepResearch(state.task)
+    // Web-only work, so a ToolContext is enough — it carries the run's
+    // permissions and cancellation without pretending research needs a machine.
+    const run = await runDeepResearch(state.task, toolContext({
+      permissions: { platformKeys: platformKeysAreAllowed() },
+    }))
     return {
       dossier: run.dossier,
       trace: [{

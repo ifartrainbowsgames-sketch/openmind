@@ -22,7 +22,6 @@ import {
   ALL_CAPABILITIES, runtimeCapabilities, type RuntimeCapabilities,
 } from './capabilities'
 import { event, type OpenMindEvent, type RunOutcome } from './events'
-import { setActiveSandbox } from '../crew-tools'
 import {
   NULL_SINK, createExecutionContext,
   type ExecutionContext, type MemoryReader, type PermissionContext,
@@ -258,12 +257,6 @@ export function createBuiltinRuntime(deps: BuiltinRuntimeDeps): AgentRuntime {
         memory: deps.memory,
         abortSignal: abort.signal,
       })
-
-      // Still bound, for the tools that reach the sandbox without a context —
-      // deep research and the chat crew share this transport. Both values come
-      // from the session, so they cannot disagree at the start of a run, and
-      // `adoptSandbox` keeps them together if a tool creates a machine.
-      setActiveSandbox(context.workspace.sandboxId)
 
       let done = false
       let failure: unknown

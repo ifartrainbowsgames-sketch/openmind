@@ -102,20 +102,15 @@ describe('production execution goes through AgentRuntime', () => {
 })
 
 /**
- * The second boundary: where a tool executes is an argument, not a global.
+ * The third boundary, and the one that is now absolute: there is no ambient
+ * machine.
  *
- * `setActiveSandbox` is the module-level binding the ExecutionContext replaced.
- * It still exists for the surfaces that have no session — the chat crew, deep
- * research — but every additional writer is a chance for the tools and the
- * session to end up on different live machines with nothing reporting it.
+ * `setActiveSandbox` / `getActiveSandbox` were the module-level binding every
+ * workspace tool read. They are gone from production entirely. The allowlist
+ * that used to name their callers is deliberately empty rather than deleted:
+ * an empty list asserted every run is a stronger statement than no list at all.
  */
-const SANDBOX_BINDERS = [
-  // Owns the value.
-  '/src/lib/crew-tools.ts',
-  // Binds it once per run, from the session, for the context-free tools that
-  // share the transport.
-  '/src/lib/workforce/builtin-runtime.ts',
-]
+const SANDBOX_BINDERS: string[] = []
 
 /**
  * Every surface that runs an employee outside the task graph, and what it is.
@@ -124,7 +119,7 @@ const SANDBOX_BINDERS = [
  * an excuse. Three of these are production: a user action runs a real employee
  * with real tools, including `run_code`, which reaches E2B. Having no session
  * did not mean having no machine — it meant inheriting whichever machine the
- * last task run left bound. They now open a conversation session instead.
+ * last task run left bound. They open a conversation session instead.
  */
 const SESSIONLESS_SURFACES: Record<string, 'production' | 'benchmark'> = {
   '/src/lib/crew.ts': 'production',
@@ -135,31 +130,50 @@ const SESSIONLESS_SURFACES: Record<string, 'production' | 'benchmark'> = {
 }
 
 describe('the machine a tool uses comes from its context', () => {
-  it('nothing new writes the module-level sandbox binding', () => {
+  it('no production code binds or reads an ambient sandbox', () => {
     const offenders = productionFiles
-      .filter(([, text]) => /\bsetActiveSandbox\s*\(/.test(text))
+      .filter(([, text]) => /\b(set|get)ActiveSandbox\s*\(/.test(text))
       .map(([path]) => path)
       .filter((path) => !SANDBOX_BINDERS.includes(path))
 
     expect(
       offenders,
-      'setActiveSandbox is the pre-context binding. A new writer means the tools ' +
-      'and the session can resolve different sandboxes — which looks entirely ' +
-      'live and is entirely wrong. Take an ExecutionContext instead.',
+      'There is no ambient machine. A tool that needs a workspace takes an ' +
+      'ExecutionContext; one that does not takes a ToolContext. Reintroducing ' +
+      'a global binding means the tools and the session can resolve different ' +
+      'sandboxes, which looks entirely live and is entirely wrong.',
     ).toEqual([])
   })
 
-  it('every allowlisted binder still binds', () => {
-    // The allowlist must shrink on its own. Two entries here named files that
-    // had stopped calling it, which is permanent permission for nothing —
-    // exactly the rot the runEmployee allowlist has a test against.
-    for (const path of SANDBOX_BINDERS) {
-      expect(sources[path], `${path} is allowlisted but does not exist`).toBeDefined()
-      expect(
-        /\bsetActiveSandbox\s*\(/.test(sources[path]),
-        `${path} no longer calls setActiveSandbox — remove it from SANDBOX_BINDERS`,
-      ).toBe(true)
-    }
+  it('the accessors no longer exist at all', () => {
+    // Stronger than "nobody calls them": they cannot be called.
+    const transport = sources['/src/lib/crew-tools.ts']
+    expect(transport).not.toMatch(/export function setActiveSandbox/)
+    expect(transport).not.toMatch(/export function getActiveSandbox/)
+  })
+
+  it('the allowlist is empty, and stays that way by being checked', () => {
+    // Every entry here would be a module permitted an implicit machine.
+    expect(SANDBOX_BINDERS).toEqual([])
+  })
+
+  it('the search above would actually find a binder', () => {
+    // Written after the first version of this file shipped a literal backspace
+    // where \b belonged, so the pattern matched nothing and the check passed
+    // against an empty search. A test that cannot fail is worse than no test:
+    // it reports a guarantee it is not making.
+    const pattern = /\b(set|get)ActiveSandbox\s*\(/
+    expect(pattern.test('  setActiveSandbox(id)')).toBe(true)
+    expect(pattern.test('  getActiveSandbox()')).toBe(true)
+    expect(pattern.test('  somethingElse(id)')).toBe(false)
+  })
+
+  it('a machine tool without a machine is refused', () => {
+    // The runtime half of the same invariant: the transport itself blocks a
+    // workspace tool that arrives with no ExecutionContext, rather than
+    // silently provisioning a sandbox that holds none of the work.
+    const transport = sources['/src/lib/crew-tools.ts']
+    expect(transport).toMatch(/isWorkspaceTool\(kind\) && !hasWorkspace\(context\)/)
   })
 
   it('every production surface outside the task graph has its own identity', () => {
@@ -169,9 +183,8 @@ describe('the machine a tool uses comes from its context', () => {
       if (kind !== 'production') continue
       expect(
         text,
-        `${path} runs employees with machine-capable tools. Without a context it ` +
-        'inherits whatever sandbox the last task run left bound and answers from ' +
-        "that task's files.",
+        `${path} runs employees with machine-capable tools and needs its own ` +
+        'workspace identity.',
       ).toMatch(/conversationContext\(/)
     }
   })

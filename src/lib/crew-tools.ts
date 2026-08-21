@@ -7,7 +7,7 @@ import { nangoLinked, customerConnectError } from './nango'
 import { stripWorkspacePrompt, type WorkspaceSpace } from './workspace'
 import { mockWebAct, parseWebActInput } from './web-act'
 import { blockedMessage, isStrict } from './execution-mode'
-import type { ExecutionContext } from './workforce/execution-context'
+import { hasWorkspace, type ToolContext } from './workforce/execution-context'
 
 export type CrewToolKind =
   | 'web_search'
@@ -92,18 +92,6 @@ let activeWorkspace: WorkspaceSpace | undefined
 let activeGuard: ((kind: CrewToolKind, summary: string) => Promise<boolean>) | undefined
 
 /**
- * The sandbox every workspace tool shares on the context-free surfaces.
- *
- * This used to be how the task graph worked too, and that was the weak point:
- * the runtime had to remember to bind it before the agent ran, and nothing
- * failed when it didn't — the tools just quietly resolved a different machine.
- * Task execution now passes an ExecutionContext instead, and a context always
- * wins over this value. What remains here serves the chat crew and deep
- * research, which have no session to carry.
- */
-let activeSandboxId: string | undefined
-
-/**
  * Sandbox work (npm install, a test suite) outlasts a web search, and the
  * function itself allows up to 240s per command.
  */
@@ -128,14 +116,6 @@ export function parseWorkspaceToolInput(input: string): WorkspaceToolInput {
     }
   }
   return { command: trimmed, path: trimmed, repo: trimmed }
-}
-
-export function setActiveSandbox(id?: string): void {
-  activeSandboxId = id?.trim() || undefined
-}
-
-export function getActiveSandbox(): string | undefined {
-  return activeSandboxId
 }
 
 const RISKY_BROWSE = /checkout|payment|pay\.|cart|billing|wallet|bank|unsubscribe|delete[-_ ]?account/i
@@ -729,7 +709,7 @@ async function invokeNangoCrewTool(kind: GithubCrewToolKind | NangoAppToolKind, 
  * `AbortSignal.any` is guarded because the tool layer also runs in older
  * embedded webviews.
  */
-function callSignal(context?: ExecutionContext): AbortSignal {
+function callSignal(context?: ToolContext): AbortSignal {
   const timeout = AbortSignal.timeout(WORKSPACE_TIMEOUT_MS)
   if (!context?.abortSignal || typeof AbortSignal.any !== 'function') return timeout
   return AbortSignal.any([timeout, context.abortSignal])
@@ -750,8 +730,19 @@ export async function invokeCrewTool(
    * the permissions and the cancellation signal — the module state below is
    * only consulted for callers that have no session.
    */
-  context?: ExecutionContext,
+  context?: ToolContext,
 ): Promise<string> {
+  // A machine tool without a machine is refused, not quietly given a fresh
+  // sandbox. A fresh sandbox runs perfectly and holds none of the work, which
+  // is the failure this whole layer exists to stop looking like success.
+  if (isWorkspaceTool(kind) && !hasWorkspace(context)) {
+    return blockedMessage(
+      'capability_unavailable',
+      kind,
+      'no workspace in scope — this tool needs an ExecutionContext with a machine',
+    )
+  }
+
   if (needsCrewToolConfirm(kind, input)) {
     const confirm = context?.permissions.confirm ?? activeGuard
     const allowed = await (confirm?.(kind, crewToolConfirmSummary(kind, input)) ?? Promise.resolve(true))
@@ -783,23 +774,22 @@ export async function invokeCrewTool(
       const res = await fetch(url, {
         method: 'POST',
         headers,
-        // sandboxId keeps successive workspace calls on the same machine. The
-        // context owns it when there is one; the module value is the fallback
-        // for sessionless callers.
+        // sandboxId keeps successive workspace calls on the same machine, and
+        // it comes from the context or not at all. There is no ambient
+        // machine any more.
         body: JSON.stringify({
           tool: kind, input, keys,
-          sandboxId: context?.workspace.sandboxId ?? activeSandboxId,
+          sandboxId: hasWorkspace(context) ? context.workspace.sandboxId : undefined,
           platformKeys: context?.permissions.platformKeys ?? platformKeysAllowed,
         }),
         signal: callSignal(context),
       })
       const data = (await res.json()) as Partial<CrewToolResponse> & { error?: string; sandboxId?: string }
       // Adopt the sandbox the function used — it may have created or replaced
-      // one. Both are updated so a run that mixes context-carrying tools with
-      // sessionless ones cannot end up straddling two machines.
-      if (typeof data.sandboxId === 'string' && data.sandboxId) {
-        activeSandboxId = data.sandboxId
-        context?.adoptSandbox(data.sandboxId)
+      // one. This is also how workspace recovery detects a substitution: the
+      // id that served the call is compared against the one we asked for.
+      if (typeof data.sandboxId === 'string' && data.sandboxId && hasWorkspace(context)) {
+        context.adoptSandbox(data.sandboxId)
       }
       if (res.ok && typeof data.output === 'string') return data.output
       if (typeof data.output === 'string') return data.output

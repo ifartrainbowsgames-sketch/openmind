@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { _resetConversations, conversationContext } from './conversation-context'
-import { getActiveSandbox, setActiveSandbox } from '../crew-tools'
+import { _resetRepositories } from './session-repository'
 
 vi.mock('../supabase')
 
@@ -20,20 +20,20 @@ vi.mock('../supabase')
 
 afterEach(() => {
   _resetConversations()
-  setActiveSandbox(undefined)
+  _resetRepositories()
 })
 
 describe('a conversation has its own machine', () => {
-  it("does not inherit the task graph's sandbox", () => {
-    // Exactly the situation: a task run just finished and left this bound.
-    setActiveSandbox('sbx-task-machine')
+  it('starts with no machine rather than inheriting one', () => {
+    // The original bug was inheriting whatever a task run left in a module
+    // global. That global no longer exists, so the property to hold now is
+    // simply that a fresh conversation owns nothing until it asks.
     const ctx = conversationContext({
       conversationId: 'user-1',
       permissions: { platformKeys: false },
     })
     expect(ctx.workspace.sandboxId).toBeUndefined()
-    // And building one does not disturb the binding for whoever set it.
-    expect(getActiveSandbox()).toBe('sbx-task-machine')
+    expect(ctx.workspace.projectId).toBe('conversation:user-1')
   })
 
   it('keeps one workspace per conversation across turns', () => {
@@ -58,10 +58,11 @@ describe('a conversation has its own machine', () => {
     expect(second.workspace.sandboxId).toBe('sbx-chat')
   })
 
-  it("does not leak a conversation's machine back into the task binding", () => {
-    const ctx = conversationContext({ conversationId: 'user-1', permissions: { platformKeys: false } })
-    ctx.adoptSandbox('sbx-chat')
-    expect(getActiveSandbox()).toBeUndefined()
+  it("does not leak a conversation's machine into another conversation", () => {
+    const one = conversationContext({ conversationId: 'user-1', permissions: { platformKeys: false } })
+    one.adoptSandbox('sbx-chat')
+    const two = conversationContext({ conversationId: 'user-2', permissions: { platformKeys: false } })
+    expect(two.workspace.sandboxId).toBeUndefined()
   })
 
   it('carries the run permissions rather than reading module state', () => {

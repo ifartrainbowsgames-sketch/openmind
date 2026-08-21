@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBuiltinRuntime } from './builtin-runtime'
 import { emptyTaskContext } from './agent-runtime'
-import { setActiveSandbox } from '../crew-tools'
 import { _resetRepositories } from './session-repository'
 import { ALL_TOOLS } from '../agent/connections'
 import type { AgentBrain, PlanStep } from '../agent'
@@ -79,7 +78,6 @@ async function drain(events: AsyncIterable<OpenMindEvent>): Promise<OpenMindEven
 afterEach(() => {
   seen = []
   adopt = undefined
-  setActiveSandbox(undefined)
   // Sessions and workspaces are now a shared process service — which is the
   // point, and which means a test that does not reset it inherits the previous
   // test's machine.
@@ -98,11 +96,10 @@ describe('one session, one workspace', () => {
     expect(seen).toEqual(['sbx-known'])
   })
 
-  it('resolves the machine from the context, not from module state', async () => {
-    // The exact bug the context exists to make impossible: something else set
-    // the global to a different live sandbox. Before, the tool would have used
-    // it. Now the tool never reads it.
-    setActiveSandbox('sbx-WRONG')
+  it('resolves the machine from the context and nowhere else', async () => {
+    // There is no longer a global to poison — `setActiveSandbox` is gone from
+    // the codebase, which runtime-boundary.test.ts asserts. What is left to
+    // check is that the tool sees the session's machine and only that.
     const runtime = createBuiltinRuntime(deps(probeBrain()))
     const session = await runtime.createSession({
       projectId: 'p1',

@@ -30,7 +30,13 @@ describe('crew tools', () => {
   it('falls back to a stamped mock when the proxy is unavailable', async () => {
     await expect(invokeCrewTool('web_search', 'open source agents')).resolves.toMatch(/\[MOCK · web_search\]/)
     await expect(invokeCrewTool('browse_url', 'https://example.com/docs')).resolves.toMatch(/\[MOCK · browse_url\]/)
-    await expect(invokeCrewTool('run_code', 'print(2)')).resolves.toMatch(/\[MOCK · run_code\]/)
+  })
+
+  it('refuses a machine tool with no machine, before it can reach a mock', async () => {
+    // run_code needs a sandbox. Falling back to a mock would be the friendlier
+    // answer and the wrong one: the caller asked to execute code and nothing
+    // executed it, so "no workspace in scope" is the truthful reply.
+    await expect(invokeCrewTool('run_code', 'print(2)')).resolves.toContain('no workspace in scope')
   })
 
   it('mock output includes the query', () => {
