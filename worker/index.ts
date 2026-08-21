@@ -84,12 +84,48 @@ function brainFor(entry?: { providerId: string; apiKey: string }): AgentBrain {
   })
 }
 
-async function patchRun(id: string, patch: Record<string, unknown>): Promise<void> {
+/**
+ * Write a terminal status, but only over a row still marked `running`.
+ *
+ * Without the guard, a run the user cancelled mid-flight was overwritten with
+ * `completed` when the worker finished — the cancellation was not merely
+ * ignored, it was erased, and the UI then showed the run as having succeeded.
+ */
+async function finishRun(id: string, patch: Record<string, unknown>): Promise<void> {
   const { error } = await db
     .from('agent_runs')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('id', id)
-  if (error) console.error(`run ${id}: status write failed — ${error.message}`)
+    .eq('status', 'running')
+  if (error) console.error(`run ${id}: terminal write failed — ${error.message}`)
+}
+
+/** How often a claimed run re-reads its own status to notice a cancellation. */
+const CANCEL_POLL_MS = 5000
+
+/**
+ * Watch for the row being cancelled while the run is in flight.
+ *
+ * The client can only set `cancelled`; nothing else moves a running row. So a
+ * status that is no longer `running` means the user stopped it, and the run
+ * loop should not start another task.
+ */
+function watchForCancel(id: string): { cancelled: () => boolean; stop: () => void } {
+  let cancelled = false
+  const timer = setInterval(() => {
+    void db
+      .from('agent_runs')
+      .select('status')
+      .eq('id', id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data && data.status !== 'running') cancelled = true
+      })
+  }, CANCEL_POLL_MS)
+  return {
+    cancelled: () => cancelled,
+    stop: () => clearInterval(timer),
+  }
 }
 
 async function executeRun(run: RunRow): Promise<void> {
@@ -100,12 +136,13 @@ async function executeRun(run: RunRow): Promise<void> {
   setProjectOwner(run.user_id)
   const strict = run.options.strictMode === true
   setExecutionMode(strict ? 'strict' : 'demo')
+  const cancel = watchForCancel(run.id)
 
   try {
     const keys = await loadKeys(run.user_id)
     const worker = keys.get('worker')
     if (strict && !worker) {
-      await patchRun(run.id, {
+      await finishRun(run.id, {
         status: 'needs_user',
         error: 'No provider key stored. Add one in Settings so background runs can execute.',
         finished_at: new Date().toISOString(),
@@ -137,10 +174,18 @@ async function executeRun(run: RunRow): Promise<void> {
           : null,
       // Progress streams to the row so a reconnecting browser sees it live.
       onTrace: () => undefined,
+      shouldStop: cancel.cancelled,
     })
 
+    if (cancel.cancelled()) {
+      // The row already says `cancelled`; write nothing over it. Reporting a
+      // status here would be the erasure this fix exists to prevent.
+      console.log(`run ${run.id}: cancelled by the user`)
+      return
+    }
+
     const blocked = result.project.tasks.some((t) => t.status === 'needs_user')
-    await patchRun(run.id, {
+    await finishRun(run.id, {
       status: blocked ? 'needs_user' : 'completed',
       project_id: result.project.id,
       snapshot: result.project,
@@ -151,12 +196,13 @@ async function executeRun(run: RunRow): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error(`run ${run.id}: failed — ${message}`)
-    await patchRun(run.id, {
+    await finishRun(run.id, {
       status: 'failed',
       error: message.slice(0, 2000),
       finished_at: new Date().toISOString(),
     })
   } finally {
+    cancel.stop()
     setExecutionMode('demo')
   }
 }

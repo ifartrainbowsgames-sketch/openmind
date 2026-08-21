@@ -78,6 +78,15 @@ export interface RunTaskGraphOptions {
   budget?: ProjectBudget
   /** Persist the ledger as it progresses. Off by default — callers opt in. */
   persist?: boolean
+  /**
+   * Asked before each task starts. Returning true stops the run.
+   *
+   * Checked between tasks rather than mid-task: a task is the smallest unit
+   * that produces a coherent artifact, and abandoning one halfway leaves the
+   * ledger describing work that was never finished. The worker uses this to
+   * honour a cancellation the user made after the run was claimed.
+   */
+  shouldStop?: () => boolean | Promise<boolean>
 }
 
 const WORKER_TOOLS: Record<WorkerKind, string[]> = {
@@ -459,6 +468,19 @@ async function executeBatch(
   const trace: TraceLine[] = []
 
   for (const task of batch) {
+    // Cancellation is checked here, before any spend. A run the user stopped
+    // must not start another worker.
+    if (options.shouldStop && (await options.shouldStop())) {
+      next = updateTask(next, task.id, { status: 'blocked', blocker: 'Run cancelled' })
+      next = logEvent(next, {
+        action: 'report_blocker',
+        taskId: task.id,
+        worker: task.worker,
+        detail: 'cancelled by the user',
+      })
+      continue
+    }
+
     if (task.stepsUsed >= task.limits.maxSteps) {
       next = updateTask(next, task.id, { status: 'blocked', blocker: 'Max steps exceeded' })
       continue

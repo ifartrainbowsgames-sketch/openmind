@@ -130,11 +130,16 @@ export async function watchRun(
   // the UI still converges. Cheap: one row by primary key.
   const poll = setInterval(async () => {
     if (stopped) return
-    const { data: row } = await supabase.from('agent_runs').select('*').eq('id', runId).single()
-    if (row) {
-      emit(row as Record<string, unknown>)
-      if (isTerminal((row as { status: RunStatus }).status)) clearInterval(poll)
+    // maybeSingle, not single: a deleted row is a normal outcome here, and
+    // `single` turns it into an error that used to be swallowed — leaving the
+    // interval running against a row that no longer exists.
+    const { data: row } = await supabase.from('agent_runs').select('*').eq('id', runId).maybeSingle()
+    if (!row) {
+      clearInterval(poll)
+      return
     }
+    emit(row as Record<string, unknown>)
+    if (isTerminal((row as { status: RunStatus }).status)) clearInterval(poll)
   }, 5000)
 
   return () => {
