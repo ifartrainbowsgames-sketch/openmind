@@ -1,5 +1,6 @@
 import type { ToolCall, TraceLine } from './agent'
 import type { CrewArtifact } from './crew'
+import type { RunStatus } from './run-queue'
 import { DEFAULT_BUDGET, ZERO_SPEND, type ProjectSnapshot } from './task-ledger'
 import { parseWorkspaceSpace, type WorkspaceSpace } from './workspace'
 
@@ -23,6 +24,11 @@ export interface MobileMessage {
   crewRun?: CrewRunSummary
   /** Set when this message tracks a queued background run, so it updates in place. */
   runId?: string
+  /**
+   * Last status seen for `runId`. Persisted so a reload can tell a run that is
+   * still on the worker from one that finished before the tab closed.
+   */
+  runStatus?: RunStatus
 }
 
 export interface MobileThread {
@@ -106,6 +112,64 @@ export function titleFromPrompt(prompt: string, maxLength = 42): string {
 export function sortMobileThreads(threads: MobileThread[]): MobileThread[] {
   return [...threads].sort((a, b) => b.updatedAt - a.updatedAt)
 }
+
+/**
+ * Strip the bulky half of a message — trace lines, tool output and artifact
+ * bodies. The conversation survives; the evidence behind it does not. Only used
+ * when the full history will not fit.
+ */
+function slimMessage(message: MobileMessage): MobileMessage {
+  return {
+    ...message,
+    trace: undefined,
+    toolCalls: undefined,
+    crewRun: message.crewRun ? { ...message.crewRun, artifacts: [] } : undefined,
+  }
+}
+
+/**
+ * Persist threads, shedding history rather than throwing when the quota is hit.
+ *
+ * Threads carry full tool output and artifact bodies, so an active account
+ * reaches the ~5MB localStorage ceiling in normal use. An unguarded write threw
+ * inside a render effect, which took the page down instead of degrading.
+ *
+ * Three passes: everything, then everything slimmed except the newest thread,
+ * then the newest few threads slimmed. Returns what was actually written.
+ */
+export function persistThreads(
+  threads: MobileThread[],
+  store: Pick<Storage, 'setItem'> | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+): 'full' | 'slimmed' | 'truncated' | 'failed' {
+  if (!store) return 'failed'
+
+  const write = (value: MobileThread[]): boolean => {
+    try {
+      store.setItem(MOBILE_THREADS_KEY, JSON.stringify(value))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  if (write(threads)) return 'full'
+
+  const sorted = sortMobileThreads(threads)
+  const slimmed = sorted.map((thread, index) =>
+    index === 0 ? thread : { ...thread, messages: thread.messages.map(slimMessage) },
+  )
+  if (write(slimmed)) return 'slimmed'
+
+  const truncated = slimmed
+    .slice(0, MAX_PERSISTED_THREADS)
+    .map((thread) => ({ ...thread, messages: thread.messages.slice(-MAX_PERSISTED_MESSAGES).map(slimMessage) }))
+  if (write(truncated)) return 'truncated'
+
+  return 'failed'
+}
+
+export const MAX_PERSISTED_THREADS = 20
+export const MAX_PERSISTED_MESSAGES = 40
 
 function isMessage(value: unknown): value is MobileMessage {
   if (!value || typeof value !== 'object') return false
