@@ -4,8 +4,9 @@ import {
   RECALL_LIMITS, clearLayer, emptyMemory, priorFailures, recall, remember, renderMemory,
 } from './memory-layers'
 import {
-  browserArtifacts, distinctHosts, emptySessionResult, needsVision, orderActions,
+  browserArtifacts, distinctHosts, needsVision, orderActions,
 } from './browser-worker'
+import { emptySessionResult } from './browser-runtime'
 import type { ExecResult, GitResult, Runtime } from './runtime'
 
 // ── Phase 11: worktrees ─────────────────────────────────────────────────────

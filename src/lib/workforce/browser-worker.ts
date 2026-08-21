@@ -1,5 +1,5 @@
 /**
- * Browser work that produces artifacts.
+ * Browser strategy: what to do with a browser, and what survives afterwards.
  *
  * `web_act` already drives hosted Chrome, but it returns prose — "I visited the
  * page and the pricing looks like…". That is unusable downstream: an analyst
@@ -14,55 +14,13 @@
  * is read by a model that may hallucinate what it sees; the accessibility tree
  * is already there and is exact. Vision is for when the page genuinely encodes
  * meaning visually — a chart, a layout bug — not as a default.
+ *
+ * The machine half lives in `browser-runtime.ts`. Nothing here should know how
+ * a page is actually fetched.
  */
 
+import type { BrowserAction, BrowserSessionResult, VisitRecord } from './browser-runtime'
 import type { ArtifactRecord } from '../task-ledger'
-
-export type BrowserActionKind = 'navigate' | 'click' | 'type' | 'extract' | 'screenshot' | 'download'
-
-export interface BrowserAction {
-  kind: BrowserActionKind
-  /** For navigate. */
-  url?: string
-  /** For click/type — prefer a role/name pair over a CSS selector. */
-  target?: string
-  /** For type. */
-  value?: string
-  /** For extract — what shape the caller wants back. */
-  fields?: string[]
-}
-
-export interface VisitRecord {
-  url: string
-  title?: string
-  at: number
-  /** How the content was obtained. */
-  via: 'dom' | 'vision' | 'download'
-}
-
-export interface BrowserSessionResult {
-  visits: VisitRecord[]
-  /** Structured data extracted, keyed by whatever the caller asked for. */
-  data: Record<string, unknown>[]
-  screenshots: string[]
-  downloads: string[]
-  /** Set when the session could not run at all. */
-  blocked?: string
-}
-
-export function emptySessionResult(): BrowserSessionResult {
-  return { visits: [], data: [], screenshots: [], downloads: [] }
-}
-
-/**
- * The interface a browser provider implements. Playwright, Browser Use and an
- * MCP browser server all fit; none is assumed.
- */
-export interface BrowserProvider {
-  readonly id: string
-  available(): Promise<boolean>
-  run(actions: BrowserAction[]): Promise<BrowserSessionResult>
-}
 
 /**
  * Turn a session into the artifacts the ledger expects.

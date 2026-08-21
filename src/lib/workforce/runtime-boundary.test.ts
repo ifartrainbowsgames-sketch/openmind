@@ -146,3 +146,52 @@ describe('the machine a tool uses comes from its context', () => {
     expect(sources['/src/lib/agent/graph.ts']).toMatch(/tool\.run\(spec\.input, spec\.args, context\)/)
   })
 })
+
+/**
+ * The third boundary: the browser has a WHO half and a WHERE half, and they
+ * were in one file.
+ *
+ * `browser-worker.ts` held `BrowserProvider` and `BrowserAction` alongside
+ * `needsVision` and `browserArtifacts` — the transport and the strategy for
+ * using it. The consequence of leaving that merged is specific: Playwright
+ * ends up buried inside a browser agent, and swapping the provider means
+ * editing the agent.
+ *
+ * Neither half is on a product path yet; the live browser path is still the
+ * `web_act` tool. This locks the layering so that when one is wired, the split
+ * is still there.
+ */
+describe('the browser worker does not own the browser', () => {
+  const worker = sources['/src/lib/workforce/browser-worker.ts']
+  const runtime = sources['/src/lib/workforce/browser-runtime.ts']
+
+  it('both halves exist', () => {
+    expect(worker, 'browser-worker.ts not found').toBeDefined()
+    expect(runtime, 'browser-runtime.ts not found').toBeDefined()
+  })
+
+  it('the machine half declares the provider and the action vocabulary', () => {
+    expect(runtime).toMatch(/interface BrowserProvider\b/)
+    expect(runtime).toMatch(/interface BrowserAction\b/)
+    expect(worker).not.toMatch(/interface BrowserProvider\b/)
+  })
+
+  it('the strategy half declares the strategy', () => {
+    expect(worker).toMatch(/function needsVision\b/)
+    expect(worker).toMatch(/function browserArtifacts\b/)
+    expect(runtime).not.toMatch(/function needsVision\b/)
+  })
+
+  it('neither half reaches a transport directly', () => {
+    // A provider is implemented against BrowserProvider, not by either of
+    // these files calling out. The day one of them imports crew-tools is the
+    // day the layering is gone again.
+    // Imports only. Both files name Playwright in prose, which is the point —
+    // they describe a provider they must not reach for themselves.
+    for (const [name, text] of [['worker', worker], ['runtime', runtime]] as const) {
+      const imports = text.match(/from\s*['"][^'"]+['"]/g) ?? []
+      const offenders = imports.filter((i) => /crew-tools|playwright|puppeteer|browserless/i.test(i))
+      expect(offenders, `${name} reaches a transport directly`).toEqual([])
+    }
+  })
+})

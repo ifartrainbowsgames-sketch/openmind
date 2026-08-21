@@ -261,13 +261,47 @@ real E2B machine, including `TASK B SEES TASK A'S FILE`.
 ## What this changes about the order
 
 1. ~~**ExecutionContext**~~ — landed. The identity invariant is an argument now.
-2. **Memory as a kernel service** — first on the architectural risk list.
-   Capability debt blocks a *feature* (learned routing); memory debt breaks
-   *correctness* as soon as a second runtime arrives. That is the harder
-   failure, so it goes first even though it is the larger change.
-3. **Capability vocabulary unification** — required before learned routing;
-   currently two disjoint sets.
-4. **Browser split** — mechanical; the halves already exist.
+2. ~~**Memory as a kernel service**~~ — landed. It went ahead of capabilities
+   because capability debt blocks a *feature* (learned routing) while memory
+   debt breaks *correctness* the moment a second runtime arrives.
+3. ~~**Capability vocabulary unification**~~ — landed.
+4. ~~**Browser split**~~ — landed. Layering only; see below.
 
 Evolution, ACP, terminal and the workbench all sit above these. Attaching them
-first would attach them to boundaries that are still moving.
+first would have attached them to boundaries that were still moving.
+
+---
+
+## What landed
+
+| Was | Is |
+|---|---|
+| Tools read the machine from a module global the runtime had to remember to bind | `tool.run(input, args, ctx)` — the machine is an argument |
+| `runTask(session, task)`; the builtin composed its own prompt from the ledger | `runTask(session, task, context)` — canonical memory reaches every runtime or none |
+| Memory was a tool a model might call; `task-runner` never touched it | Kernel service: `buildContext()` before dispatch, `recordOutcome()` on every terminal path |
+| `WorkerCapability` (11 semantic) and `CapabilitySet` (4 booleans), unconnected | One vocabulary; runtime mechanics moved to `traits` |
+| `assignWorker` called once, at plan time | Dispatch refuses a task the runtime cannot serve, naming the shortfall |
+| Tool events replayed from the result after the task finished | Emitted by the actor as each call happens |
+| `cancel()` set a flag the next task checked | Aborts in-flight tool calls |
+| `browser-worker.ts` held provider *and* strategy | `browser-runtime.ts` (WHERE/HOW) and `browser-worker.ts` (WHO) |
+
+Four invariant tests hold the lines: `runtime-boundary` (one execution path,
+one sandbox binder, one browser split), `workspace-identity` (one session one
+machine, including a case that poisons the old global and expects no effect),
+`memory-boundary` (every runtime receives project memory), `capabilities`
+(runtimes and workers speak one language).
+
+## What did not land
+
+**The browser is still not wired.** Both halves are correct and neither is on
+a product path — the live browser path remains the `web_act` tool. The split
+fixes the layering so that whichever half gets wired first does not drag the
+other in. It does not make the subsystem real.
+
+**`setActiveSandbox` still exists** for the four sessionless surfaces. The
+boundary test caps the list; it does not empty it.
+
+**Memory durability is the ledger's.** The project layer persists with
+`ProjectState`; the user layer with `agent_memories`. There is no
+project-scoped memory table, and consolidation is available but nothing calls
+it on a schedule.
