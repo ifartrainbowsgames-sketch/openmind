@@ -10,5 +10,5 @@
     "emitDeclarationOnly": true,
     "declarationDir": "./node_modules/.tmp/scripts-types"
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts", "src/**/*.tsx", "src/**/*.json", "worker/**/*.ts", "supabase/functions/**/crypto.ts"]
+  "include": ["runtimes/**/*.ts", "scripts/**/*.ts", "src/**/*.ts", "src/**/*.tsx", "src/**/*.json", "worker/**/*.ts", "supabase/functions/**/crypto.ts"]
 }

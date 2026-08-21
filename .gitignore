@@ -37,3 +37,4 @@ supabase/.temp/
 # resolves the whole app npm tree, and nothing reads it back.
 deno.lock
 .verify-restart*
+.verify-claude-code*
