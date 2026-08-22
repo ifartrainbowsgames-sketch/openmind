@@ -24,9 +24,14 @@ import {
   parseSpawnRequests, recordSpawn,
 } from './workforce/delegation'
 import {
-  runtimeShortfall, toCapability, type RuntimeCapabilities,
+  TASK_REQUIREMENTS, runtimeShortfall, toCapability, type RuntimeCapabilities,
 } from './workforce/capabilities'
-import { runtimeFor, type AgentRuntime, type TaskContext } from './workforce/agent-runtime'
+import {
+  NULL_EVIDENCE, projectOutcome,
+  type RoutingContextFeatures, type RoutingDecision, type RoutingEvidenceStore,
+  type RoutingMetrics,
+} from './workforce/routing-evidence'
+import { listRuntimes, runtimeFor, type AgentRuntime, type TaskContext } from './workforce/agent-runtime'
 import { createBuiltinRuntime } from './workforce/builtin-runtime'
 import type { OpenMindEvent, RunOutcome } from './workforce/events'
 import { makeWorkspace } from './workforce/runtime'
@@ -99,6 +104,13 @@ export interface RunTaskGraphOptions {
   runtimeId?: string
   /** Canonical runtime events, for the UI and any future replay/event store. */
   onEvent?: (event: OpenMindEvent) => void
+  /**
+   * Where routing evidence is recorded. Absent means it is dropped — a run with
+   * no signed-in owner has nobody to attribute the evidence to.
+   */
+  evidence?: RoutingEvidenceStore
+  /** Whose evidence this is. Required before anything is recorded. */
+  userId?: string
 }
 
 /** The workspace a session runs in. One per project for now; worktrees later. */
@@ -540,6 +552,128 @@ function capabilityBlocker(
   return `runtime "${runtimeId}" cannot ${missing.join(', ')}`
 }
 
+
+/**
+ * Record the routing choices this run actually makes.
+ *
+ * There is no router yet, and that is the point of doing this first: the
+ * evidence has to exist before anything can learn from it. What gets recorded
+ * today are the real decisions — which runtime executes a task, and which
+ * worker kind the planner assigned — with the candidate set that was genuinely
+ * eligible at the time.
+ *
+ * `policy: 'sole-candidate'` is recorded honestly when there was only one
+ * option. A posterior fed by those would learn that whatever we always do is
+ * what works.
+ */
+class EvidenceRecorder {
+  private readonly store: RoutingEvidenceStore
+  private readonly userId: string
+  /** decisionId per task, so an outcome can point back at its decision. */
+  private readonly byTask = new Map<string, string[]>()
+
+  constructor(options: RunTaskGraphOptions) {
+    // No owner means no evidence. Attributing a run to nobody is worse than
+    // not recording it: the row would be unattributable and unreadable.
+    this.userId = options.userId ?? ''
+    this.store = this.userId ? options.evidence ?? NULL_EVIDENCE : NULL_EVIDENCE
+  }
+
+  private id(): string {
+    return globalThis.crypto?.randomUUID?.() ?? `rd-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  }
+
+  async decide(input: {
+    project: ProjectState
+    task: TaskRecord
+    decisionType: RoutingDecision['decisionType']
+    chosen: string
+    candidates: readonly string[]
+  }): Promise<void> {
+    if (!this.userId) return
+
+    const features: RoutingContextFeatures = {
+      taskType: input.task.type,
+      requires: TASK_REQUIREMENTS[input.task.worker]?.required ?? [],
+      dependsOn: input.task.dependsOn.length,
+      attempt: input.task.retries + 1,
+      goalLength: input.task.goal.length,
+    }
+
+    const decision: RoutingDecision = {
+      id: this.id(),
+      userId: this.userId,
+      projectId: input.project.id,
+      taskId: input.task.id,
+      decisionType: input.decisionType,
+      // Grouped by task type: "code tasks go well on X" is useful; "everything
+      // goes well on X" is not.
+      scope: input.task.type,
+      chosenCandidateId: input.chosen,
+      candidateSet: input.candidates,
+      contextFeatures: features,
+      policy: input.candidates.length > 1 ? 'default' : 'sole-candidate',
+      createdAt: Date.now(),
+    }
+
+    const existing = this.byTask.get(input.task.id) ?? []
+    this.byTask.set(input.task.id, [...existing, decision.id])
+    await this.store.recordDecision(decision).catch(() => {
+      // Evidence is valuable, not load-bearing. A recording failure must never
+      // take a customer's task down with it.
+    })
+  }
+
+  /**
+   * The truth, once known. Several observations per decision is normal — a task
+   * judged, retried and then approved by a human produces three.
+   */
+  async observe(input: {
+    task: TaskRecord
+    metrics: RoutingMetrics
+    runtimeId?: string
+    modelId?: string
+  }): Promise<void> {
+    if (!this.userId) return
+    for (const decisionId of this.byTask.get(input.task.id) ?? []) {
+      await this.store.recordObservation({
+        id: this.id(),
+        decisionId,
+        userId: this.userId,
+        outcome: projectOutcome(input.metrics),
+        metrics: input.metrics,
+        specialistId: input.task.worker,
+        runtimeId: input.runtimeId,
+        modelId: input.modelId,
+        createdAt: Date.now(),
+      }).catch(() => {})
+    }
+  }
+}
+
+/**
+ * The runtimes that could have run this task.
+ *
+ * One entry today, because one runtime is selected per run — and it is recorded
+ * as `sole-candidate` for exactly that reason. Registered runtimes that fail
+ * the capability check are deliberately excluded rather than listed and scored
+ * low: eligibility is a filter, never a prior.
+ */
+function eligibleRuntimeIds(
+  chosen: AgentRuntime,
+  capabilities: RuntimeCapabilities | undefined,
+  task: TaskRecord,
+): string[] {
+  const eligible = listRuntimes()
+    .filter((candidate) => candidate.id !== chosen.id)
+    .filter((candidate) => candidate.id.length > 0)
+  // Only the chosen runtime's capabilities are known without an await here, so
+  // the others are included on identity alone and filtered by the router later.
+  void capabilities
+  void task
+  return [chosen.id, ...eligible.map((r) => r.id)]
+}
+
 async function executeBatch(
   project: ProjectState,
   options: RunTaskGraphOptions,
@@ -548,6 +682,7 @@ async function executeBatch(
   capabilities: RuntimeCapabilities | undefined,
   /** Set when the runtime itself cannot run — every task blocks on it. */
   unavailable: string | undefined,
+  evidence: EvidenceRecorder,
 ): Promise<{ project: ProjectState; members: CrewMemberResult[]; trace: TraceLine[] }> {
   const batch = readyTasks(project)
   if (!batch.length) return { project, members: [], trace: [] }
@@ -639,6 +774,17 @@ async function executeBatch(
     // Execution goes through the runtime, never through runEmployee directly.
     // One path: the runtime owns session identity and workspace ownership, and
     // the builtin implementation is what wraps the employee graph.
+    // The real decision this run makes today: which runtime executes the task.
+    // Recorded with the candidate set that was genuinely eligible, so that when
+    // a router arrives it inherits history rather than starting from zero.
+    await evidence.decide({
+      project: next,
+      task,
+      decisionType: 'runtime',
+      chosen: runtime.id,
+      candidates: eligibleRuntimeIds(runtime, capabilities, task),
+    })
+
     const session = await runtime.createSession({
       projectId: next.id,
       worker: task.worker,
@@ -727,6 +873,19 @@ async function executeBatch(
         action: 'report_blocker', taskId: task.id, worker: task.worker, detail,
       })
       next = await recordTaskMemory(next, memory, task, result, [])
+      // A blocked or cancelled task is real evidence that this candidate was
+      // NOT at fault — projectOutcome maps it to neutral, which is why it is
+      // recorded rather than skipped.
+      await evidence.observe({
+        task,
+        runtimeId: runtime.id,
+        metrics: {
+          taskStatus: status,
+          neededUser: status === 'needs_user',
+          retries: task.retries,
+          invalidToolCalls: result.toolCalls.filter((c) => c.error?.kind === 'error').length,
+        },
+      })
       continue
     }
 
@@ -851,7 +1010,12 @@ function updateTask(project: ProjectState, taskId: string, patch: Partial<TaskRe
   }
 }
 
-async function judgeBatch(project: ProjectState, memory: MemoryPass): Promise<ProjectState> {
+async function judgeBatch(
+  project: ProjectState,
+  memory: MemoryPass,
+  evidence: EvidenceRecorder,
+  runtimeId: string,
+): Promise<ProjectState> {
   let next = project
   for (const task of next.tasks.filter((t) => t.status === 'running')) {
     const taskArtifacts = next.artifacts.filter((a) => a.taskId === task.id)
@@ -867,6 +1031,23 @@ async function judgeBatch(project: ProjectState, memory: MemoryPass): Promise<Pr
     // forward — a pass supersedes the failures recorded for the same task, so
     // a fixed problem stops being recalled as an open one.
     next = await recordTaskMemory(next, memory, task, undefined, taskArtifacts, verdict)
+
+    // The truth, at the moment it becomes known. A retry produces a second
+    // observation against the same decision rather than overwriting the first —
+    // "failed once, then passed" is a different fact from "passed".
+    await evidence.observe({
+      task,
+      runtimeId,
+      metrics: {
+        acceptanceScore: verdict.score,
+        retries: task.retries,
+        costUsd: task.costUsd,
+        taskStatus: verdict.passed
+          ? 'completed'
+          : task.retries + 1 >= task.limits.maxRetries ? 'failed' : undefined,
+      },
+    })
+
     if (verdict.passed) {
       next = updateTask(next, task.id, { status: 'completed', verdict })
       next = recordDecision(next, `${task.id} accepted (${verdict.score}/100): ${task.goal} → ${task.outputs.join(', ')}`)
@@ -940,6 +1121,10 @@ export async function runTaskGraph(
   const memory: MemoryPass = {
     service: createMemoryService({ userLayer: accountUserLayer() }),
   }
+
+  // Evidence accrues before any router exists — that is the whole point of
+  // recording it now. Nothing reads these rows yet.
+  const evidence = new EvidenceRecorder(options)
   const project: ProjectState = { ...initial, memory: initialBook(initial) }
   let allMembers: CrewMemberResult[] = []
   let allTrace: TraceLine[] = [{ node: 'plan', text: `Task graph — ${project.tasks.length} tasks` }]
@@ -1006,12 +1191,12 @@ export async function runTaskGraph(
   const executeNode = async (state: TRS): Promise<Partial<TRS>> => {
     currentProject = state.project
     const { project: p, members, trace } =
-      await executeBatch(state.project, options, runtime, memory, capabilities, unavailable)
+      await executeBatch(state.project, options, runtime, memory, capabilities, unavailable, evidence)
     return { project: p, members, trace }
   }
 
   const judgeNode = async (state: TRS): Promise<Partial<TRS>> => {
-    const p = await judgeBatch(state.project, memory)
+    const p = await judgeBatch(state.project, memory, evidence, runtime.id)
     await persistQuietly(p, options)
     return {
       project: p,

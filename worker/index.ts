@@ -17,6 +17,7 @@ import { setProjectOwner } from '../src/lib/project-store'
 import { openKey } from './crypto'
 import { registerWorkerRuntimes } from './runtimes'
 import { createCredentialVault } from './credential-vault'
+import { createRoutingStore } from './routing-store'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -169,6 +170,11 @@ async function executeRun(run: RunRow): Promise<void> {
       // runtime, because answering with a different agent is worse than not
       // answering.
       runtimeId: typeof run.options.runtimeId === 'string' ? run.options.runtimeId : undefined,
+      // Routing evidence, attributed to the customer whose run this is. Nothing
+      // reads it yet — it accrues so that a router, when there is one, inherits
+      // history instead of starting from zero.
+      userId: run.user_id,
+      evidence: createRoutingStore(db),
       workspace: run.options.workspace as never,
       skill: run.options.skill as never,
       // The vault holds the customer's model key only. Tools run on our
