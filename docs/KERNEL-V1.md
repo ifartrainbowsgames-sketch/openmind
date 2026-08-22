@@ -124,6 +124,18 @@ Cleanup ("release every workspace this project owns") and permissions
 ("who may attach to this machine") both need to ask that question, and parsing
 an id to answer it is how the id becomes load-bearing.
 
+### Runtime resolution must become request-scoped before concurrency
+
+The worker re-registers runtimes per claimed run so an external runtime resolves
+*that customer's* credential. It is safe only because the run loop is serial.
+
+> Runtime resolution must become request-scoped before worker execution becomes
+> concurrent. A process-global mutable runtime registry must never contain
+> customer-bound credential resolvers during concurrent execution.
+
+This is a credential-crossing bug the moment two runs overlap, not a
+performance note.
+
 ### Cold-cache conversation attachment
 
 `conversationContext` is synchronous — chat latency and task-execution latency

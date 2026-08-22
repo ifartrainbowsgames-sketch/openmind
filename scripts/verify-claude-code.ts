@@ -10,11 +10,8 @@
  * durable.
  *
  *   set -a; . ./.env; set +a
- *   npx tsx scripts/verify-claude-code.ts          # runs both phases
- *   npx tsx scripts/verify-claude-code.ts write
- *   npx tsx scripts/verify-claude-code.ts resume
- *   npx tsx scripts/verify-claude-code.ts cancel
- *   npx tsx scripts/verify-claude-code.ts missing
+ *   npx tsx scripts/verify-claude-code.ts            # every phase
+ *   npx tsx scripts/verify-claude-code.ts approval   # one phase
  *
  * Gates, all of which must pass before this integration is called live:
  *
@@ -26,6 +23,10 @@
  *   6. cancellation actually stops the provider
  *   7. provider failure becomes failed, never a fallback
  *   8. files are read back from the workspace, not from its description of them
+ *   9. no Claude Code path exists outside AgentRuntime (unit-tested)
+ *  10. an action the policy refuses becomes needs_user, through runTaskGraph
+ *
+ * See runtimes/conformance.ts for the contract every future runtime inherits.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -33,6 +34,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createClaudeCodeRuntime } from '../runtimes/claude-code-runtime'
+import { CLAUDE_CODE_CONFORMANCE, missingGates } from '../runtimes/conformance'
+import { runTaskGraph } from '../src/lib/task-runner'
+import { _resetRuntimes, registerRuntime } from '../src/lib/workforce/agent-runtime'
+import { setRepositories } from '../src/lib/workforce/session-repository'
 import { emptyTaskContext, type TaskContext } from '../src/lib/workforce/agent-runtime'
 import { createMemoryService } from '../src/lib/workforce/memory-service'
 import {
@@ -50,6 +55,18 @@ const ROOT = join(tmpdir(), 'openmind-claude-code')
 const PROJECT = 'verify-cc'
 const FILE = 'notes.md'
 const SECRET = 'OPENMIND-CANONICAL-FACT'
+
+/**
+ * Every phase, named once.
+ *
+ * The driver used to list phases inline, and adding one to the switch without
+ * adding it to the driver printed "All phases passed" while silently skipping
+ * it — a green banner covering less than it claimed, which is the exact bug
+ * class this whole harness exists to catch. Now the list is the source of
+ * truth for both, and the count is printed so the number is checkable.
+ */
+const PHASES = ['write', 'resume', 'cancel', 'missing', 'approval'] as const
+type Phase = (typeof PHASES)[number]
 
 let failures = 0
 function check(label: string, passed: boolean, detail = ''): void {
@@ -305,6 +322,83 @@ async function missing(): Promise<void> {
   rmSync(dir, { recursive: true, force: true })
 }
 
+
+// ── PERMISSION WAITING, through the whole orchestrator ──────────────────────
+
+/**
+ * The gate the CLI makes easy to get wrong.
+ *
+ * Claude Code reports `permission_denials` alongside `subtype: "success"`. A
+ * task that could not do its job because it needed approval therefore looks
+ * completed at the provider boundary, and looked completed at the orchestrator
+ * boundary too until this test: `runTaskGraph` captured the runtime's outcome
+ * into a trace line and nothing else, so `needs_user` fell through to artifact
+ * parsing and was judged as a task that produced nothing.
+ *
+ * This runs the REAL task graph, not the runtime alone, because the claim is
+ * about the whole chain:
+ *
+ *   provider denial -> runtime needs_user -> task needs_user -> run needs_user
+ */
+async function approval(): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'openmind-cc-approval-'))
+  const repos = freshRepositories()
+  setRepositories(repos)
+  _resetRuntimes()
+
+  const rt = runtime({ workspaceRoot: dir, repositories: repos })
+  registerRuntime(rt, true)
+
+  // `npm install` is denied by DEFAULT_PERMISSIONS: installing packages is a
+  // decision, not the work. Asking for it is the point.
+  const goal = 'Run the shell command `npm install left-pad` in this directory, then report the installed version.'
+
+  const run = await runTaskGraph(goal, {
+    plan: async () => [],
+    respond: async () => 'planning only',
+  }, { runtimeId: 'claude-code', budget: {
+    maxAgentRuns: 4, maxToolCalls: 8, maxCostUsd: 2, maxTokens: 200_000, deadlineMs: 300_000,
+  } })
+
+  const tasks = run.project.tasks
+  const waiting = tasks.filter((t) => t.status === 'needs_user')
+
+  check('gate 10 — the task is needs_user, not completed and not failed',
+    waiting.length > 0,
+    tasks.map((t) => `${t.id}=${t.status}`).join(' '))
+
+  check('and NOT completed — a denial is not success',
+    !tasks.some((t) => t.status === 'completed'),
+    tasks.filter((t) => t.status === 'completed').map((t) => t.id).join(',') || 'none completed')
+
+  const blockers = run.project.blockers.join(' | ')
+  check('the run carries what was asked for, so a UI can show it',
+    /approval|permission|npm install|Bash/i.test(blockers),
+    blockers.slice(0, 200) || '(no blockers)')
+
+  // The worker derives the run row's status from exactly this.
+  const rowStatus = tasks.some((t) => t.status === 'needs_user') ? 'needs_user' : 'other'
+  check('agent_runs would be written as needs_user', rowStatus === 'needs_user', rowStatus)
+
+  const sessions = await repos.sessions.find(
+    { kind: 'project', projectId: run.project.id, worker: waiting[0]?.worker ?? 'code' },
+    'claude-code',
+  )
+  check('the WorkerSession is waiting', sessions?.status === 'waiting',
+    sessions?.status ?? '(no session)')
+
+  _resetRuntimes()
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// ── The conformance report is honest ────────────────────────────────────────
+
+function conformance(): void {
+  const gaps = missingGates(CLAUDE_CODE_CONFORMANCE)
+  check('every conformance gate has named evidence', gaps.length === 0,
+    gaps.join(', ') || 'all twelve covered')
+}
+
 function freshRepositories(): Repositories {
   return { sessions: memorySessionRepository(), workspaces: memoryWorkspaceRepository() }
 }
@@ -330,18 +424,22 @@ async function main(): Promise<void> {
     if (child('cancel') !== 0) process.exit(1)
     console.log('\n— a provider that is not there —')
     if (child('missing') !== 0) process.exit(1)
-    console.log('\nAll phases passed')
+    console.log('\n— an action the policy does not permit —')
+    if (child('approval') !== 0) process.exit(1)
+    console.log(`\nAll ${PHASES.length} phases passed`)
     return
+  }
+
+  if (!PHASES.includes(phase as Phase)) {
+    console.log(`usage: verify-claude-code.ts [${PHASES.join('|')}]`)
+    process.exit(1)
   }
 
   if (phase === 'write') await write()
   else if (phase === 'resume') await resume()
   else if (phase === 'cancel') await cancel()
   else if (phase === 'missing') await missing()
-  else {
-    console.log('usage: verify-claude-code.ts [write|resume|cancel|missing]')
-    process.exit(1)
-  }
+  else if (phase === 'approval') { conformance(); await approval() }
 
   console.log(failures ? `\n${failures} check(s) failed` : '\nphase passed')
   process.exit(failures ? 1 : 0)

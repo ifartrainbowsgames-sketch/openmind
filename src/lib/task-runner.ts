@@ -28,7 +28,7 @@ import {
 } from './workforce/capabilities'
 import { runtimeFor, type AgentRuntime, type TaskContext } from './workforce/agent-runtime'
 import { createBuiltinRuntime } from './workforce/builtin-runtime'
-import type { OpenMindEvent } from './workforce/events'
+import type { OpenMindEvent, RunOutcome } from './workforce/events'
 import { makeWorkspace } from './workforce/runtime'
 import { renderConstitution, withProjectRules } from './workforce/constitution'
 import { mergeAcceptance, renderSop, sopFor } from './workforce/sop'
@@ -665,15 +665,22 @@ async function executeBatch(
     }
 
     let result: RunResult | undefined
+    let outcome: RunOutcome | undefined
+    let outcomeText = ''
+    /** Approval requests the runtime surfaced, in the order they were asked. */
+    const approvals: string[] = []
     for await (const ev of runtime.runTask(session, task, taskContext)) {
       // Runtime events reach the trace, so the UI observes the same stream the
       // orchestrator does rather than a parallel one.
       if (ev.kind === 'task_finished') {
         result = ev.result as RunResult | undefined
+        outcome = ev.outcome
+        outcomeText = ev.text
         if (ev.outcome && ev.outcome !== 'completed') {
           trace.push({ node: 'act', text: `${task.id} ${task.worker} — ${ev.outcome}: ${ev.text}` })
         }
       } else if (ev.kind === 'blocked') {
+        approvals.push(ev.text)
         trace.push({ node: 'act', text: `${task.worker}: blocked — ${ev.text}` })
       } else if (ev.kind === 'agent_thinking') {
         // Same live trace the direct call used to produce, now sourced from the
@@ -693,6 +700,33 @@ async function executeBatch(
         detail: 'runtime returned no result',
       })
       next = await recordTaskMemory(next, memory, task, undefined, [])
+      continue
+    }
+
+    // THE RUNTIME'S OUTCOME IS AUTHORITATIVE.
+    //
+    // It used to reach nothing but a trace line, so a runtime reporting
+    // `needs_user` — Claude Code waiting on an approval it was refused — fell
+    // straight through to artifact parsing and judging. The task would then
+    // fail for having produced no artifacts, which is true and is not the
+    // reason. "Awaiting your approval to run npm install" and "the worker
+    // produced nothing" are different states and the user can only act on one.
+    if (outcome && outcome !== 'completed') {
+      const detail = approvals.length ? approvals.join('; ') : outcomeText
+      const status: TaskRecord['status'] =
+        outcome === 'needs_user' ? 'needs_user'
+        : outcome === 'cancelled' ? 'blocked'
+        : outcome === 'blocked' ? 'blocked'
+        : 'failed'
+
+      next = updateTask(next, task.id, { status, blocker: detail })
+      if (status === 'needs_user' || status === 'blocked') {
+        next = { ...next, blockers: [...next.blockers, `${task.id}: ${detail}`] }
+      }
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker, detail,
+      })
+      next = await recordTaskMemory(next, memory, task, result, [])
       continue
     }
 
