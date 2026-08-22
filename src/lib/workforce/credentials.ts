@@ -97,5 +97,6 @@ export function missingCredentialReason(
   requirement: RuntimeCredentialRequirement,
 ): string {
   const why = requirement.reason ? ` ${requirement.reason}` : ''
-  return `${runtimeId} requires a ${requirement.provider} credential.${why} Connect one in Settings → AI Providers.`
+  const article = /^[aeiou]/i.test(requirement.provider) ? 'an' : 'a'
+  return `${runtimeId} requires ${article} ${requirement.provider} credential.${why} Connect one in Settings → AI Providers.`
 }

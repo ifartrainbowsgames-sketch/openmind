@@ -38,3 +38,4 @@ supabase/.temp/
 deno.lock
 .verify-restart*
 .verify-claude-code*
+scripts/.fixture-secret
