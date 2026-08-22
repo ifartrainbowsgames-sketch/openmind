@@ -24,9 +24,42 @@ export interface SopStep {
   rationale?: string
 }
 
+/**
+ * Where a skill is in its life.
+ *
+ * Borrowed from agentoperations/agent-registry, whose important property is
+ * that EVALUATIONS ARE EXTERNAL SIGNALS: the registry never lets a thing decide
+ * it deserves promotion. That matters more here than anywhere, because the
+ * thing being evolved and the thing doing the evolving are both language
+ * models.
+ *
+ *   candidate   a mutation exists; nothing has run it
+ *   evaluated   it has been measured against the incumbent
+ *   approved    measured better, and cleared for use
+ *   active      what a specialist actually gets today
+ *   superseded  a later version won
+ *   rejected    measured, and not better
+ *
+ * Nothing is promoted automatically. Promotion stays gated until the
+ * evaluation signal is trustworthy, and `activeSkills()` is the only thing the
+ * prompt path reads.
+ */
+export type SkillStatus =
+  | 'candidate' | 'evaluated' | 'approved' | 'active' | 'superseded' | 'rejected'
+
 export interface Sop {
   id: string
   name: string
+  /**
+   * Bumped when the CONTENT changes, so evidence can distinguish
+   * `systematic-debugging@7` from `@6`. Without it three variants of one skill
+   * are indistinguishable in the routing evidence, which is precisely what
+   * evolution needs to compare.
+   */
+  version: number
+  /** The version this was mutated from, when it was. */
+  parentVersion?: number
+  status: SkillStatus
   /** The task types this procedure serves. */
   appliesTo: readonly WorkerKind[]
   whenToUse: string
@@ -45,6 +78,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'deep-research',
     name: 'Deep Research',
+    version: 1,
+    status: 'active',
     appliesTo: ['research'],
     whenToUse: 'A question needs evidence from multiple independent sources.',
     inputs: ['the research question', 'any prior findings in the project ledger'],
@@ -76,6 +111,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'build-feature',
     name: 'Build a Feature',
+    version: 1,
+    status: 'active',
     appliesTo: ['code'],
     whenToUse: 'Code must be written or changed in a real workspace.',
     inputs: ['requirements', 'the existing repository'],
@@ -104,6 +141,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'verify-work',
     name: 'Verify Work',
+    version: 1,
+    status: 'active',
     appliesTo: ['tester', 'reviewer'],
     whenToUse: "Another worker's output must be checked before it counts.",
     inputs: ['the artifacts under test', 'their acceptance criteria'],
@@ -127,6 +166,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'analysis',
     name: 'Structured Analysis',
+    version: 1,
+    status: 'active',
     appliesTo: ['analyst'],
     whenToUse: 'Findings must be turned into a decision or a comparison.',
     inputs: ['upstream artifacts'],
@@ -147,6 +188,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'browser-research',
     name: 'Browser Research',
+    version: 1,
+    status: 'active',
     appliesTo: ['browser'],
     whenToUse: 'Data lives behind interaction — a form, a login wall, a rendered page.',
     inputs: ['target URLs', 'what to extract'],
@@ -168,6 +211,8 @@ export const SOPS: readonly Sop[] = [
   {
     id: 'write-deliverable',
     name: 'Write a Deliverable',
+    version: 1,
+    status: 'active',
     appliesTo: ['writer'],
     whenToUse: 'A finished document is the output.',
     inputs: ['upstream artifacts', 'the audience'],
@@ -186,6 +231,25 @@ export const SOPS: readonly Sop[] = [
 
 export function sopFor(worker: WorkerKind): Sop | undefined {
   return SOPS.find((s) => s.appliesTo.includes(worker))
+}
+
+/**
+ * A skill and an SOP are the same object.
+ *
+ * `Sop` is the name this had first; `SkillDefinition` is the name the evolution
+ * work uses. Deliberately an alias rather than a second type: an SOP already
+ * carries capabilities, a procedure, expected outputs and acceptance criteria
+ * that the judge ENFORCES, so a parallel SkillDefinition would be a second
+ * source of truth for the same thing — the failure this codebase keeps removing.
+ *
+ * (Unrelated to `src/lib/skills.ts`, which names the chat modes — ask, plan,
+ * debug, multitask. Same word, different concept, and worth saying once.)
+ */
+export type SkillDefinition = Sop
+
+/** Only these reach a prompt. A candidate mutation must never leak into a run. */
+export function activeSkills(skills: readonly Sop[] = SOPS): Sop[] {
+  return skills.filter((s) => s.status === 'active')
 }
 
 export function sopById(id: string): Sop | undefined {
