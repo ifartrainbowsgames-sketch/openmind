@@ -56,6 +56,7 @@ import {
   NULL_SINK, createExecutionContext,
   type ExecutionContext, type PermissionContext,
 } from '../src/lib/workforce/execution-context'
+import { traced } from '../src/lib/telemetry'
 
 /**
  * What Claude Code can do, in the shared vocabulary.
@@ -321,6 +322,70 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
     })
   }
 
+  async function openSession(
+    input: CreateSessionInput,
+    mark: (attributes: Record<string, unknown>) => void,
+  ): Promise<AgentSession> {
+    const scope: SessionScope = { kind: 'project', projectId: input.projectId, worker: input.worker }
+    const existing = await repos.sessions.find(scope, 'claude-code')
+    const resumed = Boolean(existing && isResumable(existing))
+    let session = resumed && existing
+      ? touch(existing, { status: 'running' })
+      : newSession(scope, 'claude-code')
+
+    let record = session.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
+    record ??= makeWorkspaceRecord({
+      projectId: scopeProjectId(scope),
+      kind: 'shared',
+      runtime: 'local',
+      path: pathFor(input.projectId),
+    })
+
+    // A local directory is its own external id: if the path is gone, the
+    // workspace is gone, and the provider session id resolving is no comfort
+    // because the files it edited do not exist.
+    record = { ...record, runtime: 'local', externalId: record.path }
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(record.path, { recursive: true })
+
+    // The span that matters most here. The tool backend once provisioned a
+    // fresh sandbox for a dead id and returned exit 0, so a trace showing
+    // "resumed" is worth nothing unless it also shows WHICH machine served the
+    // probe against WHICH one was asked for.
+    const requested = record.externalId
+    const held = record
+    const recovery: WorkspaceRecovery = await traced('workspace.verify', {
+      ids: { runtimeId: 'claude-code', sessionId: session.id, workspaceId: held.id },
+    }, async (verify) => {
+      const outcome = await recoverWorkspace({ record: held, context: contextFor(session, held) })
+      verify({
+        'workspace.requested_id': requested ?? '(none)',
+        'workspace.actual_id': outcome.record.externalId ?? '(none)',
+        'workspace.identity_verified': outcome.kind === 'resumed' || outcome.kind === 'recreated',
+        'workspace.recovery': outcome.kind,
+        'workspace.status': outcome.record.status,
+        'workspace.reason': 'reason' in outcome ? outcome.reason : '',
+      })
+      return outcome
+    })
+
+    record = recovery.record
+    await repos.workspaces.save(record)
+    session = touch(session, { workspaceId: record.id })
+    await repos.sessions.save(session)
+
+    mark({
+      'session.resumed': resumed,
+      // Presence, never the id. It is internal runtime metadata and the
+      // sanitiser redacts it by name anyway.
+      'session.has_provider_session': Boolean(session.providerSessionId),
+      'session.tasks_served': session.taskIds.length,
+      'workspace.path_present': Boolean(record.path),
+    })
+
+    return { ...session, workspace: toWorkspace(record), recovery }
+  }
+
   return {
     id: 'claude-code',
     credentials: CLAUDE_CODE_CREDENTIALS,
@@ -365,38 +430,9 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
     },
 
     async createSession(input: CreateSessionInput): Promise<AgentSession> {
-      const scope: SessionScope = { kind: 'project', projectId: input.projectId, worker: input.worker }
-      const existing = await repos.sessions.find(scope, 'claude-code')
-      const resumed = Boolean(existing && isResumable(existing))
-      let session = resumed && existing
-        ? touch(existing, { status: 'running' })
-        : newSession(scope, 'claude-code')
-
-      let record = session.workspaceId ? await repos.workspaces.get(session.workspaceId) : null
-      record ??= makeWorkspaceRecord({
-        projectId: scopeProjectId(scope),
-        kind: 'shared',
-        runtime: 'local',
-        path: pathFor(input.projectId),
-      })
-
-      // A local directory is its own external id: if the path is gone, the
-      // workspace is gone, and the provider session id resolving is no comfort
-      // because the files it edited do not exist.
-      record = { ...record, runtime: 'local', externalId: record.path }
-      const { mkdir } = await import('node:fs/promises')
-      await mkdir(record.path, { recursive: true })
-
-      const recovery: WorkspaceRecovery = await recoverWorkspace({
-        record,
-        context: contextFor(session, record),
-      })
-      record = recovery.record
-      await repos.workspaces.save(record)
-      session = touch(session, { workspaceId: record.id })
-      await repos.sessions.save(session)
-
-      return { ...session, workspace: toWorkspace(record), recovery }
+      return traced('runtime.session', {
+        ids: { runtimeId: 'claude-code', projectId: input.projectId, specialistId: input.worker },
+      }, (mark) => openSession(input, mark))
     },
 
     async resumeSession(sessionId: string): Promise<AgentSession | null> {
@@ -473,7 +509,20 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
 
       const { spawn } = await import('node:child_process')
       // Resolved here, used immediately, referenced nowhere else.
-      const credential = deps.credential ? await deps.credential().catch(() => null) : null
+      const credential = await traced('runtime.session', {
+        ids: { ...ctx, runtimeId: 'claude-code', providerId: 'anthropic' },
+      }, async (mark) => {
+        const resolved = deps.credential ? await deps.credential().catch(() => null) : null
+        mark({
+          'credential.step': 'resolve',
+          'credential.provider': 'anthropic',
+          // Presence only. The key itself is redacted by the sanitiser anyway,
+          // but it should never be handed to it in the first place.
+          'credential.resolved': Boolean(resolved),
+          'credential.required': Boolean(deps.credential),
+        })
+        return resolved
+      })
       if (deps.credential && !credential) {
         yield event('task_finished', missingCredentialReason('claude-code', CLAUDE_CODE_CREDENTIALS[0]), {
           ...ctx, outcome: 'needs_user',
@@ -640,6 +689,21 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
         current = touch(current, { status: 'waiting' })
         await repos.sessions.save(current)
         const summary = denials.map((d) => `${d.tool}: ${d.detail}`).join('; ')
+
+        // THE false-success case, made obvious. The CLI reports subtype
+        // "success" while refusing to do the work, so all three values are put
+        // on one span: what the provider said, what it was refused, and what
+        // OpenMind concluded. Seeing them together is the whole point.
+        await traced('runtime.execute', { ids: { ...ctx, runtimeId: 'claude-code' } }, async (mark) => {
+          mark({
+            'permission.denied_count': denials.length,
+            'permission.tools': denials.map((d) => d.tool).join(','),
+            'permission.requested': denials.map((d) => d.detail).join(' | '),
+            'provider.subtype': 'success',
+            'openmind.outcome': 'needs_user',
+            'runtime.false_success_guarded': true,
+          })
+        })
         yield event('task_finished', `approval required — ${summary}`, {
           ...ctx,
           outcome: 'needs_user',

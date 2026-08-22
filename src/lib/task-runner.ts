@@ -68,7 +68,7 @@ import {
   type WorkerKind,
 } from './task-ledger'
 import { blockedMessage, isStrict } from './execution-mode'
-import { traced, type TraceIds } from './telemetry'
+import { currentTraceId, endTraceRoot, traced, type TraceIds } from './telemetry'
 import { withCrewTools, withGithubWorkspaceTools } from './crew'
 import type { SkillId } from './skills'
 import type { WorkspaceSpace } from './workspace'
@@ -920,6 +920,10 @@ async function executeBatch(
         'runtime.outcome': outcome ?? 'none',
         'runtime.tool_calls': result?.toolCalls.length ?? 0,
         'runtime.approvals_requested': approvals.length,
+        // WHAT was asked for, not just how many. A count tells you a run is
+        // waiting; only the text tells you what to approve, which is the
+        // question a person opening this trace actually has.
+        'runtime.approvals': approvals.join(' | '),
         'runtime.has_result': Boolean(result),
       })
     })
@@ -1380,45 +1384,57 @@ export async function runTaskGraph(
     runtimeId: runtime.id,
   }
 
-  for await (const update of await compiled.stream({ rawTask, project, answer: '', members: [], trace: [] }, { streamMode: 'updates' })) {
-    for (const partial of Object.values(update) as Partial<TRS>[]) {
-      final = {
-        ...final,
-        ...partial,
-        project: partial.project ?? final.project,
-        members: partial.members ? final.members.concat(partial.members) : final.members,
-        trace: partial.trace ? final.trace.concat(partial.trace) : final.trace,
+  // ONE trace per run.
+  //
+  // Every `traced()` call outside an active span starts its own ROOT, so
+  // without this wrapper a single run scattered into six unrelated traces —
+  // memory.load here, routing.select there — and Phoenix showed six things
+  // that happened rather than one thing that happened. Phoenix confirmed it:
+  // the first live run produced two trace ids for three spans.
+  await traced('openmind.run', {
+    ids: runIds,
+    root: true,
+    attributes: { 'run.goal_length': rawTask.length },
+  }, async (recordRun) => {
+    for await (const update of await compiled.stream({ rawTask, project, answer: '', members: [], trace: [] }, { streamMode: 'updates' })) {
+      for (const partial of Object.values(update) as Partial<TRS>[]) {
+        final = {
+          ...final,
+          ...partial,
+          project: partial.project ?? final.project,
+          members: partial.members ? final.members.concat(partial.members) : final.members,
+          trace: partial.trace ? final.trace.concat(partial.trace) : final.trace,
+        }
+        if (partial.members) allMembers = allMembers.concat(partial.members)
+        if (partial.trace) allTrace = allTrace.concat(partial.trace)
       }
-      if (partial.members) allMembers = allMembers.concat(partial.members)
-      if (partial.trace) allTrace = allTrace.concat(partial.trace)
     }
-  }
 
-  setActiveCrewToolKeys({})
-  const artifacts = toCrewArtifacts(final.project)
-
-  // One span describing the whole run, emitted at the end because that is when
-  // the outcome is known. The individual outcomes are kept apart rather than
-  // flattened to success/failure — needs_user and cancelled are answers, not
-  // degrees of failure.
-  const byStatus = final.project.tasks.reduce<Record<string, number>>((acc, t) => {
-    acc[t.status] = (acc[t.status] ?? 0) + 1
-    return acc
-  }, {})
-  await traced('task.outcome', { ids: runIds }, async (record) => {
-    record({
-      'run.goal_length': rawTask.length,
+    // Recorded INSIDE the root, not after it. Emitted afterwards it became its
+    // own trace, and the id handed back to the caller pointed at a single
+    // orphaned span rather than at the run.
+    const byStatus = final.project.tasks.reduce<Record<string, number>>((acc, t) => {
+      acc[t.status] = (acc[t.status] ?? 0) + 1
+      return acc
+    }, {})
+    recordRun({
       'run.tasks': final.project.tasks.length,
       'run.completed': byStatus.completed ?? 0,
       'run.failed': byStatus.failed ?? 0,
       'run.needs_user': byStatus.needs_user ?? 0,
       'run.blocked': byStatus.blocked ?? 0,
-      'run.artifacts': artifacts.length,
+      'run.artifacts': final.project.artifacts.length,
       'run.tokens': final.project.spend.tokens,
       'run.cost_usd': final.project.spend.costUsd,
       'run.blockers': final.project.blockers.length,
     })
   })
+
+  const traceId = currentTraceId()
+  endTraceRoot()
+
+  setActiveCrewToolKeys({})
+  const artifacts = toCrewArtifacts(final.project)
 
   return {
     answer: final.answer,
@@ -1427,6 +1443,10 @@ export async function runTaskGraph(
     trace: allTrace,
     employeeIds: [...new Set(allMembers.map((m) => m.employeeId))],
     project: snapshot(final.project),
+    // Correlation only. Undefined when telemetry is off, which is the honest
+    // answer — a run with no trace must not carry an id that resolves to
+    // somebody else's.
+    traceId,
   }
 }
 

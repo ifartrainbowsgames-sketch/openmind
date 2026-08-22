@@ -30,6 +30,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { startTelemetry, stopTelemetry, currentTraceId, telemetryActive } from '../src/lib/telemetry'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -414,6 +415,10 @@ function child(phase: string): number {
 
 async function main(): Promise<void> {
   const phase = process.argv[2]
+  // Telemetry is opt-in here too. When it is on, the trace id is printed so a
+  // human can open the exact trace rather than search for it.
+  const tracing = await startTelemetry()
+  if (tracing) console.log('telemetry: on')
 
   if (!phase) {
     console.log('— PHASE 1: first task —')
@@ -440,6 +445,16 @@ async function main(): Promise<void> {
   else if (phase === 'cancel') await cancel()
   else if (phase === 'missing') await missing()
   else if (phase === 'approval') { conformance(); await approval() }
+
+  if (telemetryActive()) {
+    // The exact trace, printed so a human can open it rather than search for
+    // one by timestamp — which is wrong precisely when two runs are close
+    // together.
+    const id = currentTraceId()
+    console.log(`\ntrace    ${id ?? '(none)'}`)
+    console.log('         http://localhost:6006')
+    await stopTelemetry()
+  }
 
   console.log(failures ? `\n${failures} check(s) failed` : '\nphase passed')
   process.exit(failures ? 1 : 0)

@@ -1,0 +1,45 @@
+# OpenMind cloud worker — runs queued task graphs. NOT the web app.
+#
+# The root Dockerfile builds the Vite bundle and then switches to an nginx
+# stage, so a worker built from it can only ever serve static files: the final
+# image has no node, no tsx, and no worker/. This one exists because those two
+# deployments want opposite things, and Railway reads a different config file
+# per service so neither has to distort the other.
+
+FROM node:22-bookworm-slim
+
+# ripgrep is how Claude Code searches a workspace, git is how a workspace
+# becomes a real repo, and ca-certificates is how anything reaches Supabase or
+# a provider over TLS. All three are absent from -slim.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+
+# A full install, deliberately — not `--omit=dev`. The worker executes
+# TypeScript directly through tsx (`npm run worker` → `tsx worker/index.ts`),
+# and tsx is a devDependency. There is no compile step here to strip it back
+# out of, so omitting dev dependencies produces an image that cannot start.
+RUN npm ci --no-audit --fund=false || npm install --no-audit --fund=false
+
+# The runtime the browser asks for by id. `registerWorkerRuntimes` probes
+# `claude --version` at boot; without the CLI on PATH every run that selects
+# `claude-code` blocks with "not installed on this worker" rather than running.
+# Blocking is the correct behaviour, but it is not the behaviour we want.
+RUN npm install -g @anthropic-ai/claude-code
+
+COPY . .
+
+# Set after install, not before: `NODE_ENV=production` during `npm ci` would
+# skip the devDependencies the previous stage just explained we need.
+ENV NODE_ENV=production \
+    OPENMIND_WORKSPACE_ROOT=/workspaces
+RUN mkdir -p /workspaces
+
+# No EXPOSE, and railway.worker.toml sets no healthcheckPath. This process
+# polls `agent_runs` over Postgres and listens on nothing, so an HTTP
+# healthcheck would fail forever against a worker that is working fine.
+CMD ["npm", "run", "worker"]

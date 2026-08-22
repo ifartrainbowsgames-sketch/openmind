@@ -178,6 +178,16 @@ export function _setTracerForTesting(next: Tracer | undefined): void {
 export interface SpanOptions {
   ids?: TraceIds
   attributes?: Record<string, unknown>
+  /**
+   * This span is the run.
+   *
+   * A root PINS the trace id for its duration, so `currentTraceId()` reports
+   * the run's trace rather than whichever span happened to start last. Without
+   * it the id handed back to a caller belonged to the final span — which, if
+   * that span was emitted outside the root, was a DIFFERENT trace entirely.
+   * Phoenix caught exactly that: the id returned resolved to a one-span trace.
+   */
+  root?: boolean
 }
 
 /**
@@ -218,7 +228,7 @@ export async function traced<T>(
       try {
         span.setAttributes(idAttributes(options.ids ?? {}))
         if (options.attributes) record(options.attributes)
-        noteTraceId(span.spanContext?.().traceId)
+        noteTraceId(span.spanContext?.().traceId, options.root)
       } catch {
         /* as above */
       }
@@ -263,8 +273,22 @@ export function _setTraceIdForTesting(id: string | undefined): void {
   lastTraceId = id
 }
 
-export function noteTraceId(id: string | undefined): void {
-  if (id) lastTraceId = id
+let pinned = false
+
+export function noteTraceId(id: string | undefined, isRoot = false): void {
+  if (!id) return
+  if (isRoot) {
+    lastTraceId = id
+    pinned = true
+    return
+  }
+  // A child never overwrites the run's id.
+  if (!pinned) lastTraceId = id
+}
+
+/** Release the pin when a run ends, so the next run reports its own trace. */
+export function endTraceRoot(): void {
+  pinned = false
 }
 
 function idAttributes(ids: TraceIds): SafeAttributes {

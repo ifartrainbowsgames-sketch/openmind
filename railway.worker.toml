@@ -1,0 +1,34 @@
+# Railway config for the WORKER service only.
+#
+# Point the worker service at this file explicitly:
+#   Service → Settings → Config-as-code → railway.worker.toml
+# (or serviceInstanceUpdate { railwayConfigFile: "railway.worker.toml" }).
+#
+# Without that setting the service falls back to Railpack, which detects a Vite
+# app, builds the frontend, and serves dist/ with Caddy — which is exactly what
+# this service was doing while appearing to deploy.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.worker"
+
+[deploy]
+startCommand = "npm run worker"
+
+# No healthcheckPath, on purpose. The worker binds no port; an HTTP probe
+# against it fails forever and Railway then restarts a healthy worker in a loop.
+# Liveness here is "it claimed a run", which the deploy logs show directly.
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# One replica.
+#
+# Not a correctness requirement — each replica is its own process and
+# `claim_agent_run` claims rows atomically, so two replicas cannot take the same
+# run. The constraint is inside a process: `registerWorkerRuntimes` re-registers
+# runtimes per claimed run with that customer's credential resolver, which is
+# only safe because index.ts runs one task at a time. Scale this by raising
+# numReplicas, never by making a single process concurrent.
+# See docs/KERNEL-V1.md.
+numReplicas = 1

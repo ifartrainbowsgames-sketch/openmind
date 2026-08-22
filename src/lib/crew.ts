@@ -43,6 +43,14 @@ export interface CrewRun {
   employeeIds: string[]
   /** Task ledger snapshot when run via artifact-first graph. */
   project?: import('./task-ledger').ProjectSnapshot
+  /**
+   * OpenTelemetry trace for this run, when telemetry was on.
+   *
+   * Carried so a run row can link to the exact trace rather than a search
+   * over timestamps — a heuristic that is wrong precisely when two runs are
+   * close together.
+   */
+  traceId?: string
 }
 
 export interface RunCrewOptions {

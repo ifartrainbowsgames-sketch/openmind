@@ -147,6 +147,18 @@ async function main(): Promise<void> {
   check('no JWT-shaped string', !/\bey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./.test(body))
   check('no memory text was exported', !body.includes('do not re-derive'))
 
+  // Correlation is NOT checked here.
+  //
+  // Trace ids travel as raw bytes inside protobuf, not as hex text, so a
+  // substring search finds nothing and an assertion built on one passes against
+  // ZERO matches — which is what the first version of this check did. A test
+  // that cannot fail is worse than no test.
+  //
+  // scripts/verify-phoenix.ts asks Phoenix instead, which decodes the protobuf
+  // and can answer how many traces a run actually produced.
+  console.log()
+  check('the run has a root span', body.includes('openmind.run'))
+
   console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
   process.exit(failures ? 1 : 0)
 }

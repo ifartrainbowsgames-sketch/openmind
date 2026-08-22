@@ -160,8 +160,8 @@ describe('one run produces a correlated trace', () => {
 
     const names = new Set(spans.map((s) => s.name))
     for (const expected of [
-      'memory.load', 'eligibility.evaluate', 'routing.select',
-      'runtime.execute', 'artifact.adopt', 'task.evaluate', 'task.outcome',
+      'openmind.run', 'memory.load', 'eligibility.evaluate', 'routing.select',
+      'runtime.execute', 'artifact.adopt', 'task.evaluate',
     ]) {
       expect(names.has(expected), `missing span: ${expected}`).toBe(true)
     }
@@ -217,7 +217,7 @@ describe('outcomes stay distinct', () => {
     _setTracerForTesting(recordingTracer(spans))
     await run(fakeRuntime('needs_user', ARTIFACT))
 
-    const outcome = spans.find((s) => s.name === 'task.outcome')
+    const outcome = spans.find((s) => s.name === 'openmind.run')
     expect(outcome?.attributes['run.needs_user']).toBeGreaterThan(0)
     expect(outcome?.attributes['run.failed']).toBe(0)
 
@@ -230,7 +230,7 @@ describe('outcomes stay distinct', () => {
     _setTracerForTesting(recordingTracer(spans))
     await run(fakeRuntime('cancelled', ARTIFACT))
 
-    const outcome = spans.find((s) => s.name === 'task.outcome')
+    const outcome = spans.find((s) => s.name === 'openmind.run')
     expect(outcome?.attributes['run.failed']).toBe(0)
     expect(outcome?.attributes['run.blocked']).toBeGreaterThan(0)
   })
@@ -244,7 +244,7 @@ describe('outcomes stay distinct', () => {
 
     const execute = spans.find((s) => s.name === 'runtime.execute')
     expect(execute?.attributes['runtime.has_result']).toBe(false)
-    const outcome = spans.find((s) => s.name === 'task.outcome')
+    const outcome = spans.find((s) => s.name === 'openmind.run')
     expect(outcome?.attributes['run.failed']).toBeGreaterThan(0)
   })
 
