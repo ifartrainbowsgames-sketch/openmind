@@ -127,26 +127,37 @@ export const LIVE_PROVIDERS: readonly LiveProviderSpec[] = [
   // Anthropic key, including the Claude Code runtime that requires one.
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5-20251001', keyUrl: 'console.anthropic.com → API Keys' },
   { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'moonshotai/kimi-k2.5', keyUrl: 'openrouter.ai/keys' },
-  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant', keyUrl: 'console.groq.com/keys' },
+  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', keyUrl: 'console.groq.com/keys' },
 
   // Every entry below serves an OpenAI-shaped /chat/completions, and every
   // baseUrl was probed against the live API before being added — an
   // unauthenticated POST that came back "invalid API key" rather than 404 or a
   // DNS failure. That is the same bar the Anthropic entry above was held to.
   //
-  // The MODEL ids are not verified to the same standard and cannot be: these
-  // APIs reject on auth before they resolve a model, so without a key there is
-  // nothing to check against. They are the stable published aliases where one
-  // exists (`-latest`, `deepseek-chat`, `sonar`) precisely because those drift
-  // least. A live model catalogue is Stage E; until then, treat a model id here
-  // as the best default rather than a guarantee.
+  // The MODEL ids are the weak part of this table, and that is now measured
+  // rather than suspected. The first two that a real key could be tested
+  // against were BOTH already dead:
+  //
+  //   gemini-2.5-flash     "no longer available to new users" → gemini-3.6-flash
+  //   llama-3.1-8b-instant "does not exist or you do not have access"
+  //
+  // Both had been picked as stable-looking published ids. Two for two, within
+  // days. A hard-coded default model per provider is therefore a decaying
+  // asset, not a stable one: it cannot be verified without a key, and it stops
+  // being true without any change on our side.
+  //
+  // The fix is a real catalogue plus per-key discovery, not more careful
+  // guessing — models.dev covers all fifteen of these providers, and every one
+  // of them serves GET /v1/models for what a specific key can actually reach.
+  // See docs/PROVIDER-PLATFORM-RESEARCH.md. Until that lands, treat a model id
+  // here as a default that was true when written.
   //
   // Fireworks is deliberately ABSENT. Its endpoint is real and answers, but it
   // resolves models before auth, so every id returns "not found" to an
   // unauthenticated caller and no model could be confirmed. Shipping a guessed
   // one would have meant a provider that looks connected and fails on first use.
   { id: 'xai', name: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', model: 'grok-4', keyUrl: 'console.x.ai → API Keys' },
-  { id: 'google', name: 'Google (Gemini)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', keyUrl: 'aistudio.google.com/apikey' },
+  { id: 'google', name: 'Google (Gemini)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-3.6-flash', keyUrl: 'aistudio.google.com/apikey' },
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', keyUrl: 'platform.deepseek.com → API Keys' },
   { id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', keyUrl: 'console.mistral.ai → API Keys' },
   { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', keyUrl: 'api.together.xyz/settings/api-keys' },
