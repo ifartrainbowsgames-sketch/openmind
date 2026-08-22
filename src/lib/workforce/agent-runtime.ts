@@ -22,6 +22,7 @@
 import type { TaskRecord, WorkerKind } from '../task-ledger'
 import type { OpenMindEvent } from './events'
 import type { RuntimeCapabilities } from './capabilities'
+import type { RuntimeCredentialRequirement } from './credentials'
 import type { MemoryContext } from './memory-service'
 import type { Workspace } from './runtime'
 import type { WorkspaceRecovery } from './workspaces'
@@ -109,6 +110,19 @@ export function emptyTaskContext(): TaskContext {
 
 export interface AgentRuntime {
   readonly id: string
+
+  /**
+   * Provider credentials this runtime needs before it can run.
+   *
+   * Declared here so the orchestrator can refuse a run with a message the
+   * customer can act on — "Claude Code requires an Anthropic credential" —
+   * rather than letting the provider fail with an authentication error that
+   * sends someone to the wrong settings page.
+   *
+   * The credential itself is resolved in the worker, immediately before
+   * launch. Nothing in this contract carries a secret.
+   */
+  readonly credentials?: readonly RuntimeCredentialRequirement[]
 
   capabilities(): Promise<RuntimeCapabilities>
 

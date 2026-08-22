@@ -25,9 +25,13 @@ const CORS: Record<string, string> = {
 type Role =
   | 'worker' | 'planner' | 'judge'
   | 'tavily' | 'firecrawl' | 'e2b' | 'browserless'
+  // Provider credentials consumed by agent runtimes (Claude Code runs on the
+  // customer's own Anthropic account), not by the chat brain.
+  | 'anthropic' | 'openai_runtime'
 const ROLES: Role[] = [
   'worker', 'planner', 'judge',
   'tavily', 'firecrawl', 'e2b', 'browserless',
+  'anthropic', 'openai_runtime',
 ]
 
 function json(status: number, body: unknown): Response {

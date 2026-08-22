@@ -31,6 +31,10 @@
 import type { TaskRecord } from '../src/lib/task-ledger'
 import type { RunResult, ToolArtifact, ToolCall } from '../src/lib/agent'
 import {
+  missingCredentialReason,
+  type ProviderCredential, type RuntimeCredentialRequirement,
+} from '../src/lib/workforce/credentials'
+import {
   type AgentRuntime, type AgentSession, type CreateSessionInput,
   type RuntimeAvailability, type SessionCheckpoint, type TaskContext,
   type WorkspaceState,
@@ -110,6 +114,23 @@ export const DEFAULT_PERMISSIONS = {
   defaultMode: 'default' as const,
 }
 
+/**
+ * Claude Code runs on the customer's Anthropic account, not on whatever the
+ * machine happens to be logged into.
+ *
+ * A worker that relied on a globally authenticated CLI would bill every
+ * customer's work to one account and give them all the same rate limit — and
+ * it would work perfectly in development, where the developer is logged in,
+ * which is what makes it dangerous.
+ */
+export const CLAUDE_CODE_CREDENTIALS: readonly RuntimeCredentialRequirement[] = [
+  {
+    provider: 'anthropic',
+    required: true,
+    reason: 'Claude Code runs on your own Anthropic account.',
+  },
+]
+
 export interface ClaudeCodeDeps {
   /** Directory that holds one subdirectory per project workspace. */
   workspaceRoot: string
@@ -122,6 +143,15 @@ export interface ClaudeCodeDeps {
   permissions_policy?: { allow: string[]; deny: string[]; defaultMode?: string }
   permissions?: PermissionContext
   repositories?: Repositories
+  /**
+   * Resolves this run's Anthropic credential, immediately before launch.
+   *
+   * A function rather than a value so the secret has the shortest possible
+   * life: it is fetched when a process is about to start, injected into that
+   * child's environment only, and never held on the runtime, in a session, in
+   * an event or in a log.
+   */
+  credential?: () => Promise<ProviderCredential | null>
   /** Wall-clock ceiling for one task. */
   timeoutSeconds?: number
   env?: Record<string, string>
@@ -233,6 +263,43 @@ export function buildPrompt(task: TaskRecord, context: TaskContext, resumed: boo
 
 // ── The runtime ─────────────────────────────────────────────────────────────
 
+/**
+ * The child's environment.
+ *
+ * `ANTHROPIC_API_KEY` is set on the child ONLY. Writing it to `process.env`
+ * would leak one customer's key into every later run in the same worker, and
+ * into any diagnostic that dumps the environment.
+ *
+ * The inherited environment is filtered rather than spread wholesale: a worker
+ * process holds the service-role key, the encryption secret and the platform's
+ * own tool credentials, and none of that belongs in a customer's agent.
+ */
+export function childEnv(
+  base: Record<string, string | undefined>,
+  extra: Record<string, string> = {},
+  credential?: ProviderCredential | null,
+): Record<string, string> {
+  const BLOCKED = /^(SUPABASE_|KEY_ENCRYPTION|QSTASH_|.*_SERVICE_ROLE|VITE_)/i
+  const KEEP_SECRETS = new Set(['ANTHROPIC_API_KEY'])
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined) continue
+    if (BLOCKED.test(key) && !KEEP_SECRETS.has(key)) continue
+    // The platform's own provider keys are not the customer's to spend.
+    if (/_API_KEY$/.test(key) && !KEEP_SECRETS.has(key)) continue
+    env[key] = value
+  }
+  Object.assign(env, extra)
+  if (credential) {
+    env.ANTHROPIC_API_KEY = credential.apiKey
+    // Belt and braces: with a key present the CLI must not silently fall back
+    // to a developer's OAuth login and bill the wrong account.
+    delete env.CLAUDE_CODE_USE_BEDROCK
+    delete env.CLAUDE_CODE_USE_VERTEX
+  }
+  return env
+}
+
 export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
   const repos = deps.repositories ?? repositories()
   const permissions: PermissionContext = deps.permissions ?? { platformKeys: false }
@@ -246,7 +313,7 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
   function contextFor(session: WorkerSession, record: WorkspaceRecord): ExecutionContext {
     return createExecutionContext({
       session,
-      runtime: () => localRuntime({ root: record.path, env: deps.env }),
+      runtime: () => localRuntime({ root: record.path, env: childEnv(process.env, deps.env) }),
       workspace: toWorkspace(record),
       capabilities: CLAUDE_CODE_CAPABILITIES,
       permissions,
@@ -256,6 +323,7 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
 
   return {
     id: 'claude-code',
+    credentials: CLAUDE_CODE_CREDENTIALS,
 
     async capabilities() {
       return CLAUDE_CODE_CAPABILITIES
@@ -265,10 +333,21 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
       // Ask the CLI, rather than assuming a PATH entry means a working install.
       // The failure this catches is a worker deployed without Claude Code, where
       // every selected run would otherwise die mid-task with a spawn error.
+      // A credential the customer has not connected is the commonest reason
+      // this runtime cannot run, and the one with the clearest fix. Checked
+      // before the binary so the message names the missing key rather than
+      // the missing CLI.
+      if (deps.credential) {
+        const credential = await deps.credential().catch(() => null)
+        if (!credential) {
+          return { ok: false, reason: missingCredentialReason('claude-code', CLAUDE_CODE_CREDENTIALS[0]) }
+        }
+      }
+
       const { spawn } = await import('node:child_process')
       return new Promise<RuntimeAvailability>((resolve) => {
         const probe = spawn(command, ['--version'], {
-          env: { ...process.env, ...deps.env },
+          env: childEnv(process.env, deps.env),
           shell: process.platform === 'win32',
         })
         let out = ''
@@ -393,9 +472,18 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
       let done = false
 
       const { spawn } = await import('node:child_process')
+      // Resolved here, used immediately, referenced nowhere else.
+      const credential = deps.credential ? await deps.credential().catch(() => null) : null
+      if (deps.credential && !credential) {
+        yield event('task_finished', missingCredentialReason('claude-code', CLAUDE_CODE_CREDENTIALS[0]), {
+          ...ctx, outcome: 'needs_user',
+        })
+        return
+      }
+
       const child = spawn(command, args, {
         cwd: record.path,
-        env: { ...process.env, ...deps.env },
+        env: childEnv(process.env, deps.env, credential),
         shell: process.platform === 'win32',
       })
       running.set(session.id, { kill: () => child.kill('SIGTERM') })

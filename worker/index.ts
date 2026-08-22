@@ -16,6 +16,7 @@ import { setExecutionMode } from '../src/lib/execution-mode'
 import { setProjectOwner } from '../src/lib/project-store'
 import { openKey } from './crypto'
 import { registerWorkerRuntimes } from './runtimes'
+import { createCredentialVault } from './credential-vault'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -135,6 +136,11 @@ async function executeRun(run: RunRow): Promise<void> {
 
   // Ledger rows are written as this user, and strict mode is per-run.
   setProjectOwner(run.user_id)
+
+  // Re-register runtimes for THIS customer, so an external runtime resolves
+  // their credential and not the machine's ambient login. The secret is never
+  // held here — only a resolver that fetches it at launch.
+  await registerWorkerRuntimes({ vault: createCredentialVault(db, SECRET), userId: run.user_id })
   const strict = run.options.strictMode === true
   setExecutionMode(strict ? 'strict' : 'demo')
   const cancel = watchForCancel(run.id)
@@ -235,6 +241,8 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 async function main(): Promise<void> {
   must('KEY_ENCRYPTION_SECRET', SECRET)
 
+  // Boot-time check reports the CLI. The credential is per customer, so it is
+  // checked when a run is claimed, not here.
   for (const runtime of await registerWorkerRuntimes()) {
     console.log(
       `runtime ${runtime.id}: ${runtime.available ? 'available' : 'UNAVAILABLE'}`
