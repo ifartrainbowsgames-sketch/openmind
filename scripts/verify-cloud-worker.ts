@@ -31,6 +31,24 @@ import type { Employee } from '../src/lib/agent/types'
 
 const URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
+const ANON = process.env.SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_KEY ?? ''
+
+/**
+ * Optional: provision a throwaway customer with a real provider key.
+ *
+ *   CANARY_PROVIDER=groq CANARY_API_KEY=... npx tsx scripts/verify-cloud-worker.ts
+ *
+ * The key goes in through the vault-keys Edge Function using that account's own
+ * JWT — the same path a browser uses — so the run proves the whole chain
+ * (encrypt → store → worker decrypts → provider call) rather than a shortcut
+ * around it. Writing the row directly with the service role would prove much
+ * less, and is impossible here anyway: KEY_ENCRYPTION_SECRET lives on Supabase
+ * and Railway, not on this machine.
+ *
+ * The account and every row it owns are deleted at the end.
+ */
+const PROVISION_PROVIDER = process.env.CANARY_PROVIDER ?? ''
+const PROVISION_KEY = process.env.CANARY_API_KEY ?? ''
 
 /** How long to wait for a worker to claim and finish. */
 const TIMEOUT_MS = Number(process.env.CANARY_TIMEOUT_MS ?? 480_000)
@@ -38,17 +56,75 @@ const POLL_MS = 3000
 
 const TOKEN = 'CLOUD-RUNTIME-CANARY-8274'
 const EXPECTED = 'CLOUD-RUNTIME-CANARY-4728'
+/**
+ * A real task that CARRIES the canary, rather than a bare echo request.
+ *
+ * The first version was "reply with this token, digits reversed, output only
+ * that". OpenMind routes a goal through a planner that staffs a team for it,
+ * and asked to staff a team for a token-echo the model returned "I'm sorry,
+ * but I can't comply with that" — no JSON, and the run blocked on
+ * planner_unreachable. The product was right to block; the goal was the
+ * problem. A plausible piece of work plans cleanly and still cannot be
+ * satisfied by echoing the prompt.
+ */
 const GOAL =
-  `Reply with the token ${TOKEN}, except write its four digits in reverse order. `
-  + 'Output only that one token. Do not explain, do not use any tool.'
+  'Write one short paragraph explaining what a canary test is in software deployment. '
+  + `End the paragraph with the token ${TOKEN}, except write its four digits in reverse order.`
 
 /** From simulatedBrain.respond in src/lib/agent/brains.ts. */
 const SIMULATOR_FINGERPRINT = "in live mode I'd"
+
+/**
+ * Compare on meaning, not on typography.
+ *
+ * A model that complied perfectly still failed the first version of this
+ * check: it wrote CLOUD‑RUNTIME‑CANARY‑4728, prettifying the
+ * ASCII hyphens into non-breaking ones. Asserting on the raw bytes tests the
+ * model's punctuation, not whether it read the instruction — so every dash
+ * variant is folded to '-' before comparing.
+ */
+function normalise(text: string): string {
+  return text.replace(/[‐-―−­⁃]/g, '-')
+}
 
 let failures = 0
 function check(label: string, passed: boolean, detail = ''): void {
   if (!passed) failures++
   console.log(`${passed ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`)
+}
+
+interface Provisioned { id: string; email: string; token: string }
+
+/** A throwaway customer holding one real provider credential. */
+async function provision(admin: SupabaseClient): Promise<Provisioned> {
+  const email = `canary-${Date.now()}@openmind-verify.invalid`
+  const password = `pw-${Math.random().toString(36).slice(2)}-${Date.now()}`
+
+  const { data: created, error } = await admin.auth.admin.createUser({
+    email, password, email_confirm: true,
+  })
+  if (error || !created.user) throw new Error(`could not create canary account: ${error?.message}`)
+
+  const { data: session, error: signIn } = await createClient(URL, ANON, {
+    auth: { persistSession: false },
+  }).auth.signInWithPassword({ email, password })
+  if (signIn || !session.session) throw new Error(`could not sign in: ${signIn?.message}`)
+  const token = session.session.access_token
+
+  const res = await fetch(`${URL}/functions/v1/vault-keys`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', apikey: ANON, authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      action: 'set', role: PROVISION_PROVIDER,
+      providerId: PROVISION_PROVIDER, apiKey: PROVISION_KEY,
+    }),
+  })
+  const body = await res.text()
+  if (!res.ok) throw new Error(`vault refused the key: ${res.status} ${body}`)
+  if (body.includes(PROVISION_KEY)) throw new Error('the vault ECHOED THE KEY BACK — stop')
+  console.log(`      stored a ${PROVISION_PROVIDER} key through the Edge Function — ${body}`)
+
+  return { id: created.user.id, email, token }
 }
 
 interface RunRow {
@@ -103,10 +179,18 @@ async function settle(db: SupabaseClient, id: string): Promise<RunRow> {
     claimed_by: null, claimed_at: null, trace_id: null, project_id: null }) as RunRow
 }
 
-async function enqueue(db: SupabaseClient, userId: string, goal: string): Promise<string> {
+async function enqueue(
+  db: SupabaseClient, userId: string, goal: string, providerId?: string,
+): Promise<string> {
+  const options: Record<string, unknown> = { strictMode: true }
+  // An id, never a key. Exercises rule 1 of credentialFor rather than falling
+  // through to "the only connection there is", which would pass even if the
+  // explicit-choice path were broken.
+  if (providerId) options.providerId = providerId
+
   const { data, error } = await db
     .from('agent_runs')
-    .insert({ user_id: userId, goal, status: 'queued', options: { strictMode: true } })
+    .insert({ user_id: userId, goal, status: 'queued', options })
     .select('id')
     .single()
   if (error) throw new Error(`could not queue: ${error.message}`)
@@ -125,7 +209,7 @@ async function main(): Promise<void> {
     id: 'canary', name: 'Canary', role: 'Probe',
     prompt: 'Answer exactly as asked.', tools: [], accent: '#000',
   }
-  const simulated = await simulatedBrain().respond(GOAL, [], employee)
+  const simulated = normalise(await simulatedBrain().respond(GOAL, [], employee))
 
   check('the simulator echoes the goal, as expected', simulated.includes(TOKEN))
   check('THE SIMULATOR CANNOT PASS THE CANARY', !simulated.includes(EXPECTED),
@@ -139,12 +223,23 @@ async function main(): Promise<void> {
   }
 
   // ── Phase 2 — production ──────────────────────────────────────────────────
-  const db = createClient(must('SUPABASE_URL', URL), must('SUPABASE_SERVICE_ROLE_KEY', SERVICE_ROLE), {
+  const admin = createClient(must('SUPABASE_URL', URL), must('SUPABASE_SERVICE_ROLE_KEY', SERVICE_ROLE), {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+  const db = admin
 
   const flagged = process.argv.indexOf('--user')
   let userId = flagged >= 0 ? process.argv[flagged + 1] : ''
+  let provisioned: Provisioned | undefined
+  let chosenProvider: string | undefined
+
+  if (!userId && PROVISION_PROVIDER && PROVISION_KEY) {
+    console.log('\n— provisioning a throwaway customer —\n')
+    provisioned = await provision(admin)
+    userId = provisioned.id
+    chosenProvider = PROVISION_PROVIDER
+    console.log(`      ${provisioned.email}`)
+  }
 
   if (!userId) {
     const { data } = await db.from('provider_keys').select('user_id, role').in('role', ['worker', 'anthropic'])
@@ -159,7 +254,7 @@ async function main(): Promise<void> {
   }
 
   console.log('\n— phase 2: a real run, executed by the deployed worker —\n')
-  const canaryId = await enqueue(db, userId, GOAL)
+  const canaryId = await enqueue(db, userId, GOAL, chosenProvider)
   console.log(`      queued ${canaryId}`)
   const run = await settle(db, canaryId)
 
@@ -169,13 +264,21 @@ async function main(): Promise<void> {
   check('the run COMPLETED', run.status === 'completed',
     run.status === 'completed' ? '' : `${run.status}: ${run.error ?? '(no error)'}`)
 
-  const answer = run.answer ?? ''
+  const answer = normalise(run.answer ?? '')
   check('THE CANARY CAME BACK', answer.includes(EXPECTED),
     answer.includes(EXPECTED) ? EXPECTED : `absent — answer began "${answer.slice(0, 120)}"`)
   check('the simulator was NOT used', !answer.includes(SIMULATOR_FINGERPRINT))
   check('the answer is not a bare echo of the goal',
     answer.includes(EXPECTED) && !(answer.includes(TOKEN) && !answer.includes(EXPECTED)))
-  check('a trace was recorded', Boolean(run.trace_id), run.trace_id ?? '(none)')
+  // Only meaningful when the worker is exporting. Telemetry is opt-in and OFF
+  // by default (PHOENIX_ENABLED), so a null trace_id on a healthy worker is
+  // correct behaviour — asserting one unconditionally failed a passing run and
+  // would have taught us to ignore this line.
+  if (process.env.PHOENIX_ENABLED === 'true') {
+    check('a trace was recorded', Boolean(run.trace_id), run.trace_id ?? '(none)')
+  } else {
+    console.log(`SKIP  trace_id — telemetry is off on the worker (got ${run.trace_id ?? 'null'}, as expected)`)
+  }
   check('a project snapshot was written', Boolean(run.project_id), run.project_id ?? '(none)')
 
   // ── Phase 3 — a customer with no key blocks, truthfully ───────────────────
@@ -198,10 +301,24 @@ async function main(): Promise<void> {
 
     check('it BLOCKED rather than answering', blocked.status === 'needs_user', blocked.status)
     check('it did not silently complete', blocked.status !== 'completed')
-    check('the reason names the fix', (blocked.error ?? '').toLowerCase().includes('provider key'),
+    // Matches the message worker/index.ts actually writes; it says "provider
+    // connected" now that a customer connects providers rather than filling a
+    // key slot.
+    check('the reason names the fix', /provider (key|connected)/i.test(blocked.error ?? ''),
       blocked.error ?? '(no error)')
     check('nothing was simulated', !(blocked.answer ?? '').includes(SIMULATOR_FINGERPRINT))
-    check('the canary did NOT come back', !(blocked.answer ?? '').includes(EXPECTED))
+    check('the canary did NOT come back', !normalise(blocked.answer ?? '').includes(EXPECTED))
+  }
+
+  if (provisioned) {
+    console.log('\n— cleanup —\n')
+    await db.from('agent_runs').delete().eq('user_id', provisioned.id)
+    const { error } = await admin.auth.admin.deleteUser(provisioned.id)
+    check('the throwaway customer is gone', !error, error?.message ?? '')
+    const { data: left } = await admin
+      .from('provider_keys').select('role').eq('user_id', provisioned.id)
+    check('and took its stored key with it', (left ?? []).length === 0,
+      `${(left ?? []).length} row(s) left`)
   }
 
   console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed')
