@@ -44,7 +44,7 @@ export const SECTION_META: Readonly<Record<SettingsSection, SectionMeta>> = {
   },
   keys: {
     label: 'Keys',
-    blurb: 'Where each key is stored, and which runs can reach it.',
+    blurb: 'Connect the providers you pay for. One key each, encrypted, never readable back.',
     icon: 'KeyRound',
   },
   tools: {
@@ -92,9 +92,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: 'planner-model', title: 'Planner model', section: 'models', anchor: 'planner-model', keywords: 'plan separate independent review' },
   { id: 'judge-model', title: 'Judge model', section: 'models', anchor: 'judge-model', keywords: 'grade verdict acceptance review' },
 
-  { id: 'browser-keys', title: 'Keys held in this browser', section: 'keys', anchor: 'browser-keys', keywords: 'local device localstorage foreground' },
-  { id: 'server-keys', title: 'Keys held on the server', section: 'keys', anchor: 'server-keys', keywords: 'vault encrypted background worker' },
-  { id: 'key-storage', title: 'Where keys are stored', section: 'keys', anchor: 'storage-explainer', keywords: 'encryption aes security privacy' },
+  // No entry for the browser-held key field: it is behind import.meta.env.DEV
+  // and compiled out of the production bundle, so a search result for it would
+  // scroll a customer to an anchor that is not on the page.
+  { id: 'server-keys', title: 'Connected providers', section: 'keys', anchor: 'server-keys', keywords: 'vault encrypted server stored background worker connect provider api key claude anthropic openai gpt grok xai gemini google deepseek mistral kimi moonshot groq openrouter perplexity cohere cerebras together ollama llama' },
+  { id: 'key-storage', title: 'Where keys are stored', section: 'keys', anchor: 'storage-explainer', keywords: 'encryption aes security privacy safe' },
 
   { id: 'search-tool', title: 'Search provider', section: 'tools', anchor: 'search', keywords: 'tavily duckduckgo searxng' },
   { id: 'browse-tool', title: 'Browse provider', section: 'tools', anchor: 'browse', keywords: 'firecrawl jina scrape fetch' },
