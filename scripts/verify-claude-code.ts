@@ -124,7 +124,7 @@ function task(id: string, goal: string, outputs: string[] = [FILE]): TaskRecord 
 function runtime(over: Partial<Parameters<typeof createClaudeCodeRuntime>[0]> = {}) {
   return createClaudeCodeRuntime({
     workspaceRoot: ROOT,
-    permissionMode: 'acceptEdits',
+
     timeoutSeconds: 300,
     repositories: fileRepositories(),
     ...over,

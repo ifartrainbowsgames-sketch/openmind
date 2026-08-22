@@ -74,6 +74,12 @@ export interface WorkspaceState {
   inspected: boolean
 }
 
+export interface RuntimeAvailability {
+  ok: boolean
+  /** Why not, in words a user can act on. Required when ok is false. */
+  reason?: string
+}
+
 export interface CreateSessionInput {
   projectId: string
   worker: WorkerKind
@@ -105,6 +111,20 @@ export interface AgentRuntime {
   readonly id: string
 
   capabilities(): Promise<RuntimeCapabilities>
+
+  /**
+   * Can this runtime actually run right now?
+   *
+   * Distinct from capabilities: capabilities say what it could do in
+   * principle, this says whether the binary is installed, the account is
+   * authenticated, the endpoint answers. Optional because the builtin runtime
+   * is always present.
+   *
+   * A runtime that is selected and unavailable must BLOCK the work. The
+   * alternative — quietly running it on the builtin runtime instead — answers
+   * with a different agent entirely and reports success.
+   */
+  available?(): Promise<RuntimeAvailability>
 
   createSession(input: CreateSessionInput): Promise<AgentSession>
 

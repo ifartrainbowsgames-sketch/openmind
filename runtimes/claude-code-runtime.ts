@@ -32,7 +32,8 @@ import type { TaskRecord } from '../src/lib/task-ledger'
 import type { RunResult, ToolArtifact, ToolCall } from '../src/lib/agent'
 import {
   type AgentRuntime, type AgentSession, type CreateSessionInput,
-  type SessionCheckpoint, type TaskContext, type WorkspaceState,
+  type RuntimeAvailability, type SessionCheckpoint, type TaskContext,
+  type WorkspaceState,
 } from '../src/lib/workforce/agent-runtime'
 import { runtimeCapabilities, type RuntimeCapabilities } from '../src/lib/workforce/capabilities'
 import { event, type OpenMindEvent, type RunOutcome } from '../src/lib/workforce/events'
@@ -76,19 +77,49 @@ export const CLAUDE_CODE_CAPABILITIES: RuntimeCapabilities = runtimeCapabilities
   },
 )
 
+/**
+ * What Claude Code may do unattended.
+ *
+ * Not "full autonomy" and not "hang waiting for a prompt" — both are wrong for
+ * a background runtime. Reading, editing the workspace, inspecting git and
+ * running the project's own checks are the work; installing packages,
+ * committing, pushing and reaching the network are decisions a person should
+ * make. Anything outside `allow` comes back as a permission denial, which this
+ * runtime surfaces as `needs_user` rather than swallowing.
+ *
+ * Delivered as a settings FILE rather than `--allowedTools` arguments: on
+ * Windows the CLI is spawned through a shell, and patterns like
+ * `Bash(git status:*)` contain characters a shell rewrites. A file has no
+ * quoting rules — the same reason the prompt goes on stdin.
+ */
+export const DEFAULT_PERMISSIONS = {
+  allow: [
+    'Read', 'Glob', 'Grep', 'Write', 'Edit', 'NotebookEdit', 'TodoWrite',
+    'Bash(git status:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git add:*)',
+    'Bash(ls:*)', 'Bash(cat:*)', 'Bash(pwd)',
+    'Bash(npm test:*)', 'Bash(npm run test:*)', 'Bash(npm run lint:*)',
+    'Bash(npm run build:*)', 'Bash(npx tsc:*)',
+    'Bash(pytest:*)', 'Bash(go test:*)', 'Bash(cargo test:*)',
+  ],
+  deny: [
+    // Escaping the workspace, spending money, or publishing. A denial here is
+    // reported to the user, never quietly worked around.
+    'Bash(rm -rf /:*)', 'Bash(curl:*)', 'Bash(wget:*)',
+    'Bash(git push:*)', 'Bash(npm publish:*)', 'Bash(docker push:*)',
+  ],
+  defaultMode: 'default' as const,
+}
+
 export interface ClaudeCodeDeps {
   /** Directory that holds one subdirectory per project workspace. */
   workspaceRoot: string
   /** The CLI. Overridable so a test can point at a fake. */
   command?: string
   /**
-   * How much Claude Code may do without asking.
-   *
-   * `acceptEdits` lets it write files but still gates shell. An unattended
-   * runtime that stalls on a permission prompt looks exactly like one that
-   * hung, so this is a real tradeoff and it is stated rather than buried.
+   * Overrides DEFAULT_PERMISSIONS. Widening this is a policy decision, so it
+   * is a parameter rather than a default nobody notices.
    */
-  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+  permissions_policy?: { allow: string[]; deny: string[]; defaultMode?: string }
   permissions?: PermissionContext
   repositories?: Repositories
   /** Wall-clock ceiling for one task. */
@@ -122,6 +153,32 @@ interface StreamResult {
   result?: string
   session_id?: string
   total_cost_usd?: number
+  /**
+   * Tools the provider wanted and was not allowed.
+   *
+   * Reported alongside `subtype: 'success'`, which is the trap: a task that
+   * could not do its job because it needed permission looks completed. These
+   * become `needs_user` — OpenMind is the policy authority, so a provider
+   * asking for something is a question for the user, not a failure and
+   * certainly not a success.
+   */
+  permission_denials?: Array<{ tool_name?: string; tool_input?: Record<string, unknown> }>
+}
+
+export interface PermissionRequest {
+  tool: string
+  detail: string
+}
+
+export function permissionRequests(result: StreamResult): PermissionRequest[] {
+  return (result.permission_denials ?? []).map((denial) => ({
+    tool: denial.tool_name ?? 'unknown',
+    detail: String(
+      denial.tool_input?.command
+      ?? denial.tool_input?.file_path
+      ?? JSON.stringify(denial.tool_input ?? {}),
+    ).slice(0, 300),
+  }))
 }
 
 type StreamLine = StreamInit | StreamAssistant | StreamUser | StreamResult | { type: string }
@@ -204,6 +261,30 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
       return CLAUDE_CODE_CAPABILITIES
     },
 
+    async available(): Promise<RuntimeAvailability> {
+      // Ask the CLI, rather than assuming a PATH entry means a working install.
+      // The failure this catches is a worker deployed without Claude Code, where
+      // every selected run would otherwise die mid-task with a spawn error.
+      const { spawn } = await import('node:child_process')
+      return new Promise<RuntimeAvailability>((resolve) => {
+        const probe = spawn(command, ['--version'], {
+          env: { ...process.env, ...deps.env },
+          shell: process.platform === 'win32',
+        })
+        let out = ''
+        probe.stdout?.on('data', (d: Buffer) => { out += d.toString() })
+        probe.on('error', (error: Error) => resolve({
+          ok: false,
+          reason: `Claude Code is not installed on this worker (${error.message})`,
+        }))
+        probe.on('close', (code: number | null) => resolve(
+          code === 0
+            ? { ok: true, reason: out.trim().slice(0, 80) }
+            : { ok: false, reason: `\`${command} --version\` exited with ${code}` },
+        ))
+      })
+    },
+
     async createSession(input: CreateSessionInput): Promise<AgentSession> {
       const scope: SessionScope = { kind: 'project', projectId: input.projectId, worker: input.worker }
       const existing = await repos.sessions.find(scope, 'claude-code')
@@ -272,11 +353,20 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
       yield event('task_started', task.goal, ctx)
 
       const resume = current.providerSessionId
+      // The policy goes in a file for the same reason the prompt goes on stdin.
+      const settingsPath = `${record.path}/.openmind-claude-settings.json`
+      const { writeFile } = await import('node:fs/promises')
+      await writeFile(
+        settingsPath,
+        JSON.stringify({ permissions: deps.permissions_policy ?? DEFAULT_PERMISSIONS }, null, 2),
+        'utf8',
+      )
+
       const args = [
         '-p',
         '--output-format', 'stream-json',
         '--verbose',
-        '--permission-mode', deps.permissionMode ?? 'acceptEdits',
+        '--settings', settingsPath,
       ]
       if (resume) args.push('--resume', resume)
 
@@ -299,6 +389,7 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
       let providerSession: string | undefined
       let failure: string | undefined
       let sawResult = false
+      let denials: PermissionRequest[] = []
       let done = false
 
       const { spawn } = await import('node:child_process')
@@ -378,6 +469,12 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
             if (result.session_id) providerSession = result.session_id
             if (typeof result.result === 'string' && result.result) answer = result.result
             if (result.is_error) failure = result.result || result.subtype || 'the provider reported an error'
+            denials = permissionRequests(result)
+            for (const request of denials) {
+              push(event('blocked', `${request.tool} needs approval: ${request.detail}`, {
+                ...ctx, tool: request.tool,
+              }))
+            }
           }
         }
       })
@@ -444,6 +541,27 @@ export function createClaudeCodeRuntime(deps: ClaudeCodeDeps): AgentRuntime {
         current = touch(current, { status: 'failed' })
         await repos.sessions.save(current)
         yield event('task_finished', failure, { ...ctx, outcome: 'failed' })
+        return
+      }
+
+      // A provider that asked for permission and was refused did not fail and
+      // did not finish. The decision is the user's, and OpenMind is where it
+      // gets made — letting the provider invent its own approval flow is how a
+      // second policy authority appears inside the first.
+      if (denials.length) {
+        current = touch(current, { status: 'waiting' })
+        await repos.sessions.save(current)
+        const summary = denials.map((d) => `${d.tool}: ${d.detail}`).join('; ')
+        yield event('task_finished', `approval required — ${summary}`, {
+          ...ctx,
+          outcome: 'needs_user',
+          result: {
+            answer,
+            plan: [],
+            toolCalls,
+            trace: [{ node: 'act' as const, text: `claude-code — awaiting approval for ${denials.length} action(s)` }],
+          },
+        })
         return
       }
 

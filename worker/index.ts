@@ -15,6 +15,7 @@ import { runTaskGraph } from '../src/lib/task-runner'
 import { setExecutionMode } from '../src/lib/execution-mode'
 import { setProjectOwner } from '../src/lib/project-store'
 import { openKey } from './crypto'
+import { registerWorkerRuntimes } from './runtimes'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -157,6 +158,11 @@ async function executeRun(run: RunRow): Promise<void> {
 
     const result = await runTaskGraph(run.goal, brainFor(worker), {
       persist: true,
+      // The browser sends an id, never an implementation. An id this worker
+      // has not registered throws rather than falling back to the builtin
+      // runtime, because answering with a different agent is worse than not
+      // answering.
+      runtimeId: typeof run.options.runtimeId === 'string' ? run.options.runtimeId : undefined,
       workspace: run.options.workspace as never,
       skill: run.options.skill as never,
       // The vault holds the customer's model key only. Tools run on our
@@ -228,6 +234,14 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 
 async function main(): Promise<void> {
   must('KEY_ENCRYPTION_SECRET', SECRET)
+
+  for (const runtime of await registerWorkerRuntimes()) {
+    console.log(
+      `runtime ${runtime.id}: ${runtime.available ? 'available' : 'UNAVAILABLE'}`
+      + (runtime.detail ? ` — ${runtime.detail}` : ''),
+    )
+  }
+
   console.log(`worker ${WORKER_ID} polling every ${POLL_MS}ms`)
   let idleTicks = 0
 

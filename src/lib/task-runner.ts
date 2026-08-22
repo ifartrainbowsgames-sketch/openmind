@@ -546,6 +546,8 @@ async function executeBatch(
   runtime: AgentRuntime,
   memory: MemoryPass,
   capabilities: RuntimeCapabilities | undefined,
+  /** Set when the runtime itself cannot run — every task blocks on it. */
+  unavailable: string | undefined,
 ): Promise<{ project: ProjectState; members: CrewMemberResult[]; trace: TraceLine[] }> {
   const batch = readyTasks(project)
   if (!batch.length) return { project, members: [], trace: [] }
@@ -568,9 +570,10 @@ async function executeBatch(
       continue
     }
 
-    // Capability first: cheaper than the budget check and a harder no. A
-    // runtime that cannot do the work will not do it more cheaply later.
-    const unable = capabilityBlocker(task, capabilities, runtime.id)
+    // Availability first, then capability: both are cheaper than the budget
+    // check and both are harder noes. A runtime that cannot run, or cannot do
+    // the work, will not manage either more cheaply later.
+    const unable = unavailable ?? capabilityBlocker(task, capabilities, runtime.id)
     if (unable) {
       next = updateTask(next, task.id, { status: 'needs_user', blocker: unable })
       next = { ...next, blockers: [...next.blockers, `${task.id}: ${unable}`] }
@@ -949,6 +952,19 @@ export async function runTaskGraph(
   // refused before they cost anything.
   const capabilities = await runtime.capabilities().catch(() => undefined)
 
+  // And whether it can run at all. A selected runtime that is not installed
+  // must BLOCK the work — quietly running it on the builtin runtime instead
+  // would answer with a different agent and report success.
+  const availability = runtime.available
+    ? await runtime.available().catch((error: unknown) => ({
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      }))
+    : { ok: true }
+  const unavailable = availability.ok
+    ? undefined
+    : `runtime "${runtime.id}" is unavailable: ${availability.reason ?? 'no reason given'}`
+
   // The prompt needs the ledger as it stands when the task runs, not as it was
   // when the runtime was built.
   let currentProject: ProjectState = project
@@ -956,7 +972,7 @@ export async function runTaskGraph(
   const executeNode = async (state: TRS): Promise<Partial<TRS>> => {
     currentProject = state.project
     const { project: p, members, trace } =
-      await executeBatch(state.project, options, runtime, memory, capabilities)
+      await executeBatch(state.project, options, runtime, memory, capabilities, unavailable)
     return { project: p, members, trace }
   }
 
