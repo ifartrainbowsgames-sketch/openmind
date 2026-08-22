@@ -44,6 +44,10 @@ export interface RunOptions {
   providerId?: string
   plannerProviderId?: string
   judgeProviderId?: string
+  /** Which model within that provider. Blank means the provider's default. */
+  modelId?: string
+  plannerModelId?: string
+  judgeModelId?: string
 }
 
 export const TERMINAL_STATUSES: RunStatus[] = [
@@ -117,6 +121,9 @@ export function sanitizeOptions(options: RunOptions): Record<string, unknown> {
   if (options.providerId) out.providerId = options.providerId
   if (options.plannerProviderId) out.plannerProviderId = options.plannerProviderId
   if (options.judgeProviderId) out.judgeProviderId = options.judgeProviderId
+  if (options.modelId) out.modelId = options.modelId
+  if (options.plannerModelId) out.plannerModelId = options.plannerModelId
+  if (options.judgeModelId) out.judgeModelId = options.judgeModelId
   return out
 }
 

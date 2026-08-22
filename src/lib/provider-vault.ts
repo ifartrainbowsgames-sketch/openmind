@@ -42,6 +42,20 @@ export interface StoredKey {
   /** "••••7f2a" — enough to recognise, useless to steal. */
   hint: string
   updatedAt?: number
+  /**
+   * Model ids GET /v1/models returned for this key, recorded when it was
+   * connected. Ids only — the same public strings a catalogue carries.
+   *
+   * `undefined` means discovery has not run or the provider does not list
+   * models, which is NOT the same as "reaches nothing". The picker treats it
+   * as "offer the whole catalogue"; treating it as an empty list would show a
+   * customer with a working key an empty dropdown.
+   */
+  models?: string[]
+  /** The key authenticated when it was stored. */
+  verified?: boolean
+  /** Why verification failed, if it did. Provider text, key-shapes redacted. */
+  verificationError?: string
 }
 
 /**
@@ -108,10 +122,13 @@ export async function listKeys(): Promise<StoredKey[]> {
   const out = await callVault({ action: 'list' })
   const rows = Array.isArray(out.keys) ? (out.keys as Record<string, unknown>[]) : []
   return rows.map((r) => ({
-    role: r.role as VaultRole,
+    role: r.role as VaultSlot,
     providerId: String(r.provider_id ?? ''),
     hint: String(r.hint ?? '••••'),
     updatedAt: r.updated_at ? Date.parse(String(r.updated_at)) : undefined,
+    models: Array.isArray(r.models) ? (r.models as unknown[]).map(String) : undefined,
+    verified: r.verified_at ? true : undefined,
+    verificationError: r.verification_error ? String(r.verification_error) : undefined,
   }))
 }
 

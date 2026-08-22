@@ -32,6 +32,19 @@ export interface MobileProviderConfig {
   plannerApiKey?: string
   judgeProviderId?: string
   judgeApiKey?: string
+  /**
+   * Which model, within the chosen provider, plays each part.
+   *
+   * Separate from the provider id because one provider serves many models at
+   * very different prices — OpenRouter alone lists 359. Blank means "the
+   * provider's default", which is what every run used before this existed.
+   *
+   * A model id is not a secret. It is the same public string a catalogue
+   * carries, so it travels with the run and lives in localStorage freely.
+   */
+  modelId?: string
+  plannerModelId?: string
+  judgeModelId?: string
 }
 
 export function loadMobileProvider(): MobileProviderConfig {
@@ -52,6 +65,9 @@ export function loadMobileProvider(): MobileProviderConfig {
       plannerApiKey: parsed.plannerApiKey?.trim() || undefined,
       judgeProviderId: parsed.judgeProviderId?.trim() || undefined,
       judgeApiKey: parsed.judgeApiKey?.trim() || undefined,
+      modelId: parsed.modelId?.trim() || undefined,
+      plannerModelId: parsed.plannerModelId?.trim() || undefined,
+      judgeModelId: parsed.judgeModelId?.trim() || undefined,
     }
   } catch {
     return { providerId: 'openai', apiKey: '' }

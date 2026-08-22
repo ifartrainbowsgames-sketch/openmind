@@ -93,13 +93,20 @@ async function loadKeys(userId: string): Promise<Map<string, { providerId: strin
  * credential disclosure to an unrelated third party, from a stale string.
  * An unknown provider now blocks the run instead.
  */
-function brainFor(entry?: { providerId: string; apiKey: string }): AgentBrain | null {
+function brainFor(
+  entry?: { providerId: string; apiKey: string },
+  modelId?: unknown,
+): AgentBrain | null {
   if (!entry) return simulatedBrain()
   const spec = providerSpec(entry.providerId)
   if (!spec) return null
   return liveBrain({
     baseUrl: spec.baseUrl,
-    model: spec.model,
+    // The customer's choice wins over the provider's built-in default. That
+    // default is a decaying asset — two of the first ones tested against real
+    // keys had already been retired by their providers — so the id someone
+    // picked from their own key's model list is the more trustworthy value.
+    model: typeof modelId === 'string' && modelId ? modelId : spec.model,
     key: entry.apiKey,
     fixedParams: spec.fixedParams,
   })
@@ -180,7 +187,7 @@ async function executeRun(run: RunRow): Promise<void> {
     }
 
     // Unknown provider: block, do not substitute. See brainFor.
-    const brain = brainFor(worker)
+    const brain = brainFor(worker, run.options.modelId)
     if (!brain) {
       await finishRun(run.id, {
         status: 'needs_user',
@@ -219,7 +226,9 @@ async function executeRun(run: RunRow): Promise<void> {
         planner && plannerSpec
           ? {
               baseUrl: plannerSpec.baseUrl,
-              model: plannerSpec.model,
+              model: typeof run.options.plannerModelId === 'string' && run.options.plannerModelId
+                ? run.options.plannerModelId
+                : plannerSpec.model,
               key: planner.apiKey,
               fixedParams: plannerSpec.fixedParams,
             }

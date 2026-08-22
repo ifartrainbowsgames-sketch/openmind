@@ -10,6 +10,7 @@ import type { MobileProviderConfig } from '@/lib/mobile-provider'
 import {
   connectProvider, connectionFor, disconnect, type StoredKey,
 } from '@/lib/provider-vault'
+import { contextLabel, priceLabel, selectableModels } from '@/lib/models'
 import { getSession } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { SettingsCard, SettingsRow, inputClass } from './SettingsLayout'
@@ -105,9 +106,72 @@ function ProviderSelect({
   )
 }
 
+/**
+ * Which model, within a provider, plays this part.
+ *
+ * Offers what the customer's key can actually REACH, not everything the
+ * provider publishes. Those differ: a real Groq key reached 13 models where the
+ * catalogue listed 15, and the model OpenMind shipped as that provider's
+ * default was not among the 13.
+ *
+ * When discovery has not run, `models` is undefined and the whole catalogue is
+ * offered — an empty dropdown is indistinguishable from a broken one.
+ */
+function ModelSelect({
+  providerId, stored, value, onChange,
+}: {
+  providerId: string
+  stored?: StoredKey
+  value: string
+  onChange: (id: string) => void
+}) {
+  const options = selectableModels(providerId, stored?.models)
+  const spec = LIVE_PROVIDERS.find((p) => p.id === providerId)
+
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+      <option value="">Provider default{spec ? ` · ${spec.model}` : ''}</option>
+      {options.map((m) => {
+        const facts = [contextLabel(m), priceLabel(m)].filter(Boolean).join(' · ')
+        return (
+          <option key={m.id} value={m.id}>
+            {m.name}{facts ? ` — ${facts}` : ''}
+          </option>
+        )
+      })}
+    </select>
+  )
+}
+
+/** Provider, then model, as one row of choice. */
+function RolePicker({
+  keys, providerId, modelId, onProvider, onModel, allowInherit,
+}: {
+  keys: StoredKey[]
+  providerId: string
+  modelId: string
+  onProvider: (id: string) => void
+  onModel: (id: string) => void
+  allowInherit?: boolean
+}) {
+  const stored = connectionFor(keys, providerId)
+  return (
+    <div className="space-y-1.5">
+      <ProviderSelect allowInherit={allowInherit} value={providerId} onChange={onProvider} />
+      {providerId ? (
+        <ModelSelect providerId={providerId} stored={stored} value={modelId} onChange={onModel} />
+      ) : null}
+      {stored?.verificationError ? (
+        <Banner tone="warn">This key did not verify: {stored.verificationError.slice(0, 160)}</Banner>
+      ) : null}
+    </div>
+  )
+}
+
 export function ModelsPanel({
   config, update,
 }: { config: MobileProviderConfig; update: (next: MobileProviderConfig) => void }) {
+  const vault = useVault()
   return (
     <>
       <SettingsCard
@@ -115,7 +179,16 @@ export function ModelsPanel({
         description="Does the actual work — every task in the plan runs on this."
         anchor={anchorProps('worker-model')}
       >
-        <ProviderSelect value={config.providerId} onChange={(providerId) => update({ ...config, providerId })} />
+        <RolePicker
+          keys={vault.keys}
+          providerId={config.providerId}
+          modelId={config.modelId ?? ''}
+          // Changing provider clears the model: a model id belongs to one
+          // provider, and carrying it across would ask Anthropic for a Groq
+          // model and fail at run time.
+          onProvider={(providerId) => update({ ...config, providerId, modelId: undefined })}
+          onModel={(modelId) => update({ ...config, modelId: modelId || undefined })}
+        />
       </SettingsCard>
 
       <SettingsCard
@@ -123,10 +196,15 @@ export function ModelsPanel({
         description="Splits the goal into tasks. Leave blank to reuse the worker model."
         anchor={anchorProps('planner-model')}
       >
-        <ProviderSelect
+        <RolePicker
           allowInherit
-          value={config.plannerProviderId ?? ''}
-          onChange={(id) => update({ ...config, plannerProviderId: id || undefined })}
+          keys={vault.keys}
+          providerId={config.plannerProviderId ?? ''}
+          modelId={config.plannerModelId ?? ''}
+          onProvider={(id) => update({
+            ...config, plannerProviderId: id || undefined, plannerModelId: undefined,
+          })}
+          onModel={(id) => update({ ...config, plannerModelId: id || undefined })}
         />
       </SettingsCard>
 
@@ -143,10 +221,15 @@ export function ModelsPanel({
           ) : null
         }
       >
-        <ProviderSelect
+        <RolePicker
           allowInherit
-          value={config.judgeProviderId ?? ''}
-          onChange={(id) => update({ ...config, judgeProviderId: id || undefined })}
+          keys={vault.keys}
+          providerId={config.judgeProviderId ?? ''}
+          modelId={config.judgeModelId ?? ''}
+          onProvider={(id) => update({
+            ...config, judgeProviderId: id || undefined, judgeModelId: undefined,
+          })}
+          onModel={(id) => update({ ...config, judgeModelId: id || undefined })}
         />
       </SettingsCard>
     </>
