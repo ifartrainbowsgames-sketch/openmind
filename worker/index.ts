@@ -17,6 +17,7 @@ import { openKey } from './crypto'
 import { registerWorkerRuntimes } from './runtimes'
 import { createCredentialVault } from './credential-vault'
 import { createRoutingStore } from './routing-store'
+import { credentialFor } from './credential-resolution'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -65,7 +66,14 @@ async function loadKeys(userId: string): Promise<Map<string, { providerId: strin
   const out = new Map<string, { providerId: string; apiKey: string }>()
   for (const row of (data ?? []) as KeyRow[]) {
     try {
-      out.set(row.role, { providerId: row.provider_id, apiKey: await openKey(row, SECRET) })
+      const entry = { providerId: row.provider_id, apiKey: await openKey(row, SECRET) }
+      // Indexed by BOTH, because a row is reachable two ways. A provider
+      // connection is stored under its own id, so role and provider agree and
+      // this writes one entry. A legacy row (`worker` holding an OpenAI key)
+      // writes two, which is what lets old rows keep working unchanged while
+      // new lookups go by provider.
+      out.set(row.role, entry)
+      if (!out.has(row.provider_id)) out.set(row.provider_id, entry)
     } catch {
       // A key encrypted under a rotated secret cannot be recovered. Skip it and
       // let the run block on a missing capability rather than crash the worker.
@@ -158,11 +166,14 @@ async function executeRun(run: RunRow): Promise<void> {
 
   try {
     const keys = await loadKeys(run.user_id)
-    const worker = keys.get('worker')
+    const worker = credentialFor(keys, run.options.providerId, 'worker')
     if (!worker) {
       await finishRun(run.id, {
         status: 'needs_user',
-        error: 'No provider key stored. Add one in Settings → AI Providers so Cloud runs can execute.',
+        error: keys.size === 0
+          ? 'No provider connected. Add one in Settings → Connected providers so Cloud runs can execute.'
+          : 'Several providers are connected and none was chosen for this run. '
+            + 'Pick a worker model in Settings → Models.',
         finished_at: new Date().toISOString(),
       })
       return
@@ -180,7 +191,7 @@ async function executeRun(run: RunRow): Promise<void> {
       return
     }
 
-    const planner = keys.get('planner') ?? worker
+    const planner = credentialFor(keys, run.options.plannerProviderId, 'planner') ?? worker
     // Same rule for the planner. A planner whose provider is unrecognised is
     // dropped rather than redirected; strict mode then blocks on
     // planner_unreachable, which is a true statement about the run.

@@ -13,6 +13,6 @@ export default defineConfig({
     // `src/` deliberately — they load node:child_process and must never be
     // reachable from the browser bundle — but their tests are part of the
     // suite, not an optional extra.
-    include: ['src/**/*.test.{ts,tsx}', 'runtimes/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}', 'runtimes/**/*.test.ts', 'worker/**/*.test.ts'],
   },
 })

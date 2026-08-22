@@ -23,12 +23,37 @@ export function isToolRole(role: VaultRole): boolean {
   return (TOOL_ROLES as readonly string[]).includes(role)
 }
 
+/**
+ * The slot a credential occupies — a role, or a provider id.
+ *
+ * One row per (user, slot) is the storage rule, so which string goes here is
+ * exactly what decides how many keys a customer may hold. While slots were
+ * only ever `worker | planner | judge`, three was the hard ceiling and
+ * "connect Anthropic and Grok at once" had nowhere to live. A provider
+ * CONNECTION uses the provider id as its slot, so the ceiling becomes the
+ * number of providers instead.
+ */
+export type VaultSlot = string
+
 export interface StoredKey {
-  role: VaultRole
+  /** The slot: a provider id for a connection, a role for a legacy row. */
+  role: VaultSlot
   providerId: string
   /** "••••7f2a" — enough to recognise, useless to steal. */
   hint: string
   updatedAt?: number
+}
+
+/**
+ * Is this provider connected?
+ *
+ * By `providerId`, never by slot — a key stored years ago under the `worker`
+ * role for Anthropic is still an Anthropic connection, and the worker resolves
+ * it as one (worker/credential-vault.ts looks up by provider). Asking by slot
+ * would report such a customer as not connected while their runs worked fine.
+ */
+export function connectionFor(keys: StoredKey[], providerId: string): StoredKey | undefined {
+  return keys.find((k) => k.providerId === providerId)
 }
 
 async function callVault(body: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -51,10 +76,32 @@ async function callVault(body: Record<string, unknown>): Promise<Record<string, 
   return json
 }
 
-/** Store a key for a role. The plaintext leaves the browser exactly once. */
-export async function storeKey(role: VaultRole, providerId: string, apiKey: string): Promise<StoredKey> {
+/** Store a key in a slot. The plaintext leaves the browser exactly once. */
+export async function storeKey(role: VaultSlot, providerId: string, apiKey: string): Promise<StoredKey> {
   const out = await callVault({ action: 'set', role, providerId, apiKey })
   return { role, providerId, hint: String(out.hint ?? '••••') }
+}
+
+/**
+ * Connect a provider: store its key under its own id.
+ *
+ * `role === providerId` is the entire mechanism behind holding many keys at
+ * once, and it is deliberate rather than incidental — see VaultSlot.
+ */
+export async function connectProvider(providerId: string, apiKey: string): Promise<StoredKey> {
+  return storeKey(providerId, providerId, apiKey)
+}
+
+/**
+ * Disconnect a stored credential.
+ *
+ * Takes the row rather than a provider id, because deletion is by SLOT while
+ * connection is by provider. A legacy Anthropic key living in the `worker`
+ * slot is removed by deleting `worker` — passing 'anthropic' would match
+ * nothing and report success for a key that is still there.
+ */
+export async function disconnect(stored: StoredKey): Promise<void> {
+  await deleteKey(stored.role)
 }
 
 export async function listKeys(): Promise<StoredKey[]> {
@@ -68,6 +115,6 @@ export async function listKeys(): Promise<StoredKey[]> {
   }))
 }
 
-export async function deleteKey(role: VaultRole): Promise<void> {
+export async function deleteKey(role: VaultSlot): Promise<void> {
   await callVault({ action: 'delete', role })
 }

@@ -37,6 +37,13 @@ export interface RunOptions {
   /** Worker resolves the runtime implementation; browser sends id only. */
   runtimeId?: string
   toolKeys?: Record<string, string | undefined>
+  /**
+   * Which connected provider plays each part. Ids only — see sanitizeOptions.
+   * Absent means "let the worker decide from what is connected".
+   */
+  providerId?: string
+  plannerProviderId?: string
+  judgeProviderId?: string
 }
 
 export const TERMINAL_STATUSES: RunStatus[] = [
@@ -99,6 +106,17 @@ export function sanitizeOptions(options: RunOptions): Record<string, unknown> {
     strictMode: options.strictMode === true,
   }
   if (options.runtimeId) out.runtimeId = options.runtimeId
+
+  // WHICH provider, never the key for it.
+  //
+  // Once a customer can connect several providers at once, the worker can no
+  // longer infer which one to use from a row named `worker` — the choice lives
+  // in the browser's model settings. These are provider IDS: public, inert,
+  // and useless without the vault. They travel so the worker can look up the
+  // right connection; the credential itself never leaves the server.
+  if (options.providerId) out.providerId = options.providerId
+  if (options.plannerProviderId) out.plannerProviderId = options.plannerProviderId
+  if (options.judgeProviderId) out.judgeProviderId = options.judgeProviderId
   return out
 }
 

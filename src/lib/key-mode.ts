@@ -74,23 +74,54 @@ export function describeReadiness(
   stored: StoredKey[],
   opts: { background: boolean },
 ): Readiness {
-  const vaulted = stored.some((k) => k.role === 'worker')
+  // These three rules MIRROR credentialFor() in worker/credential-resolution.ts,
+  // and the mirroring is the requirement, not a coincidence.
+  //
+  // This function's only job is to predict whether a run will find a
+  // credential. If it is more permissive than the worker, it shows a green
+  // "Ready" and the run then blocks — the badge lies. If it is stricter, it
+  // nags a customer to add a key that would have worked. Either way the two
+  // must be changed together.
+  //
+  // It used to ask for a row literally named `worker`. Once keys live under
+  // provider ids that reported a customer with Anthropic and Grok connected as
+  // having no key at all.
+  const providers = new Set(stored.map((k) => k.providerId))
+  const chosen = config.providerId
+
+  const resolves =
+    // 1. an explicit choice that is actually connected
+    (Boolean(chosen) && providers.has(chosen))
+    // 2. a legacy `worker` slot, for accounts predating connections
+    || stored.some((k) => k.role === 'worker')
+    // 3. exactly one connection, so there is nothing to be ambiguous about
+    || providers.size === 1
+
+  // Connected to several, and none of them is the one selected. The worker
+  // will not choose on the customer's behalf — that spends their money at a
+  // rate they did not pick — so say what actually needs doing.
+  const ambiguous = !resolves && providers.size > 1
+  const vaultReason = ambiguous
+    ? 'Several providers are connected. Pick which one does the work under Models.'
+    : 'Background runs need a provider connected on the server — a worker has no browser to read a key from.'
 
   if (opts.background) {
     // A worker process has no localStorage, so only the vault counts.
-    return vaulted
+    return resolves
       ? { usable: true, viaVault: true }
-      : {
-          usable: false,
-          viaVault: false,
-          reason: 'Background runs need your model key stored on the server — a worker has no browser to read it from.',
-        }
+      : { usable: false, viaVault: false, reason: vaultReason }
   }
 
   if (config.apiKey) return { usable: true, viaVault: false }
-  return vaulted
+  return resolves
     ? { usable: true, viaVault: true }
-    : { usable: false, viaVault: false, reason: 'Add your model key to start a run.' }
+    : {
+        usable: false,
+        viaVault: false,
+        reason: ambiguous
+          ? 'Several providers are connected. Pick which one does the work under Models.'
+          : 'Add your model key to start a run.',
+      }
 }
 
 export function summarise(readiness: Readiness): string {

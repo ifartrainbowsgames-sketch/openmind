@@ -3,11 +3,13 @@ import { Link } from 'react-router'
 import { AlertTriangle, Check, Loader2, Trash2 } from 'lucide-react'
 import { LIVE_PROVIDERS } from '@/lib/agent'
 import {
-  MODEL_ROLE_META, TOOL_CAPABILITIES, TOOL_META,
+  TOOL_CAPABILITIES, TOOL_META,
   describeReadiness, summarise, type ToolCapability,
 } from '@/lib/key-mode'
 import type { MobileProviderConfig } from '@/lib/mobile-provider'
-import { deleteKey, storeKey, type StoredKey, type VaultRole } from '@/lib/provider-vault'
+import {
+  connectProvider, connectionFor, disconnect, type StoredKey,
+} from '@/lib/provider-vault'
 import { getSession } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { SettingsCard, SettingsRow, inputClass } from './SettingsLayout'
@@ -153,30 +155,39 @@ export function ModelsPanel({
 
 // ── Keys ─────────────────────────────────────────────────────────────────
 
-function VaultRow({
-  role, label, blurb, stored, onSave, onDelete, busy,
+/**
+ * One provider, connected or not.
+ *
+ * Keyed by provider rather than by role, which is the point: a customer holds
+ * one key per provider and may hold as many as they pay for. Which connected
+ * provider does the work is chosen under Models, and involves no key at all.
+ */
+function ConnectionRow({
+  spec, stored, onConnect, onDisconnect, busy,
 }: {
-  role: VaultRole; label: string; blurb: string; stored?: StoredKey
-  onSave: (role: VaultRole, providerId: string, key: string) => Promise<void>
-  onDelete: (role: VaultRole) => Promise<void>
+  spec: typeof LIVE_PROVIDERS[number]
+  stored?: StoredKey
+  onConnect: (providerId: string, key: string) => Promise<void>
+  onDisconnect: (stored: StoredKey) => Promise<void>
   busy: boolean
 }) {
   const [value, setValue] = useState('')
-  const [providerId, setProviderId] = useState(LIVE_PROVIDERS[0]?.id ?? 'openai')
+  const [open, setOpen] = useState(false)
 
   if (stored) {
     return (
-      <div className="flex items-center justify-between rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2">
-        <span className="min-w-0 text-sm">
-          <span className="font-medium">{label}</span>
-          <span className="ml-2 text-[#8d8b84]">{stored.providerId} · {stored.hint}</span>
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-black/10 bg-[#faf9f6] px-3 py-2">
+        <span className="flex min-w-0 items-center gap-2 text-sm">
+          <Check className="h-3.5 w-3.5 shrink-0 text-[#2f5d33]" />
+          <span className="truncate font-medium">{spec.name}</span>
+          <span className="shrink-0 text-[#8d8b84]">{stored.hint}</span>
         </span>
         <button
           type="button"
           disabled={busy}
-          onClick={() => void onDelete(role)}
+          onClick={() => void onDisconnect(stored)}
           className="shrink-0 rounded-full p-1.5 text-[#8d8b84] hover:bg-black/5 hover:text-[#b3261e]"
-          aria-label={`Remove ${label} key`}
+          aria-label={`Disconnect ${spec.name}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
@@ -184,11 +195,37 @@ function VaultRow({
     )
   }
 
+  if (!spec.keyRequired && spec.keyRequired !== undefined) {
+    return (
+      <div className="flex items-center justify-between rounded-xl border border-dashed border-black/15 px-3 py-2 text-sm">
+        <span className="font-medium">{spec.name}</span>
+        <span className="text-[11px] text-[#8d8b84]">{spec.keyUrl}</span>
+      </div>
+    )
+  }
+
+  if (!open) {
+    return (
+      <div className="flex items-center justify-between rounded-xl border border-dashed border-black/15 px-3 py-2">
+        <span className="min-w-0 truncate text-sm">
+          <span className="font-medium">{spec.name}</span>
+          <span className="ml-2 text-[11px] text-[#8d8b84]">{spec.model}</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="shrink-0 rounded-xl border border-black/15 px-2.5 py-1 text-[12px] hover:bg-black/5"
+        >
+          Connect
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-1.5 rounded-xl border border-dashed border-black/15 p-2.5">
-      <p className="text-[12px] font-medium">{label}</p>
-      <p className="text-[11px] leading-snug text-[#8d8b84]">{blurb}</p>
-      <ProviderSelect value={providerId} onChange={setProviderId} />
+    <div className="space-y-1.5 rounded-xl border border-black/15 p-2.5">
+      <p className="text-[12px] font-medium">{spec.name}</p>
+      <p className="text-[11px] leading-snug text-[#8d8b84]">Key from {spec.keyUrl}</p>
       <div className="flex gap-1.5">
         <input
           type="password"
@@ -196,12 +233,15 @@ function VaultRow({
           onChange={(e) => setValue(e.target.value)}
           placeholder="paste key"
           autoComplete="off"
+          autoFocus
           className={inputClass}
         />
         <button
           type="button"
           disabled={busy || !value.trim()}
-          onClick={() => { void onSave(role, providerId, value.trim()).then(() => setValue('')) }}
+          onClick={() => {
+            void onConnect(spec.id, value.trim()).then(() => { setValue(''); setOpen(false) })
+          }}
           className="shrink-0 rounded-xl bg-[#17140f] px-3 text-sm text-white disabled:opacity-40"
         >
           Save
@@ -219,10 +259,10 @@ export function KeysPanel({
   const [note, setNote] = useState<string | null>(null)
   const readiness = describeReadiness(config, vault.keys, { background: config.backgroundRuns === true })
 
-  const save = async (role: VaultRole, providerId: string, key: string) => {
+  const connect = async (providerId: string, key: string) => {
     setBusy(true); setNote(null)
     try {
-      await storeKey(role, providerId, key)
+      await connectProvider(providerId, key)
       setNote('Stored. The key left this browser once and cannot be read back.')
       vault.refresh()
     } catch (err) {
@@ -230,9 +270,9 @@ export function KeysPanel({
     } finally { setBusy(false) }
   }
 
-  const remove = async (role: VaultRole) => {
+  const remove = async (stored: StoredKey) => {
     setBusy(true)
-    try { await deleteKey(role); vault.refresh() }
+    try { await disconnect(stored); vault.refresh() }
     catch (err) { setNote(err instanceof Error ? err.message : String(err)) }
     finally { setBusy(false) }
   }
@@ -286,8 +326,8 @@ export function KeysPanel({
       ) : null}
 
       <SettingsCard
-        title="Held on the server"
-        description="Encrypted with AES-256-GCM before it reaches the database, and never readable back — not even by you. Required for background runs, which have no browser to read a key from."
+        title="Connected providers"
+        description="Connect as many as you like — one key each. Encrypted with AES-256-GCM before it reaches the database and never readable back, not even by you. Which one does the work is chosen under Models."
         anchor={anchorProps('server-keys')}
         footer={note ? <p className="text-[12px] text-[#8d8b84]">{note}</p> : null}
       >
@@ -296,15 +336,16 @@ export function KeysPanel({
         ) : (
           <div className="space-y-2">
             {vault.error ? <Banner tone="warn">{vault.error}</Banner> : null}
-            {MODEL_ROLE_META.map((meta) => (
-              <VaultRow
-                key={meta.role}
-                role={meta.role}
-                label={meta.label}
-                blurb={meta.blurb}
-                stored={vault.keys.find((k) => k.role === meta.role)}
-                onSave={save}
-                onDelete={remove}
+            {LIVE_PROVIDERS.map((spec) => (
+              <ConnectionRow
+                key={spec.id}
+                spec={spec}
+                // By provider, not by slot. A key stored under the legacy
+                // `worker` role still IS an Anthropic connection, and the
+                // worker resolves it as one.
+                stored={connectionFor(vault.keys, spec.id)}
+                onConnect={connect}
+                onDisconnect={remove}
                 busy={busy}
               />
             ))}
