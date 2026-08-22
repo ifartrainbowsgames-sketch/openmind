@@ -9,6 +9,7 @@ RUN npm install
 
 COPY src ./src
 COPY worker ./worker
+COPY runtimes ./runtimes
 COPY tsconfig.json ./
 
 ENV NODE_ENV=production

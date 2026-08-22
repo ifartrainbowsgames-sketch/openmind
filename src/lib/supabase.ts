@@ -13,30 +13,88 @@ if (!isSupabaseConfigured) {
 
 const REMEMBER_KEY = 'om-remember'
 
+function browserStore(which: 'local' | 'session'): Storage | null {
+  if (typeof globalThis === 'undefined') return null
+  const store = which === 'local' ? globalThis.localStorage : globalThis.sessionStorage
+  return typeof store === 'undefined' ? null : store
+}
+
+/** In-memory fallback so Node tests and the worker can import this module. */
+function memoryStorage(): Storage {
+  const map = new Map<string, string>()
+  return {
+    get length() {
+      return map.size
+    },
+    clear() {
+      map.clear()
+    },
+    key(i) {
+      return [...map.keys()][i] ?? null
+    },
+    getItem(k) {
+      return map.get(k) ?? null
+    },
+    setItem(k, v) {
+      map.set(k, String(v))
+    },
+    removeItem(k) {
+      map.delete(k)
+    },
+  }
+}
+
+const memory = memoryStorage()
+
 export function getRemember(): boolean {
-  return localStorage.getItem(REMEMBER_KEY) !== '0' // default: remember
+  const store = browserStore('local') ?? memory
+  return store.getItem(REMEMBER_KEY) !== '0' // default: remember
 }
 
 export function setRemember(on: boolean) {
-  localStorage.setItem(REMEMBER_KEY, on ? '1' : '0')
+  const store = browserStore('local') ?? memory
+  store.setItem(REMEMBER_KEY, on ? '1' : '0')
 }
 
 // Remember-me aware storage: the session lands in localStorage when the user
 // asked to be remembered, sessionStorage (tab-lifetime) otherwise. The flag is
 // read per access, so the choice made on the login form applies immediately.
+// Under Node there is no window storage — supabase-js still loads a session
+// on createClient, so we must not throw.
 const rememberStorage: Storage = {
   get length() {
-    return (getRemember() ? localStorage : sessionStorage).length
+    const local = browserStore('local')
+    const session = browserStore('session')
+    if (!local && !session) return memory.length
+    return (getRemember() ? local ?? memory : session ?? memory).length
   },
   clear() {
     /* never called by supabase-js */
   },
-  key: (i) => (getRemember() ? localStorage : sessionStorage).key(i),
-  getItem: (k) => localStorage.getItem(k) ?? sessionStorage.getItem(k),
-  setItem: (k, v) => (getRemember() ? localStorage : sessionStorage).setItem(k, v),
+  key: (i) => {
+    const local = browserStore('local')
+    const session = browserStore('session')
+    if (!local && !session) return memory.key(i)
+    return (getRemember() ? local ?? memory : session ?? memory).key(i)
+  },
+  getItem: (k) => {
+    const local = browserStore('local')
+    const session = browserStore('session')
+    if (!local && !session) return memory.getItem(k)
+    return local?.getItem(k) ?? session?.getItem(k) ?? null
+  },
+  setItem: (k, v) => {
+    const local = browserStore('local')
+    const session = browserStore('session')
+    if (!local && !session) return memory.setItem(k, v)
+    ;(getRemember() ? local ?? memory : session ?? memory).setItem(k, v)
+  },
   removeItem: (k) => {
-    localStorage.removeItem(k)
-    sessionStorage.removeItem(k)
+    const local = browserStore('local')
+    const session = browserStore('session')
+    if (!local && !session) return memory.removeItem(k)
+    local?.removeItem(k)
+    session?.removeItem(k)
   },
 }
 
