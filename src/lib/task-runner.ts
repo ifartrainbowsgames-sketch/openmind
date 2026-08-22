@@ -24,8 +24,12 @@ import {
   parseSpawnRequests, recordSpawn,
 } from './workforce/delegation'
 import {
-  TASK_REQUIREMENTS, runtimeShortfall, toCapability, type RuntimeCapabilities,
+  TASK_REQUIREMENTS, toCapability, type RuntimeCapabilities,
 } from './workforce/capabilities'
+import {
+  describeReasons, evaluateEligibility,
+  type CredentialDirectory, type EligibilityPolicy, type EligibilityReason,
+} from './workforce/eligibility'
 import {
   NULL_EVIDENCE, projectOutcome,
   type RoutingContextFeatures, type RoutingDecision, type RoutingEvidenceStore,
@@ -111,6 +115,12 @@ export interface RunTaskGraphOptions {
   evidence?: RoutingEvidenceStore
   /** Whose evidence this is. Required before anything is recorded. */
   userId?: string
+  /**
+   * Whether this customer holds working provider credentials. Metadata only —
+   * this path must never be able to see a key.
+   */
+  credentials?: CredentialDirectory
+  eligibilityPolicy?: EligibilityPolicy
 }
 
 /** The workspace a session runs in. One per project for now; worktrees later. */
@@ -531,25 +541,45 @@ interface MemoryPass {
 }
 
 /**
- * Refuse a task the chosen runtime cannot do, before spending anything on it.
+ * Refuse a task the chosen runtime cannot legitimately run, before spending
+ * anything on it.
  *
- * This is the half of capability routing that did not exist. `assignWorker`
- * ran once, at plan time, matching a task type to a worker kind; nothing
- * consulted capabilities at dispatch. So a task could be handed to a runtime
- * with no chance of completing it, and the failure would arrive as whatever
- * that runtime does when asked for something it cannot do — a timeout, an
- * empty answer, a judge rejection — rather than as "this runtime cannot write
- * files".
+ * Three questions, all hard gates rather than preferences: can it do the work,
+ * is it installed, and does THIS customer hold the provider credential it
+ * needs. A candidate failing any of them is not a worse choice — it is not a
+ * choice. See eligibility.ts for why that distinction is load-bearing.
+ *
+ * Every reason is returned, not the first, so a customer is not sent round the
+ * loop once per problem.
  */
-function capabilityBlocker(
-  task: TaskRecord,
-  capabilities: RuntimeCapabilities | undefined,
-  runtimeId: string,
-): string | undefined {
-  if (!capabilities) return undefined
-  const missing = runtimeShortfall(task.worker, capabilities)
-  if (!missing.length) return undefined
-  return `runtime "${runtimeId}" cannot ${missing.join(', ')}`
+async function eligibilityBlocker(input: {
+  task: TaskRecord
+  runtime: AgentRuntime
+  capabilities: RuntimeCapabilities | undefined
+  options: RunTaskGraphOptions
+}): Promise<{ blocker?: string; reasons: EligibilityReason[] }> {
+  if (!input.capabilities) return { reasons: [] }
+
+  const result = await evaluateEligibility({
+    candidate: {
+      id: input.runtime.id,
+      skills: input.capabilities.skills,
+      credentials: input.runtime.credentials,
+      available: input.runtime.available
+        ? () => input.runtime.available!()
+        : undefined,
+    },
+    taskType: input.task.worker,
+    userId: input.options.userId,
+    credentials: input.options.credentials,
+    policy: input.options.eligibilityPolicy,
+  })
+
+  if (result.eligible) return { reasons: [] }
+  return {
+    blocker: `runtime "${input.runtime.id}" ${describeReasons(result.reasons)}`,
+    reasons: result.reasons,
+  }
 }
 
 
@@ -708,7 +738,8 @@ async function executeBatch(
     // Availability first, then capability: both are cheaper than the budget
     // check and both are harder noes. A runtime that cannot run, or cannot do
     // the work, will not manage either more cheaply later.
-    const unable = unavailable ?? capabilityBlocker(task, capabilities, runtime.id)
+    const gate = await eligibilityBlocker({ task, runtime, capabilities, options })
+    const unable = unavailable ?? gate.blocker
     if (unable) {
       next = updateTask(next, task.id, { status: 'needs_user', blocker: unable })
       next = { ...next, blockers: [...next.blockers, `${task.id}: ${unable}`] }

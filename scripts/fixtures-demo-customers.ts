@@ -86,6 +86,10 @@ async function seed(customer: DemoCustomer, userId: string): Promise<void> {
 
   for (const credential of customer.credentials) {
     const sealed = await sealKey(credential.apiKey, SECRET)
+    // The invalid-credential fixture is marked as HAVING BEEN TESTED and having
+    // failed. Without that it would be indistinguishable from an untested key,
+    // and the fixture would not exercise the case it exists for.
+    const failed = customer.id === 'invalid-credential'
     const { error } = await db.from('provider_keys').upsert({
       user_id: userId,
       role: credential.role,
@@ -93,6 +97,8 @@ async function seed(customer: DemoCustomer, userId: string): Promise<void> {
       ciphertext: sealed.ciphertext,
       iv: sealed.iv,
       hint: sealed.hint,
+      verified_at: failed ? null : new Date().toISOString(),
+      verification_error: failed ? 'invalid api key (fixture)' : null,
       updated_at: new Date().toISOString(),
     })
     if (error) throw new Error(`${customer.id}: storing ${credential.role}: ${error.message}`)
