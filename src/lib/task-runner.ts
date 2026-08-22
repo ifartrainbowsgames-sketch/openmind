@@ -68,6 +68,7 @@ import {
   type WorkerKind,
 } from './task-ledger'
 import { blockedMessage, isStrict } from './execution-mode'
+import { traced, type TraceIds } from './telemetry'
 import { withCrewTools, withGithubWorkspaceTools } from './crew'
 import type { SkillId } from './skills'
 import type { WorkspaceSpace } from './workspace'
@@ -722,6 +723,14 @@ async function executeBatch(
   const trace: TraceLine[] = []
 
   for (const task of batch) {
+    const ids: TraceIds = {
+      userId: options.userId,
+      projectId: project.id,
+      taskId: task.id,
+      runtimeId: runtime.id,
+      specialistId: task.worker,
+    }
+
     // Cancellation is checked here, before any spend. A run the user stopped
     // must not start another worker.
     if (options.shouldStop && (await options.shouldStop())) {
@@ -738,7 +747,18 @@ async function executeBatch(
     // Availability first, then capability: both are cheaper than the budget
     // check and both are harder noes. A runtime that cannot run, or cannot do
     // the work, will not manage either more cheaply later.
-    const gate = await eligibilityBlocker({ task, runtime, capabilities, options })
+    const gate = await traced('eligibility.evaluate', { ids }, async (record) => {
+      const result = await eligibilityBlocker({ task, runtime, capabilities, options })
+      record({
+        'eligibility.eligible': !result.blocker && !unavailable,
+        'eligibility.candidate': runtime.id,
+        // Why a candidate was ABSENT is the question these traces exist to
+        // answer, so the reasons are recorded by kind rather than summarised.
+        'eligibility.reasons': result.reasons.map((r) => r.kind).join(',') || 'none',
+        'eligibility.detail': result.blocker ?? '',
+      })
+      return result
+    })
     const unable = unavailable ?? gate.blocker
     if (unable) {
       next = updateTask(next, task.id, { status: 'needs_user', blocker: unable })
@@ -776,14 +796,22 @@ async function executeBatch(
     // worker may call — the whole point is that a Claude Code worker, a Codex
     // worker and the builtin worker all start from the same project facts. It
     // travels as an argument to runTask for exactly that reason.
-    const taskContext: TaskContext = {
-      memory: await memory.service.buildContext({
+    const taskContext: TaskContext = await traced('memory.load', { ids }, async (record) => {
+      const built = await memory.service.buildContext({
         book: next.memory ?? { entries: [] },
         projectId: next.id,
         task,
         worker: task.worker,
-      }),
-    }
+      })
+      // Metadata, never the book. A customer's project memory is not telemetry.
+      record({
+        'memory.entries': built.entries.length,
+        'memory.prior_failures': built.priorFailures.length,
+        'memory.bytes': built.text.length,
+        'memory.layers': [...new Set(built.entries.map((e) => e.layer))].join(','),
+      })
+      return { memory: built }
+    })
 
     const employee = withGithubWorkspaceTools(withCrewTools(workerEmployee(task.worker)), options.workspace)
     const prompt = buildWorkerPrompt(next, task, taskContext.memory.text)
@@ -808,12 +836,26 @@ async function executeBatch(
     // The real decision this run makes today: which runtime executes the task.
     // Recorded with the candidate set that was genuinely eligible, so that when
     // a router arrives it inherits history rather than starting from zero.
-    await evidence.decide({
-      project: next,
-      task,
-      decisionType: 'runtime',
-      chosen: runtime.id,
-      candidates: eligibleRuntimeIds(runtime, capabilities, task),
+    const candidates = eligibleRuntimeIds(runtime, capabilities, task)
+    await traced('routing.select', { ids }, async (record) => {
+      record({
+        'routing.decision_type': 'runtime',
+        'routing.selected': runtime.id,
+        'routing.eligible_count': candidates.length,
+        'routing.candidates': candidates.join(','),
+        'routing.manual_override': Boolean(options.runtimeId),
+        // A choice made because there was nothing else is not evidence about
+        // what was chosen, and the trace should say so as plainly as the
+        // evidence table does.
+        'routing.policy': candidates.length > 1 ? 'default' : 'sole-candidate',
+      })
+      await evidence.decide({
+        project: next,
+        task,
+        decisionType: 'runtime',
+        chosen: runtime.id,
+        candidates,
+      })
     })
 
     const session = await runtime.createSession({
@@ -846,6 +888,14 @@ async function executeBatch(
     let outcomeText = ''
     /** Approval requests the runtime surfaced, in the order they were asked. */
     const approvals: string[] = []
+    await traced('runtime.execute', {
+      ids: { ...ids, sessionId: session.id, workspaceId: session.workspaceId },
+      attributes: {
+        'runtime.provider': session.provider,
+        'runtime.resumed': session.taskIds.length > 0,
+        'workspace.recovery': session.recovery?.kind ?? 'none',
+      },
+    }, async (record) => {
     for await (const ev of runtime.runTask(session, task, taskContext)) {
       // Runtime events reach the trace, so the UI observes the same stream the
       // orchestrator does rather than a parallel one.
@@ -866,19 +916,20 @@ async function executeBatch(
       }
       options.onEvent?.(ev)
     }
-
-    if (!result) {
-      // The runtime terminated without a result. Treat it as a failed task
-      // rather than inventing an empty one, which would judge as an artifact-less
-      // completion.
-      next = updateTask(next, task.id, { status: 'failed', blocker: 'runtime returned no result' })
-      next = logEvent(next, {
-        action: 'report_blocker', taskId: task.id, worker: task.worker,
-        detail: 'runtime returned no result',
+      record({
+        'runtime.outcome': outcome ?? 'none',
+        'runtime.tool_calls': result?.toolCalls.length ?? 0,
+        'runtime.approvals_requested': approvals.length,
+        'runtime.has_result': Boolean(result),
       })
-      next = await recordTaskMemory(next, memory, task, undefined, [])
-      continue
-    }
+    })
+
+    // A failed run legitimately carries no result, so the outcome is read
+    // FIRST. Checking `!result` before it replaced the runtime's own
+    // explanation with a description of its shape: the first live run against
+    // a real model reported "runtime returned no result" for every task, and
+    // the actual message — a 429 saying the account was out of quota — never
+    // reached anyone. A billing problem presented as an internal malfunction.
 
     // THE RUNTIME'S OUTCOME IS AUTHORITATIVE.
     //
@@ -914,9 +965,21 @@ async function executeBatch(
           taskStatus: status,
           neededUser: status === 'needs_user',
           retries: task.retries,
-          invalidToolCalls: result.toolCalls.filter((c) => c.error?.kind === 'error').length,
+          invalidToolCalls: (result?.toolCalls ?? []).filter((c) => c.error?.kind === 'error').length,
         },
       })
+      continue
+    }
+
+    if (!result) {
+      // Reported completed, and yet nothing came back. Failed rather than an
+      // invented empty result, which would judge as an artifact-less completion.
+      const detail = outcomeText || 'the runtime reported success but returned no result'
+      next = updateTask(next, task.id, { status: 'failed', blocker: detail })
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker, detail,
+      })
+      next = await recordTaskMemory(next, memory, task, undefined, [])
       continue
     }
 
@@ -947,7 +1010,20 @@ async function executeBatch(
       // attempt. Recorded here because this path is terminal — it never
       // reaches the judge, and without this every later worker rediscovers
       // that the same connection is missing.
-      next = await recordTaskMemory(next, memory, task, result, [])
+      next = await recordTaskMemory(next, memory, task, result ?? undefined, [])
+      continue
+    }
+
+    if (!result) {
+      // Reported completed, and yet nothing came back. Treat it as failed
+      // rather than inventing an empty result, which would judge as an
+      // artifact-less completion.
+      const detail = outcomeText || 'the runtime reported success but returned no result'
+      next = updateTask(next, task.id, { status: 'failed', blocker: detail })
+      next = logEvent(next, {
+        action: 'report_blocker', taskId: task.id, worker: task.worker, detail,
+      })
+      next = await recordTaskMemory(next, memory, task, undefined, [])
       continue
     }
 
@@ -963,10 +1039,23 @@ async function executeBatch(
     // Tool artifacts win on a path collision: a browser session that wrote
     // sources.json from the URLs it actually visited is evidence, and the
     // model's prose account of the same page is a description of evidence.
+    const fromTools = toolArtifacts(task, result)
     const artifacts = mergeArtifacts(
-      toolArtifacts(task, result),
+      fromTools,
       parseWorkerArtifacts(task, result.answer, task.worker),
     )
+    await traced('artifact.adopt', { ids }, async (record) => {
+      record({
+        'artifact.count': artifacts.length,
+        // Provenance, which is the whole reason this span exists: bytes a tool
+        // wrote are not the same claim as prose a model produced.
+        'artifact.from_tools': fromTools.length,
+        'artifact.from_prose': artifacts.length - fromTools.length,
+        'artifact.paths': artifacts.map((a) => a.path).join(','),
+        'artifact.bytes': artifacts.reduce((n, a) => n + a.body.length, 0),
+        'artifact.sources': artifacts.reduce((n, a) => n + (a.sources ?? 0), 0),
+      })
+    })
     next = {
       ...next,
       artifacts: [...next.artifacts.filter((a) => !artifacts.some((n) => n.path === a.path)), ...artifacts],
@@ -1046,6 +1135,7 @@ async function judgeBatch(
   memory: MemoryPass,
   evidence: EvidenceRecorder,
   runtimeId: string,
+  userId: string | undefined,
 ): Promise<ProjectState> {
   let next = project
   for (const task of next.tasks.filter((t) => t.status === 'running')) {
@@ -1057,7 +1147,24 @@ async function judgeBatch(
       ...task,
       acceptance: mergeAcceptance(sopFor(task.worker), task.acceptance),
     }
-    const verdict = judgeTask(contract, taskArtifacts)
+    const verdict = await traced('task.evaluate', {
+      ids: { userId, projectId: next.id, taskId: task.id, runtimeId, specialistId: task.worker },
+    }, async (record) => {
+      const v = judgeTask(contract, taskArtifacts)
+      // Deterministic checks only, today. When an LLM judge exists this span is
+      // where `judge.model` belongs, so the difference is visible rather than
+      // assumed.
+      record({
+        'evaluation.deterministic': true,
+        'evaluation.llm_judge': false,
+        'evaluation.passed': v.passed,
+        'evaluation.score': v.score,
+        'evaluation.problems': v.problems.length,
+        'evaluation.artifacts': taskArtifacts.length,
+        'evaluation.criteria': Object.keys(contract.acceptance ?? {}).join(','),
+      })
+      return v
+    })
     // The validator's decision is the part of the outcome worth carrying
     // forward — a pass supersedes the failures recorded for the same task, so
     // a fixed problem stops being recalled as an open one.
@@ -1227,7 +1334,7 @@ export async function runTaskGraph(
   }
 
   const judgeNode = async (state: TRS): Promise<Partial<TRS>> => {
-    const p = await judgeBatch(state.project, memory, evidence, runtime.id)
+    const p = await judgeBatch(state.project, memory, evidence, runtime.id, options.userId)
     await persistQuietly(p, options)
     return {
       project: p,
@@ -1267,6 +1374,12 @@ export async function runTaskGraph(
   const compiled = graph.compile()
   let final: TRS = { rawTask, project, answer: '', members: [], trace: [] }
 
+  const runIds: TraceIds = {
+    userId: options.userId,
+    projectId: project.id,
+    runtimeId: runtime.id,
+  }
+
   for await (const update of await compiled.stream({ rawTask, project, answer: '', members: [], trace: [] }, { streamMode: 'updates' })) {
     for (const partial of Object.values(update) as Partial<TRS>[]) {
       final = {
@@ -1283,6 +1396,30 @@ export async function runTaskGraph(
 
   setActiveCrewToolKeys({})
   const artifacts = toCrewArtifacts(final.project)
+
+  // One span describing the whole run, emitted at the end because that is when
+  // the outcome is known. The individual outcomes are kept apart rather than
+  // flattened to success/failure — needs_user and cancelled are answers, not
+  // degrees of failure.
+  const byStatus = final.project.tasks.reduce<Record<string, number>>((acc, t) => {
+    acc[t.status] = (acc[t.status] ?? 0) + 1
+    return acc
+  }, {})
+  await traced('task.outcome', { ids: runIds }, async (record) => {
+    record({
+      'run.goal_length': rawTask.length,
+      'run.tasks': final.project.tasks.length,
+      'run.completed': byStatus.completed ?? 0,
+      'run.failed': byStatus.failed ?? 0,
+      'run.needs_user': byStatus.needs_user ?? 0,
+      'run.blocked': byStatus.blocked ?? 0,
+      'run.artifacts': artifacts.length,
+      'run.tokens': final.project.spend.tokens,
+      'run.cost_usd': final.project.spend.costUsd,
+      'run.blockers': final.project.blockers.length,
+    })
+  })
+
   return {
     answer: final.answer,
     members: allMembers,

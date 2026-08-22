@@ -17,7 +17,10 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@arizeai/openinference-semantic-conventions": "^2.7.0",
+    "@arizeai/phoenix-otel": "^2.2.0",
     "@langchain/langgraph": "^1.4.8",
+    "@opentelemetry/api": "^1.9.1",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
     "@rive-app/react-canvas": "4.29.5",

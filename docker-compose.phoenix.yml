@@ -1,0 +1,38 @@
+# Arize Phoenix, for looking at what OpenMind actually did.
+#
+#   docker compose -f docker-compose.phoenix.yml up -d
+#   open http://localhost:6006
+#
+# Then run anything with telemetry on:
+#
+#   PHOENIX_ENABLED=true npx tsx scripts/verify-agent-live.ts
+#
+# Deliberately a SEPARATE compose file rather than part of a dev stack.
+# Observability that starts by default is observability nobody decided to send,
+# and OpenMind must work with this container absent, stopped or restarting.
+#
+# Phoenix has no access to OpenMind's database. It receives OTLP and nothing
+# else — it cannot read tasks, artifacts, memory or credentials, and it is not
+# consulted to decide anything.
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: openmind-phoenix
+    ports:
+      # UI, and the OTLP/HTTP collector at /v1/traces.
+      - '6006:6006'
+      # OTLP/gRPC.
+      - '4317:4317'
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+      # Bound to localhost by the port mapping above. Do NOT expose this
+      # container publicly without putting authentication in front of it:
+      # traces describe a customer's work even with every secret redacted.
+      PHOENIX_ENABLE_AUTH: 'false'
+    volumes:
+      - phoenix-data:/mnt/data
+    restart: unless-stopped
+
+volumes:
+  phoenix-data:

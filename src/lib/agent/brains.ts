@@ -121,6 +121,11 @@ export const LIVE_PROVIDERS: readonly LiveProviderSpec[] = [
   { id: 'kimi', name: 'Kimi (Moonshot)', baseUrl: 'https://api.moonshot.ai/v1', model: 'kimi-k3', fixedParams: true, keyUrl: 'platform.moonshot.ai → API Keys' },
   { id: 'kimi-cn', name: 'Kimi (Moonshot · CN)', baseUrl: 'https://api.moonshot.cn/v1', model: 'kimi-k3', fixedParams: true, keyUrl: 'platform.moonshot.cn → API Keys' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', keyUrl: 'platform.openai.com/api-keys' },
+  // Anthropic serves an OpenAI-shaped endpoint at /v1/chat/completions, so it
+  // needs no new client — verified against the live API before adding, not
+  // assumed from documentation. Its absence was why nothing could use an
+  // Anthropic key, including the Claude Code runtime that requires one.
+  { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5-20251001', keyUrl: 'console.anthropic.com → API Keys' },
   { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'moonshotai/kimi-k2.5', keyUrl: 'openrouter.ai/keys' },
   { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant', keyUrl: 'console.groq.com/keys' },
   { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1', keyRequired: false, keyUrl: 'no key needed — local' },
