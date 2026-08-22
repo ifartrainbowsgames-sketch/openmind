@@ -149,10 +149,10 @@ async function executeRun(run: RunRow): Promise<void> {
   try {
     const keys = await loadKeys(run.user_id)
     const worker = keys.get('worker')
-    if (strict && !worker) {
+    if (!worker) {
       await finishRun(run.id, {
         status: 'needs_user',
-        error: 'No provider key stored. Add one in Settings so background runs can execute.',
+        error: 'No provider key stored. Add one in Settings → AI Providers so Cloud runs can execute.',
         finished_at: new Date().toISOString(),
       })
       return
@@ -208,6 +208,8 @@ async function executeRun(run: RunRow): Promise<void> {
       project_id: result.project.id,
       snapshot: result.project,
       answer: result.answer,
+      // The exact trace, so "View Trace" resolves rather than searches.
+      trace_id: result.traceId ?? null,
       finished_at: new Date().toISOString(),
     })
     console.log(`run ${run.id}: done in ${Math.round((Date.now() - started) / 1000)}s`)

@@ -34,6 +34,8 @@ export interface RunOptions {
   workspace?: WorkspaceSpace
   skill?: SkillId
   strictMode?: boolean
+  /** Worker resolves the runtime implementation; browser sends id only. */
+  runtimeId?: string
   toolKeys?: Record<string, string | undefined>
 }
 
@@ -91,11 +93,13 @@ export async function enqueueRun(goal: string, options: RunOptions = {}): Promis
  * only place keys belong now.
  */
 export function sanitizeOptions(options: RunOptions): Record<string, unknown> {
-  return {
+  const out: Record<string, unknown> = {
     workspace: options.workspace,
     skill: options.skill,
     strictMode: options.strictMode === true,
   }
+  if (options.runtimeId) out.runtimeId = options.runtimeId
+  return out
 }
 
 /**

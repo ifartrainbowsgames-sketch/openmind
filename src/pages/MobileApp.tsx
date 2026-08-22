@@ -70,6 +70,18 @@ import { getSession } from '@/lib/auth'
 import { bootKernel, runTurn } from '@/lib/openmind-os'
 import { withExecutionMode } from '@/lib/execution-mode'
 import { cancelRun, enqueueRun, isTerminal, listRuns, watchRun, type QueuedRun } from '@/lib/run-queue'
+import {
+  executionStatusLabel,
+  loadAppExecutionMode,
+  loadStoredRuntimeId,
+  saveExecutionMode,
+  saveRuntimeId,
+  CLOUD_PROVIDER_SETTINGS_PATH,
+  type AppExecutionMode,
+  type AppRuntimeId,
+} from '@/lib/app-execution'
+import { fetchCloudReadiness, type CloudReadiness } from '@/lib/cloud-readiness'
+import { buildCloudRunOptions, describeRunStatus, resolveSendRoute } from '@/lib/app-send'
 import { SKILLS, type SkillId } from '@/lib/skills'
 import {
   applySlashToDraft,
@@ -115,23 +127,13 @@ interface PendingAttachment {
   name: string
   text?: string}
 function formatTime(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(timestamp)}/** What to show in the bubble while a queued run is still in flight. */function describeRun(run: QueuedRun): string {
-  switch (run.status) {
-    case 'queued':
-      return 'Queued — a worker will pick this up. You can close the tab.'
-    case 'running':
-      return run.snapshot
-        ? `Running — ${run.snapshot.tasks.filter((t) => t.status === 'completed').length}/${run.snapshot.tasks.length} tasks done.`
-        : 'Running on the worker…'
-    case 'needs_user':
-      return run.error ?? 'Blocked — something needs your input before this can continue.'
-    case 'failed':
-      return `Failed — ${run.error ?? 'no reason reported'}`
-    case 'cancelled':
-      return 'Cancelled.'
-    default:
-      return run.answer ?? 'Done.'
-  }}function getStoredThreads(): MobileThread[] {
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(timestamp)
+}
+
+/** What to show in the bubble while a queued run is still in flight. */
+function describeRun(run: QueuedRun): string {
+  return describeRunStatus(run)
+}function getStoredThreads(): MobileThread[] {
   if (typeof window === 'undefined') return [createMobileThread()]
   const saved = parseMobileThreads(localStorage.getItem(MOBILE_THREADS_KEY))
   return saved.length ? saved : [createMobileThread()]}function AgentMark({ employee, small = false }: { employee: Employee; small?: boolean }) {
@@ -321,6 +323,14 @@ function formatTime(timestamp: number): string {
   // Read-only here: /settings owns writes, and returning from that route
   // remounts this page, so the fresh config is picked up on mount.
   const [provider] = useState<MobileProviderConfig>(() => loadMobileProvider())
+  const [executionMode, setExecutionMode] = useState<AppExecutionMode>(() => loadAppExecutionMode(false))
+  const [runtimeId, setRuntimeId] = useState<AppRuntimeId>(() => loadStoredRuntimeId())
+  const [cloudReadiness, setCloudReadiness] = useState<CloudReadiness>(() => ({
+    ready: false,
+    signedIn: false,
+    demoSession: false,
+  }))
+  const [signedIn, setSignedIn] = useState(false)
   const [voice, setVoice] = useState<MobileVoiceSettings>(() => loadMobileVoiceSettings())
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
@@ -339,6 +349,15 @@ function formatTime(timestamp: number): string {
   const recordingRef = useRef<{ stop: () => void } | null>(null)
   const liveReady = mobileLiveReady(provider)
   const providerSpec = resolveMobileProviderSpec(provider)
+  const executionLabel = executionStatusLabel(executionMode, {
+    providerName:
+      executionMode === 'cloud'
+        ? cloudReadiness.workerProviderName
+        : executionMode === 'browser_direct'
+          ? providerSpec.name
+          : undefined,
+    runtimeId: executionMode === 'cloud' ? runtimeId : undefined,
+  })
   const openAiVoiceReady = provider.providerId === 'openai' && provider.apiKey.trim().length > 0
   // A dedicated planner provider when one is configured, else the worker
   // provider. Same model planning and executing is weaker, but it is what a
@@ -353,15 +372,6 @@ function formatTime(timestamp: number): string {
         fixedParams: plannerSpec.fixedParams,
       }
     : null
-  const brain = () =>
-    liveReady
-      ? liveBrain({
-          baseUrl: providerSpec.baseUrl,
-          model: providerSpec.model,
-          key: provider.apiKey.trim(),
-          fixedParams: providerSpec.fixedParams,
-        })
-      : simulatedBrain()
   const persistVoice = (next: MobileVoiceSettings) => {
     setVoice(next)
     saveMobileVoiceSettings(next)
@@ -416,8 +426,12 @@ function formatTime(timestamp: number): string {
   }, [threads])
   useEffect(() => {
     void getSession().then((session) => {
+      const isSignedIn = Boolean(session?.user.id && !session.demo)
+      setSignedIn(isSignedIn)
+      setExecutionMode(loadAppExecutionMode(isSignedIn))
       if (session?.user.id) bootKernel({ userId: session.user.id })
       setAccountEmail(session?.user.email ?? null)
+      void fetchCloudReadiness().then(setCloudReadiness)
     })
   }, [])
   useEffect(() => {
@@ -625,36 +639,60 @@ function formatTime(timestamp: number): string {
         updateThread(threadId, (current) => ({ ...current, workspace: space, updatedAt: Date.now() }))
       }
       const crewPrompt = workspacePrompt(space, runtimePrompt)
-      // Background: hand the goal to the worker and stop holding the run here.
-      // The tab becomes a viewer, so closing it no longer kills the work.
-      if (provider.backgroundRuns) {
-        const queued = await enqueueRun(crewPrompt, {
-          workspace: space,
-          skill: turnSkill,
-          strictMode: provider.strictMode === true,
-        })
-        appendRunMessage(threadId, queued)
-        watchQueuedRun(threadId, queued.id)
-        clearPending(threadId)
+      const route = resolveSendRoute({
+        executionMode,
+        signedIn,
+        demoSession: cloudReadiness.demoSession,
+        cloudReady: cloudReadiness.ready,
+        cloudBlockReason: cloudReadiness.reason,
+        browserKeyReady: liveReady,
+      })
+
+      if (route.kind === 'blocked') {
+        updateThread(threadId, (current) => ({
+          ...current,
+          messages: [
+            ...current.messages,
+            {
+              id: makeId('message'),
+              role: 'assistant',
+              content: `${route.message} Open Settings → AI Providers to connect one.`,
+              createdAt: Date.now(),
+            },
+          ],
+          updatedAt: Date.now(),
+        }))
         return
       }
-      // A strict run is opt-in per the Settings toggle. Inside it nothing
-      // substitutes for a missing capability, so a task blocks rather than
-      // returning canned data that would judge as success.
-      const result = await withExecutionMode(provider.strictMode ? 'strict' : 'demo', () =>
-        runTurn(crewPrompt, brain(), {
+
+      if (route.kind === 'cloud_enqueue') {
+        const queued = await enqueueRun(
+          crewPrompt,
+          buildCloudRunOptions({ workspace: space, skill: turnSkill, runtimeId, route }),
+        )
+        appendRunMessage(threadId, queued)
+        watchQueuedRun(threadId, queued.id)
+        return
+      }
+
+      const turnBrain =
+        route.kind === 'demo_runTurn'
+          ? simulatedBrain()
+          : liveBrain({
+              baseUrl: providerSpec.baseUrl,
+              model: providerSpec.model,
+              key: provider.apiKey.trim(),
+              fixedParams: providerSpec.fixedParams,
+            })
+
+      const result = await withExecutionMode(route.kind === 'demo_runTurn' ? 'demo' : 'strict', () =>
+        runTurn(crewPrompt, turnBrain, {
           lead: employee,
           skill: turnSkill,
           workspace: space,
           onTrace: (line) => pushTrace(threadId, line),
-          // The planner gets its own call with its own prompt rather than
-          // reusing the worker brain's context — one model should not design a
-          // plan and then grade its own execution of it.
           planner: plannerBrain,
           persist: true,
-          // No toolKeys: search, browse, sandbox and hosted Chrome run on our
-          // credentials, held in Edge Function secrets. The browser never has
-          // one to send, which is the point — a bundle is public.
           platformKeys: true,
         }),
       )
@@ -811,11 +849,7 @@ function formatTime(timestamp: number): string {
                 </span>
                 <span className="mt-1 flex items-center gap-1 text-[10px] leading-none text-white/45">
                   {online ? <Wifi className="h-2.5 w-2.5" /> : <WifiOff className="h-2.5 w-2.5" />}
-                  {online
-                    ? liveReady
-                      ? `Live · ${providerSpec.name}`
-                      : 'Simulated · tap speaker to add key'
-                    : 'Offline'}
+                  {online ? executionLabel : 'Offline'}
                 </span>
               </span>
             </div>
@@ -1149,7 +1183,7 @@ function formatTime(timestamp: number): string {
       <CommandSheet
         open={commandOpen}
         skill={skill}
-        modelName={liveReady ? providerSpec.model : 'Simulated'}
+        modelName={executionMode === 'demo' ? 'Demo' : liveReady ? providerSpec.model : 'Not configured'}
         onClose={() => setCommandOpen(false)}
         onPickSkill={setSkill}
         onFiles={() => fileRef.current?.click()}
@@ -1176,6 +1210,61 @@ function formatTime(timestamp: number): string {
                 Sign in
               </Link>
             )}
+            <p className="mt-5 text-[11px] uppercase tracking-[0.12em] text-white/35">Execution</p>
+            <p className="mt-1 text-[12px] text-white/55">{executionLabel}</p>
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              {(['cloud', 'browser_direct', 'demo'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={mode === 'cloud' && !signedIn}
+                  onClick={() => {
+                    setExecutionMode(mode)
+                    saveExecutionMode(mode)
+                    if (mode === 'cloud') void fetchCloudReadiness().then(setCloudReadiness)
+                  }}
+                  className={`rounded-lg px-2 py-2 text-[11px] font-medium ${
+                    executionMode === mode ? 'bg-[#ff4d00] text-white' : 'bg-white/10 text-white/70'
+                  } disabled:opacity-40`}
+                >
+                  {mode === 'cloud' ? 'Cloud' : mode === 'browser_direct' ? 'Browser' : 'Demo'}
+                </button>
+              ))}
+            </div>
+            {executionMode === 'cloud' && !cloudReadiness.ready && cloudReadiness.reason ? (
+              <p className="mt-2 text-[12px] text-amber-200/90">{cloudReadiness.reason}</p>
+            ) : null}
+            {executionMode === 'cloud' ? (
+              <div className="mt-3">
+                <p className="text-[11px] uppercase tracking-[0.12em] text-white/35">Runtime</p>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  {(['builtin', 'claude-code'] as const).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        setRuntimeId(id)
+                        saveRuntimeId(id)
+                      }}
+                      className={`rounded-lg px-2 py-2 text-[11px] font-medium ${
+                        runtimeId === id ? 'bg-white/20 text-white' : 'bg-white/10 text-white/70'
+                      }`}
+                    >
+                      {id === 'builtin' ? 'OpenMind Native' : 'Claude Code'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {executionMode === 'cloud' && !cloudReadiness.ready ? (
+              <Link
+                to={CLOUD_PROVIDER_SETTINGS_PATH}
+                onClick={() => setSettingsOpen(false)}
+                className="mt-3 block w-full rounded-xl bg-[#ff4d00]/90 py-3 text-center text-sm font-medium"
+              >
+                Open AI Provider Settings
+              </Link>
+            ) : null}
             <Link
               to="/settings/general"
               onClick={() => setSettingsOpen(false)}

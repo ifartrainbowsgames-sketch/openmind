@@ -36,6 +36,10 @@ describe('sanitizeOptions', () => {
     expect(sanitizeOptions({}).strictMode).toBe(false)
   })
 
+  it('passes runtimeId when set', () => {
+    expect(sanitizeOptions({ runtimeId: 'claude-code' }).runtimeId).toBe('claude-code')
+  })
+
   it('drops unknown fields instead of passing them through', () => {
     const out = sanitizeOptions({ apiKey: 'sk-leak', foo: 1 } as unknown as RunOptions)
     expect(JSON.stringify(out)).not.toContain('sk-leak')
