@@ -128,8 +128,49 @@ export const LIVE_PROVIDERS: readonly LiveProviderSpec[] = [
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-haiku-4-5-20251001', keyUrl: 'console.anthropic.com → API Keys' },
   { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'moonshotai/kimi-k2.5', keyUrl: 'openrouter.ai/keys' },
   { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.1-8b-instant', keyUrl: 'console.groq.com/keys' },
+
+  // Every entry below serves an OpenAI-shaped /chat/completions, and every
+  // baseUrl was probed against the live API before being added — an
+  // unauthenticated POST that came back "invalid API key" rather than 404 or a
+  // DNS failure. That is the same bar the Anthropic entry above was held to.
+  //
+  // The MODEL ids are not verified to the same standard and cannot be: these
+  // APIs reject on auth before they resolve a model, so without a key there is
+  // nothing to check against. They are the stable published aliases where one
+  // exists (`-latest`, `deepseek-chat`, `sonar`) precisely because those drift
+  // least. A live model catalogue is Stage E; until then, treat a model id here
+  // as the best default rather than a guarantee.
+  //
+  // Fireworks is deliberately ABSENT. Its endpoint is real and answers, but it
+  // resolves models before auth, so every id returns "not found" to an
+  // unauthenticated caller and no model could be confirmed. Shipping a guessed
+  // one would have meant a provider that looks connected and fails on first use.
+  { id: 'xai', name: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', model: 'grok-4', keyUrl: 'console.x.ai → API Keys' },
+  { id: 'google', name: 'Google (Gemini)', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash', keyUrl: 'aistudio.google.com/apikey' },
+  { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', keyUrl: 'platform.deepseek.com → API Keys' },
+  { id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', keyUrl: 'console.mistral.ai → API Keys' },
+  { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', keyUrl: 'api.together.xyz/settings/api-keys' },
+  { id: 'perplexity', name: 'Perplexity', baseUrl: 'https://api.perplexity.ai', model: 'sonar', keyUrl: 'perplexity.ai/settings/api' },
+  { id: 'cohere', name: 'Cohere', baseUrl: 'https://api.cohere.ai/compatibility/v1', model: 'command-r-plus', keyUrl: 'dashboard.cohere.com/api-keys' },
+  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'llama3.3-70b', keyUrl: 'cloud.cerebras.ai → API Keys' },
+
   { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.1', keyRequired: false, keyUrl: 'no key needed — local' },
 ]
+
+/**
+ * The spec for a stored provider id, or null when this build has never heard
+ * of it.
+ *
+ * Null rather than a default, and that distinction is a security boundary.
+ * Callers used to write `find(...) ?? LIVE_PROVIDERS[0]`, so a provider id that
+ * had been renamed, retired, or simply mistyped did not fail — it sent the
+ * CUSTOMER'S API KEY to whichever provider happened to sit first in this array.
+ * A stored credential must only ever be presented to the provider it belongs
+ * to, so an unknown id has to stop the run, not pick a neighbour.
+ */
+export function providerSpec(id: string): LiveProviderSpec | null {
+  return LIVE_PROVIDERS.find((p) => p.id === id) ?? null
+}
 
 export async function chatComplete(
   provider: LiveProvider & { fixedParams?: boolean },

@@ -246,30 +246,48 @@ export function KeysPanel({
         footer={<Banner tone={readiness.usable ? 'ok' : 'warn'}>{summarise(readiness)}</Banner>}
       />
 
-      <SettingsCard
-        title="Held in this browser"
-        description="Used by runs that execute in the tab. Stored in localStorage and sent straight to the model provider — it never reaches our servers."
-        anchor={anchorProps('browser-keys')}
-      >
-        <SettingsRow
-          label="Model key"
-          hint="For the worker model chosen under Models."
-          control={
-            <input
-              type="password"
-              value={config.apiKey}
-              onChange={(e) => update({ ...config, apiKey: e.target.value })}
-              placeholder="sk-..."
-              autoComplete="off"
-              className={inputClass}
-            />
-          }
-        />
-      </SettingsCard>
+      {/*
+        Local development only.
+
+        A production customer must never be asked to paste a provider key into
+        a web page that keeps it in localStorage: anything running in the tab
+        can read it, it survives sign-out, it follows the browser profile onto
+        shared machines, and it is exactly the exposure the server-side vault
+        below exists to remove. The vault encrypts with AES-256-GCM before the
+        key reaches the database and never hands it back.
+
+        The field stays under `import.meta.env.DEV` rather than being deleted
+        because tab-executed runs genuinely have no server to fetch a key from,
+        and that path is still worth exercising locally. `DEV` is compiled out
+        by Vite, so this markup is not merely hidden in the production bundle —
+        it is absent from it.
+      */}
+      {import.meta.env.DEV ? (
+        <SettingsCard
+          title="Held in this browser (dev only)"
+          description="Local development only — not shown in the deployed app. Stored in localStorage, which anything running in this tab can read. Use the server-side vault below for anything real."
+          anchor={anchorProps('browser-keys')}
+        >
+          <SettingsRow
+            label="Model key"
+            hint="For the worker model chosen under Models."
+            control={
+              <input
+                type="password"
+                value={config.apiKey}
+                onChange={(e) => update({ ...config, apiKey: e.target.value })}
+                placeholder="sk-..."
+                autoComplete="off"
+                className={inputClass}
+              />
+            }
+          />
+        </SettingsCard>
+      ) : null}
 
       <SettingsCard
         title="Held on the server"
-        description="Encrypted with AES-256-GCM before it reaches the database, and never readable back — not even by you. Required for background runs, which have no browser to read the key above."
+        description="Encrypted with AES-256-GCM before it reaches the database, and never readable back — not even by you. Required for background runs, which have no browser to read a key from."
         anchor={anchorProps('server-keys')}
         footer={note ? <p className="text-[12px] text-[#8d8b84]">{note}</p> : null}
       >

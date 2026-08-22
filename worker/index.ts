@@ -9,8 +9,7 @@
 // the owner from the claimed row rather than from any request.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { liveBrain, simulatedBrain, type AgentBrain } from '../src/lib/agent'
-import { LIVE_PROVIDERS } from '../src/lib/agent'
+import { liveBrain, providerSpec, simulatedBrain, type AgentBrain } from '../src/lib/agent'
 import { runTaskGraph } from '../src/lib/task-runner'
 import { setExecutionMode } from '../src/lib/execution-mode'
 import { setProjectOwner } from '../src/lib/project-store'
@@ -76,9 +75,20 @@ async function loadKeys(userId: string): Promise<Map<string, { providerId: strin
   return out
 }
 
-function brainFor(entry?: { providerId: string; apiKey: string }): AgentBrain {
+/**
+ * The brain for one stored credential, or null if this build does not know the
+ * provider.
+ *
+ * Null is the whole point. This used to end in `?? LIVE_PROVIDERS[0]`, which
+ * meant a provider id this build did not recognise — retired, renamed, or
+ * mistyped — quietly sent the customer's key to Moonshot's endpoint. A
+ * credential disclosure to an unrelated third party, from a stale string.
+ * An unknown provider now blocks the run instead.
+ */
+function brainFor(entry?: { providerId: string; apiKey: string }): AgentBrain | null {
   if (!entry) return simulatedBrain()
-  const spec = LIVE_PROVIDERS.find((p) => p.id === entry.providerId) ?? LIVE_PROVIDERS[0]
+  const spec = providerSpec(entry.providerId)
+  if (!spec) return null
   return liveBrain({
     baseUrl: spec.baseUrl,
     model: spec.model,
@@ -158,12 +168,25 @@ async function executeRun(run: RunRow): Promise<void> {
       return
     }
 
-    const planner = keys.get('planner') ?? worker
-    const plannerSpec = planner
-      ? LIVE_PROVIDERS.find((p) => p.id === planner.providerId) ?? LIVE_PROVIDERS[0]
-      : undefined
+    // Unknown provider: block, do not substitute. See brainFor.
+    const brain = brainFor(worker)
+    if (!brain) {
+      await finishRun(run.id, {
+        status: 'needs_user',
+        error: `Stored key names provider "${worker.providerId}", which this worker does not know. `
+          + 'Re-select a provider in Settings → AI Providers.',
+        finished_at: new Date().toISOString(),
+      })
+      return
+    }
 
-    const result = await runTaskGraph(run.goal, brainFor(worker), {
+    const planner = keys.get('planner') ?? worker
+    // Same rule for the planner. A planner whose provider is unrecognised is
+    // dropped rather than redirected; strict mode then blocks on
+    // planner_unreachable, which is a true statement about the run.
+    const plannerSpec = planner ? providerSpec(planner.providerId) : null
+
+    const result = await runTaskGraph(run.goal, brain, {
       persist: true,
       // The browser sends an id, never an implementation. An id this worker
       // has not registered throws rather than falling back to the builtin
