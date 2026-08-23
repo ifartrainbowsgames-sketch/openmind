@@ -367,7 +367,13 @@ function describeRun(run: QueuedRun): string {
   const plannerBrain = plannerRole.apiKey.trim()
     ? {
         baseUrl: plannerSpec.baseUrl,
-        model: plannerSpec.model,
+        // The planner's own chosen model when there is one, falling back to
+        // the worker's choice only if the planner has no separate provider.
+        // Reusing the worker's model against a different provider would ask,
+        // say, Anthropic for a Groq model id.
+        model: (provider.plannerProviderId
+          ? provider.plannerModelId?.trim()
+          : provider.modelId?.trim()) || plannerSpec.model,
         key: plannerRole.apiKey.trim(),
         fixedParams: plannerSpec.fixedParams,
       }
@@ -668,7 +674,7 @@ function describeRun(run: QueuedRun): string {
       if (route.kind === 'cloud_enqueue') {
         const queued = await enqueueRun(
           crewPrompt,
-          buildCloudRunOptions({ workspace: space, skill: turnSkill, runtimeId, route }),
+          buildCloudRunOptions({ workspace: space, skill: turnSkill, runtimeId, route, config: provider }),
         )
         appendRunMessage(threadId, queued)
         watchQueuedRun(threadId, queued.id)
@@ -680,7 +686,12 @@ function describeRun(run: QueuedRun): string {
           ? simulatedBrain()
           : liveBrain({
               baseUrl: providerSpec.baseUrl,
-              model: providerSpec.model,
+              // The customer's chosen model, not the provider's built-in
+              // default. Those defaults decay — two of the first tested
+              // against real keys had already been retired by their providers
+              // — and an in-tab run that ignored the picker while a queued run
+              // honoured it would be the same setting meaning two things.
+              model: provider.modelId?.trim() || providerSpec.model,
               key: provider.apiKey.trim(),
               fixedParams: providerSpec.fixedParams,
             })

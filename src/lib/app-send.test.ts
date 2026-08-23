@@ -6,7 +6,7 @@ import {
   resolveExecutionMode,
 } from './app-execution'
 import { cloudReadinessFromKeys } from './cloud-readiness'
-import { buildCloudRunOptions, describeRunStatus, resolveSendRoute } from './app-send'
+import { buildCloudRunOptions, describeRunStatus, modelSelection, resolveSendRoute } from './app-send'
 import type { StoredKey } from './provider-vault'
 
 describe('resolveSendRoute', () => {
@@ -125,6 +125,83 @@ describe('buildCloudRunOptions', () => {
       route: { kind: 'cloud_enqueue', options: { strictMode: true } },
     })
     expect(options.runtimeId).toBeUndefined()
+  })
+
+  describe('the customer’s model choice reaches the worker', () => {
+    // The bug this pins: buildCloudRunOptions returned four fields and dropped
+    // providerId and modelId entirely. Runs still succeeded — the worker falls
+    // back to "the only provider connected" — so picking a model in Settings
+    // changed nothing while everything appeared to work.
+    const base = {
+      workspace: { kind: 'openmind', slug: 'scratch', branch: 'main', source: 'live', summary: 'local' },
+      skill: 'multitask',
+      runtimeId: 'builtin',
+      route: { kind: 'cloud_enqueue', options: { strictMode: true } },
+    } as const
+
+    it('carries the chosen provider and model', () => {
+      const options = buildCloudRunOptions({
+        ...base,
+        config: { providerId: 'groq', modelId: 'qwen/qwen3.6-27b' },
+      })
+      expect(options.providerId).toBe('groq')
+      expect(options.modelId).toBe('qwen/qwen3.6-27b')
+    })
+
+    it('carries separate planner and judge choices', () => {
+      const options = buildCloudRunOptions({
+        ...base,
+        config: {
+          providerId: 'groq', modelId: 'openai/gpt-oss-120b',
+          plannerProviderId: 'anthropic', plannerModelId: 'claude-haiku-4-5',
+          judgeProviderId: 'google', judgeModelId: 'gemini-3.6-flash',
+        },
+      })
+      expect(options.plannerProviderId).toBe('anthropic')
+      expect(options.plannerModelId).toBe('claude-haiku-4-5')
+      expect(options.judgeProviderId).toBe('google')
+      expect(options.judgeModelId).toBe('gemini-3.6-flash')
+    })
+
+    it('omits a blank choice rather than sending an empty string', () => {
+      // '' would reach credentialFor as a chosen provider and match nothing.
+      const options = buildCloudRunOptions({
+        ...base,
+        config: { providerId: 'groq', modelId: '', plannerProviderId: '' },
+      })
+      expect(options.modelId).toBeUndefined()
+      expect(options.plannerProviderId).toBeUndefined()
+      expect(options.providerId).toBe('groq')
+    })
+
+    it('survives a caller that passes no config at all', () => {
+      const options = buildCloudRunOptions(base)
+      expect(options.providerId).toBeUndefined()
+      expect(options.strictMode).toBe(true)
+    })
+  })
+})
+
+describe('modelSelection is the one place the choice is read', () => {
+  it('passes ids straight through', () => {
+    expect(modelSelection({ providerId: 'xai', modelId: 'grok-4' }))
+      .toMatchObject({ providerId: 'xai', modelId: 'grok-4' })
+  })
+
+  it('never emits an empty string for an unset field', () => {
+    const out = modelSelection({})
+    for (const [key, value] of Object.entries(out)) {
+      expect(value, key).toBeUndefined()
+    }
+  })
+
+  it('carries no secret-shaped field', () => {
+    // Whatever else changes, this object lands in `agent_runs`, which is a
+    // row a support engineer may read. It holds ids, never credentials.
+    const out = modelSelection({ providerId: 'groq', modelId: 'm' }) as Record<string, unknown>
+    for (const key of Object.keys(out)) {
+      expect(key, key).not.toMatch(/key|secret|token|password/i)
+    }
   })
 })
 

@@ -62,17 +62,56 @@ export function resolveSendRoute(input: SendRouteInput): SendRoute {
   }
 }
 
+/**
+ * The provider and model a run should use, as ids.
+ *
+ * Ids only — public strings, useless without the vault, which is why they may
+ * travel on the row. The credential stays server-side.
+ *
+ * Exported and shared because the same question is asked twice, from a browser
+ * for an in-tab run and from `agent_runs` for a queued one. Answering it in two
+ * places is what let the two drift: the picker wrote a choice that the queue
+ * path silently dropped, so selecting a model changed nothing while everything
+ * still appeared to work.
+ */
+export function modelSelection(config: {
+  providerId?: string
+  modelId?: string
+  plannerProviderId?: string
+  plannerModelId?: string
+  judgeProviderId?: string
+  judgeModelId?: string
+}): Pick<RunOptions,
+  'providerId' | 'modelId' | 'plannerProviderId' | 'plannerModelId'
+  | 'judgeProviderId' | 'judgeModelId'> {
+  return {
+    providerId: config.providerId || undefined,
+    modelId: config.modelId || undefined,
+    plannerProviderId: config.plannerProviderId || undefined,
+    plannerModelId: config.plannerModelId || undefined,
+    judgeProviderId: config.judgeProviderId || undefined,
+    judgeModelId: config.judgeModelId || undefined,
+  }
+}
+
 export function buildCloudRunOptions(input: {
   workspace: WorkspaceSpace
   skill: SkillId
   runtimeId: AppRuntimeId
   route: Extract<SendRoute, { kind: 'cloud_enqueue' }>
+  /**
+   * The customer's model settings. Optional so existing callers keep compiling,
+   * but omitting it means the worker gets no choice and falls back to "the only
+   * provider connected" — which succeeds often enough to hide the omission.
+   */
+  config?: Parameters<typeof modelSelection>[0]
 }): RunOptions {
   return {
     workspace: input.workspace,
     skill: input.skill,
     strictMode: true,
     runtimeId: input.runtimeId === 'builtin' ? undefined : input.runtimeId,
+    ...modelSelection(input.config ?? {}),
   }
 }
 
