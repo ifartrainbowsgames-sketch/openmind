@@ -18,6 +18,7 @@ import { registerWorkerRuntimes } from './runtimes'
 import { createCredentialVault } from './credential-vault'
 import { createRoutingStore } from './routing-store'
 import { credentialFor } from './credential-resolution'
+import { terminalStatus } from './terminal-status'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
@@ -245,9 +246,8 @@ async function executeRun(run: RunRow): Promise<void> {
       return
     }
 
-    const blocked = result.project.tasks.some((t) => t.status === 'needs_user')
     await finishRun(run.id, {
-      status: blocked ? 'needs_user' : 'completed',
+      ...terminalStatus(result.project.tasks),
       project_id: result.project.id,
       snapshot: result.project,
       answer: result.answer,
